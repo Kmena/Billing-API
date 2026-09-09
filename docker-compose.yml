@@ -1,0 +1,108 @@
+version: '3.9'
+
+# ─── Billing Development Stack ─────────────────────────────────────────────────
+# Services: billing-api + billing-worker + postgres + localstack
+# ADR-003: No Redis. Queue via pg-boss on the same PostgreSQL instance.
+
+services:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: billing-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: billing_dev
+      POSTGRES_USER: billing
+      POSTGRES_PASSWORD: billing_password
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U billing -d billing_dev']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── LocalStack (S3 mock for dev) ──────────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3
+    container_name: billing-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - '4566:4566'
+    volumes:
+      - localstack_data:/var/lib/localstack
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Billing API ───────────────────────────────────────────────────────────────
+  billing-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: billing-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-32chars}
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      STORAGE_TYPE: s3
+      AWS_S3_BUCKET: billing-documents
+      AWS_S3_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SECRET_PROVIDER: env
+      LOG_LEVEL: info
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  # ── Billing Worker ────────────────────────────────────────────────────────────
+  billing-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runner
+    container_name: billing-worker
+    restart: unless-stopped
+    command: ['node', 'dist/bootstrap/worker.main.js']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-32chars}
+      STORAGE_TYPE: s3
+      AWS_S3_BUCKET: billing-documents
+      AWS_S3_ENDPOINT: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      SECRET_PROVIDER: env
+      LOG_LEVEL: info
+
+volumes:
+  postgres_data:
+  localstack_data:

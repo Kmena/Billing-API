@@ -1,0 +1,220 @@
+// ─── Prisma Schema — Billing ────────────────────────────────────────────────
+// Fase 0: Foundation
+// Schema version: 1.1 (ADR-009: event_class field in audit_logs)
+// Do NOT modify this file without creating a new migration.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ──────────────────────────────────────────────────────────────────
+
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum TenantPlan {
+  TRIAL
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_VERIFICATION
+}
+
+enum UserRole {
+  TENANT_ADMIN
+  MEMBER
+  READ_ONLY
+}
+
+enum CompanyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum IdentificationType {
+  FISICA   // 01 – Cédula física (CR)
+  JURIDICA // 02 – Cédula jurídica (CR)
+  DIMEX    // 03 – DIMEX (extranjeros residentes)
+  NITE     // 04 – NITE
+}
+
+enum ApiKeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum ApiKeyEnv {
+  LIVE
+  TEST
+}
+
+// ADR-009: Three-level audit retention classification
+enum EventClass {
+  FISCAL_AUDIT // >= 5 years — fiscal lifecycle traceability
+  TECHNICAL    // configurable — general operational events
+  SECURITY     // configurable — security-related events
+}
+
+// ─── TENANT ─────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id        String       @id @db.Uuid
+  name      String       @db.VarChar(255)
+  slug      String       @unique @db.VarChar(100)
+  status    TenantStatus @default(ACTIVE)
+  plan      TenantPlan   @default(TRIAL)
+  metadata  Json?
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  companies Company[]
+  users     User[]
+  apiKeys   ApiKey[]
+  auditLogs AuditLog[]
+
+  @@map("tenants")
+}
+
+// ─── COMPANY ────────────────────────────────────────────────────────────────
+
+model Company {
+  id                   String             @id @db.Uuid
+  tenantId             String             @db.Uuid @map("tenant_id")
+  legalName            String             @db.VarChar(255) @map("legal_name")
+  tradeName            String?            @db.VarChar(255) @map("trade_name")
+  identificationType   IdentificationType @map("identification_type")
+  identificationNumber String             @db.VarChar(20) @map("identification_number")
+  status               CompanyStatus      @default(ACTIVE)
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @updatedAt @map("updated_at")
+  tenant               Tenant             @relation(fields: [tenantId], references: [id])
+  authorizedApiKeys    ApiKeyCompany[]
+
+  @@unique([tenantId, identificationNumber])
+  @@index([tenantId, status])
+  @@map("companies")
+}
+
+// ─── USER ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String     @id @db.Uuid
+  tenantId     String     @db.Uuid @map("tenant_id")
+  email        String     @db.VarChar(255)
+  passwordHash String     @map("password_hash") @db.VarChar(255)
+  firstName    String?    @db.VarChar(100) @map("first_name")
+  lastName     String?    @db.VarChar(100) @map("last_name")
+  role         UserRole   @default(MEMBER)
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  tenant        Tenant         @relation(fields: [tenantId], references: [id])
+  refreshTokens RefreshToken[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@map("users")
+}
+
+// ─── API KEY ────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String       @id @db.Uuid
+  tenantId    String       @db.Uuid @map("tenant_id")
+  name        String       @db.VarChar(255)
+  environment ApiKeyEnv    @default(LIVE) @map("environment")
+  keyPrefix   String       @unique @db.VarChar(16) @map("key_prefix")
+  keyHash     String       @db.VarChar(255) @map("key_hash")
+  scopes      String[]
+  status      ApiKeyStatus @default(ACTIVE)
+  expiresAt   DateTime?    @map("expires_at")
+  lastUsedAt  DateTime?    @map("last_used_at")
+  revokedAt   DateTime?    @map("revoked_at")
+  revokedBy   String?      @db.Uuid @map("revoked_by")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  companies   ApiKeyCompany[]
+  auditLogs   AuditLog[]
+
+  @@index([tenantId, status])
+  @@index([keyPrefix])
+  @@map("api_keys")
+}
+
+// ─── API KEY ↔ COMPANY (N:M) ───────────────────────────────────────────────
+
+model ApiKeyCompany {
+  apiKeyId  String  @db.Uuid @map("api_key_id")
+  companyId String  @db.Uuid @map("company_id")
+  apiKey    ApiKey  @relation(fields: [apiKeyId], references: [id])
+  company   Company @relation(fields: [companyId], references: [id])
+
+  @@id([apiKeyId, companyId])
+  @@map("api_key_companies")
+}
+
+// ─── REFRESH TOKENS ────────────────────────────────────────────────────────
+// Stores hashed refresh tokens. On use, old token is marked used and a new one issued.
+
+model RefreshToken {
+  id         String   @id @db.Uuid
+  userId     String   @db.Uuid @map("user_id")
+  tenantId   String   @db.Uuid @map("tenant_id")
+  tokenHash  String   @unique @db.VarChar(255) @map("token_hash")
+  used       Boolean  @default(false)
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ─── AUDIT LOG ──────────────────────────────────────────────────────────────
+// append-only: no UPDATE, no DELETE — enforced at application layer
+// ADR-009: eventClass classifies retention requirement
+
+model AuditLog {
+  id            String     @id @db.Uuid
+  tenantId      String?    @db.Uuid @map("tenant_id")
+  companyId     String?    @db.Uuid @map("company_id")
+  apiKeyId      String?    @db.Uuid @map("api_key_id")
+  actor         String?    @db.VarChar(255) // userId | apiKeyPrefix | "system"
+  action        String     @db.VarChar(255) // "api-key.created" | "user.login"
+  resource      String?    @db.VarChar(255) // "ApiKey:uuid" | "Tenant:uuid"
+  endpoint      String?    @db.VarChar(500)
+  httpMethod    String?    @db.VarChar(10) @map("http_method")
+  statusCode    Int?       @map("status_code")
+  ipAddress     String?    @db.VarChar(45) @map("ip_address")
+  correlationId String?    @db.VarChar(36) @map("correlation_id")
+  durationMs    Int?       @map("duration_ms")
+  eventClass    EventClass @default(TECHNICAL) @map("event_class")
+  metadata      Json?
+  errorMessage  String?    @map("error_message")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  tenant        Tenant?    @relation(fields: [tenantId], references: [id])
+  apiKey        ApiKey?    @relation(fields: [apiKeyId], references: [id])
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([correlationId])
+  @@index([apiKeyId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+  @@index([eventClass, createdAt(sort: Desc)])
+  @@map("audit_logs")
+}

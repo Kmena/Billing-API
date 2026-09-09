@@ -1,0 +1,56 @@
+# Spec and docs (project management)
+specs/**
+docs/**
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+*.local.env
+
+# Certificates and private keys — NEVER commit
+*.p12
+*.pfx
+*.key
+*.pem
+*.crt
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Jest coverage
+coverage/
+
+# Prisma
+prisma/dev.db
+
+# Temporary files
+*.tmp
+*.temp
+
+# TypeScript incremental build
+*.tsbuildinfo
