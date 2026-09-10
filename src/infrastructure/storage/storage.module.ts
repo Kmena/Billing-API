@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { STORAGE_PORT } from './ports/storage.port';
 import { LocalStorageAdapter } from './adapters/local-storage.adapter';
 import { S3StorageAdapter } from './adapters/s3-storage.adapter';
+import type { StorageConfig } from '../config/storage.config';
 
 @Global()
 @Module({
@@ -14,7 +15,8 @@ import { S3StorageAdapter } from './adapters/s3-storage.adapter';
         if (storageType === 's3') {
           return new S3StorageAdapter(configService);
         }
-        return new LocalStorageAdapter();
+        const storageCfg = configService.get<StorageConfig>('storage');
+        return new LocalStorageAdapter(storageCfg?.localStoragePath, storageCfg?.localStorageSecret);
       },
       inject: [ConfigService],
     },

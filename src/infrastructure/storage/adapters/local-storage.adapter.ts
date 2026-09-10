@@ -13,9 +13,9 @@ export class LocalStorageAdapter implements StoragePort {
   private readonly storagePath: string;
   private readonly signingSecret: string;
 
-  constructor(storagePath?: string) {
-    this.storagePath = storagePath ?? process.env.LOCAL_STORAGE_PATH ?? './storage';
-    this.signingSecret = process.env.LOCAL_STORAGE_SECRET ?? 'local-signing-secret-dev-only';
+  constructor(storagePath?: string, signingSecret?: string) {
+    this.storagePath = storagePath ?? './storage';
+    this.signingSecret = signingSecret ?? 'local-signing-secret-dev-only';
   }
 
   async upload(key: string, content: Buffer, _metadata?: Record<string, string>): Promise<string> {
