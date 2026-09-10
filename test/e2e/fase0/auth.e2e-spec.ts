@@ -35,8 +35,8 @@ describe('Auth (E2E)', () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
-    await app.close();
+    await prisma?.$disconnect();
+    await app?.close();
   });
 
   describe('POST /api/v1/auth/login', () => {
@@ -68,9 +68,15 @@ describe('Auth (E2E)', () => {
         .expect(401);
 
       expect(response.body.error.code).toBe('INVALID_CREDENTIALS');
-      // Should NOT reveal whether the email exists
-      expect(response.body.error.message).not.toContain('email');
-      expect(response.body.error.message).not.toContain('user');
+      const user = await createTestUser(prisma, tenant.id);
+      const wrongPasswordResponse = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ tenantId: tenant.id, email: user.email, password: 'WrongPass' })
+        .expect(401);
+
+      // Both failure paths must be indistinguishable to avoid email enumeration.
+      expect(wrongPasswordResponse.body.error.code).toBe(response.body.error.code);
+      expect(wrongPasswordResponse.body.error.message).toBe(response.body.error.message);
     });
 
     it('returns 401 for correct email but wrong password', async () => {

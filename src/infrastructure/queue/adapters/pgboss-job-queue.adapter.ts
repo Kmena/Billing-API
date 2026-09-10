@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import PgBoss from 'pg-boss';
+import PgBoss = require('pg-boss');
 import { JobPublishOptions, JobQueuePort } from '../ports/job-queue.port';
 
 @Injectable()

@@ -9,6 +9,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
 import { AppModule } from '../../../src/app.module';
+import { PrismaService } from '../../../src/infrastructure/database/prisma.service';
+import { createTestApiKey } from '../../helpers/test-factories';
 import { CorrelationIdInterceptor } from '../../../src/api/interceptors/correlation-id.interceptor';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
 
@@ -29,19 +31,30 @@ async function createTestApp(): Promise<INestApplication> {
     }),
   );
   app.useGlobalInterceptors(app.get(CorrelationIdInterceptor));
-  await app.init();
-  return app;
+  try {
+    await app.init();
+    return app;
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
 }
 
 describe('ScopeGuard (E2E)', () => {
   let app: INestApplication;
+  let apiKey: string;
 
   beforeAll(async () => {
     app = await createTestApp();
+    apiKey = await createTestApiKey(app.get(PrismaService), [
+      'taxpayers:read',
+      'cabys:read',
+      'exchange-rates:read',
+    ]);
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   describe('GET /api/v1/taxpayers/:identification (scope: taxpayers:read)', () => {
@@ -57,10 +70,10 @@ describe('ScopeGuard (E2E)', () => {
     });
 
     it('FR-006: returns 400 when identification is not 9–12 digits', async () => {
-      // Even with invalid API key, validation runs first for param format
+      // Authenticate with the required scope before testing parameter validation.
       await request(app.getHttpServer())
         .get('/api/v1/taxpayers/123')
-        .set('X-API-Key', 'bk_live_invalid_key')
+        .set('X-API-Key', apiKey)
         .expect(400);
     });
   });

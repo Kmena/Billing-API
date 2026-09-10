@@ -50,8 +50,8 @@ describe('API Keys (E2E)', () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
-    await app.close();
+    await prisma?.$disconnect();
+    await app?.close();
   });
 
   describe('AC-007: POST /api/v1/api-keys', () => {

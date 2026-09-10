@@ -4,7 +4,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 
 export interface TestTenant {
   id: string;
@@ -63,4 +63,25 @@ export async function createTestUser(
   });
 
   return { id, tenantId, email, password, role };
+}
+
+export async function createTestApiKey(prisma: PrismaClient, scopes: string[]): Promise<string> {
+  const tenant = await createTestTenant(prisma);
+  const keyPrefix = randomBytes(4).toString('hex');
+  const secret = 'bk_test_' + keyPrefix + '_' + randomBytes(16).toString('hex');
+  const keyHash = await argon2.hash(secret, { type: argon2.argon2id });
+
+  await prisma.apiKey.create({
+    data: {
+      id: randomUUID(),
+      tenantId: tenant.id,
+      name: 'E2E validation key',
+      environment: 'TEST',
+      keyPrefix,
+      keyHash,
+      scopes,
+      status: 'ACTIVE',
+    },
+  });
+  return secret;
 }

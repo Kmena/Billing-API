@@ -3,6 +3,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
 import { SecretsModule } from '../../infrastructure/secrets/secrets.module';
+import {
+  SECRET_PROVIDER,
+  SecretProvider,
+} from '../../infrastructure/secrets/ports/secret-provider.port';
 import { TENANT_REPOSITORY } from './domain/ports/tenant.repository';
 import { USER_REPOSITORY } from './domain/ports/user.repository';
 import { REFRESH_TOKEN_REPOSITORY } from './domain/ports/refresh-token.repository';
@@ -24,9 +28,13 @@ import { JwtAuthGuard } from '../../api/guards/jwt-auth.guard';
     DatabaseModule,
     SecretsModule,
     PassportModule,
-    JwtModule.register({
-      // Secret is fetched dynamically via SecretProvider in JwtStrategy
-      signOptions: { expiresIn: '15m' },
+    JwtModule.registerAsync({
+      imports: [SecretsModule],
+      inject: [SECRET_PROVIDER],
+      useFactory: async (secretProvider: SecretProvider) => ({
+        secret: await secretProvider.getSecret('JWT_SECRET'),
+        signOptions: { expiresIn: '15m' },
+      }),
     }),
   ],
   controllers: [TenantController, AuthController],

@@ -66,8 +66,8 @@ describe('Tenant Isolation (E2E)', () => {
   });
 
   afterAll(async () => {
-    await prisma.$disconnect();
-    await app.close();
+    await prisma?.$disconnect();
+    await app?.close();
   });
 
   describe('AC-018: Company isolation — Tenant A cannot see Tenant B data', () => {
