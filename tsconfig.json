@@ -18,6 +18,7 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
+    "resolveJsonModule": true,
     "paths": {
       "@/modules/*": ["src/modules/*"],
       "@/infrastructure/*": ["src/infrastructure/*"],

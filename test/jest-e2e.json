@@ -6,6 +6,9 @@
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs/cache-manager|cache-manager|@nestjs/axios)/)"
+  ],
   "moduleNameMapper": {
     "^@/modules/(.*)$": "<rootDir>/../src/modules/$1",
     "^@/infrastructure/(.*)$": "<rootDir>/../src/infrastructure/$1",

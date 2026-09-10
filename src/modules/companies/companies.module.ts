@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../infrastructure/database/database.module';
 import { IdentityModule } from '../identity/identity.module';
+import { HaciendaModule } from '../../infrastructure/integrations/hacienda/hacienda.module';
 import { COMPANY_REPOSITORY } from './domain/ports/company.repository';
 import { CreateCompanyHandler } from './application/use-cases/create-company/create-company.handler';
 import { GetCompanyHandler } from './application/use-cases/get-company/get-company.handler';
@@ -8,7 +9,7 @@ import { PrismaCompanyRepository } from './infrastructure/persistence/prisma-com
 import { CompanyController } from './infrastructure/http/company.controller';
 
 @Module({
-  imports: [DatabaseModule, IdentityModule],
+  imports: [DatabaseModule, IdentityModule, HaciendaModule],
   controllers: [CompanyController],
   providers: [
     CreateCompanyHandler,

@@ -1,0 +1,22 @@
+{
+  "nombre": "PERSONA FISICA DEMO",
+  "tipoIdentificacion": "01",
+  "regimen": {
+    "codigo": 1,
+    "descripcion": "Régimen general"
+  },
+  "situacion": {
+    "moroso": "NO",
+    "omiso": "NO",
+    "estado": "Inscrito",
+    "administracionTributaria": "Administración Tributaria de San José"
+  },
+  "actividades": [
+    {
+      "estado": "A",
+      "tipo": "P",
+      "codigo": "9609.0",
+      "descripcion": "Otras actividades de servicios personales n.c.p."
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
 import { CreateTenantHandler } from '../../application/use-cases/create-tenant/create-tenant.handler';
 import { GetTenantHandler } from '../../application/use-cases/get-tenant/get-tenant.handler';
@@ -24,6 +25,7 @@ import { TenantResponseDto } from './dtos/tenant.response.dto';
 
 @ApiTags('Tenants')
 @ApiBearerAuth()
+@SkipThrottle()
 @UseGuards(JwtAuthGuard)
 @Controller('tenants')
 export class TenantController {

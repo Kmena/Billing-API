@@ -19,6 +19,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
 import { CreateApiKeyHandler } from '../../application/use-cases/create-api-key/create-api-key.handler';
 import { ListApiKeysHandler } from '../../application/use-cases/list-api-keys/list-api-keys.handler';
@@ -29,6 +30,7 @@ import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 import type { ApiKeyEnvironment } from '../../domain/entities/api-key.entity';
 
 @ApiTags('API Keys')
+@SkipThrottle()
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('api-keys')

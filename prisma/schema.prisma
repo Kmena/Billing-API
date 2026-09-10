@@ -62,6 +62,15 @@ enum ApiKeyEnv {
   TEST
 }
 
+// Fase 1: Hacienda verification outcome for company creation
+enum HaciendaVerificationStatus {
+  VERIFIED    // Taxpayer found and confirmed in Hacienda
+  NOT_FOUND   // Hacienda returned not-found (body code=404)
+  UNAVAILABLE // HTTP 429, timeout, or transient 5xx from Hacienda
+  ERROR       // Unexpected / unclassified failure
+  SKIPPED     // Verification intentionally skipped (reserved for future use)
+}
+
 // ADR-009: Three-level audit retention classification
 enum EventClass {
   FISCAL_AUDIT // >= 5 years — fiscal lifecycle traceability
@@ -97,11 +106,15 @@ model Company {
   tradeName            String?            @db.VarChar(255) @map("trade_name")
   identificationType   IdentificationType @map("identification_type")
   identificationNumber String             @db.VarChar(20) @map("identification_number")
-  status               CompanyStatus      @default(ACTIVE)
-  createdAt            DateTime           @default(now()) @map("created_at")
-  updatedAt            DateTime           @updatedAt @map("updated_at")
-  tenant               Tenant             @relation(fields: [tenantId], references: [id])
-  authorizedApiKeys    ApiKeyCompany[]
+  status                      CompanyStatus              @default(ACTIVE)
+  // Fase 1: Hacienda verification fields (nullable — backward-compatible with Fase 0 records)
+  haciendaName                String?                    @db.VarChar(255) @map("hacienda_name")
+  haciendaVerifiedAt          DateTime?                  @map("hacienda_verified_at")
+  haciendaVerificationStatus  HaciendaVerificationStatus? @map("hacienda_verification_status")
+  createdAt                   DateTime                   @default(now()) @map("created_at")
+  updatedAt                   DateTime                   @updatedAt @map("updated_at")
+  tenant                      Tenant                     @relation(fields: [tenantId], references: [id])
+  authorizedApiKeys           ApiKeyCompany[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])

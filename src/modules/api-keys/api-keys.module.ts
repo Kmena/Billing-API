@@ -9,6 +9,8 @@ import { ValidateApiKeyHandler } from './application/use-cases/validate-api-key/
 import { PrismaApiKeyRepository } from './infrastructure/persistence/prisma-api-key.repository';
 import { ApiKeysController } from './infrastructure/http/api-keys.controller';
 import { ApiKeyAuthGuard } from '../../api/guards/api-key-auth.guard';
+import { ApiKeyThrottlerGuard } from '../../api/guards/api-key-throttler.guard';
+import { ScopeGuard } from '../../api/guards/scope.guard';
 
 @Module({
   imports: [DatabaseModule, IdentityModule],
@@ -19,6 +21,8 @@ import { ApiKeyAuthGuard } from '../../api/guards/api-key-auth.guard';
     RevokeApiKeyHandler,
     ValidateApiKeyHandler,
     ApiKeyAuthGuard,
+    ApiKeyThrottlerGuard,
+    ScopeGuard,
     {
       provide: API_KEY_REPOSITORY,
       useClass: PrismaApiKeyRepository,
@@ -30,6 +34,8 @@ import { ApiKeyAuthGuard } from '../../api/guards/api-key-auth.guard';
     RevokeApiKeyHandler,
     ValidateApiKeyHandler,
     ApiKeyAuthGuard,
+    ApiKeyThrottlerGuard,
+    ScopeGuard,
   ],
 })
 export class ApiKeysModule {}

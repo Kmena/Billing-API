@@ -13,6 +13,7 @@ import {
  * MockHaciendaAdapter — Development/test implementation.
  * Returns predictable fixture data for all HaciendaPort methods.
  * ADR-004: Never uses real Hacienda connectivity.
+ * Updated for Fase 1: includes all TaxpayerResult extended fields (OQ-RA-001).
  */
 @Injectable()
 export class MockHaciendaAdapter implements HaciendaPort {
@@ -20,14 +21,56 @@ export class MockHaciendaAdapter implements HaciendaPort {
     '3101234567': {
       identification: '3101234567',
       name: 'Empresa Demo S.A.',
-      commercialName: 'Empresa Demo',
-      email: 'demo@empresa.com',
       found: true,
+      identificationType: '02',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Inscrito',
+      economicActivities: [
+        {
+          code: '6110.0',
+          description: 'Actividades de telecomunicaciones alámbricas',
+          status: 'A',
+          type: 'P',
+        },
+      ],
     },
     '123456789': {
       identification: '123456789',
       name: 'Juan Demo Pérez',
       found: true,
+      identificationType: '01',
+      taxRegime: 'Régimen simplificado',
+      taxSituation: 'Inscrito',
+      economicActivities: [
+        {
+          code: '9609.0',
+          description: 'Otras actividades de servicios personales n.c.p.',
+          status: 'A',
+          type: 'P',
+        },
+      ],
+    },
+    '4000042139': {
+      identification: '4000042139',
+      name: 'INSTITUTO COSTARRICENSE DE ELECTRICIDAD',
+      found: true,
+      identificationType: '02',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Inscrito',
+      economicActivities: [
+        {
+          code: '6110.0',
+          description: 'Actividades de telecomunicaciones alámbricas',
+          status: 'A',
+          type: 'P',
+        },
+        {
+          code: '3510.0',
+          description: 'Generación, transmisión y distribución de energía eléctrica',
+          status: 'A',
+          type: 'S',
+        },
+      ],
     },
   };
 
@@ -36,13 +79,13 @@ export class MockHaciendaAdapter implements HaciendaPort {
       code: '5209900000000',
       description: 'Mercancías de consumo corriente, n.e.p.',
       taxRate: 13,
-      category: 'Mercancías',
+      category: 'Mercancías de consumo corriente, n.e.p.',
     },
     '4909000000000': {
       code: '4909000000000',
       description: 'Servicios de tecnología de información',
       taxRate: 13,
-      category: 'Servicios',
+      category: 'Servicios de tecnología de información',
     },
   };
 
@@ -58,7 +101,6 @@ export class MockHaciendaAdapter implements HaciendaPort {
   }
 
   async getExchangeRate(currency: string, date: Date): Promise<ExchangeRateResult> {
-    // Mock exchange rates for common currencies
     const rates: Record<string, { buy: number; sell: number }> = {
       USD: { buy: 515.5, sell: 519.5 },
       EUR: { buy: 558.3, sell: 562.3 },
@@ -94,7 +136,6 @@ export class MockHaciendaAdapter implements HaciendaPort {
   }
 
   async submitDocument(_xmlPayload: string, _accessToken: string): Promise<SubmissionResult> {
-    // Mock acceptance — real implementation in Fase 2+
     return {
       accepted: true,
       key: `MOCK-${Date.now()}`,

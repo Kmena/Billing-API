@@ -17,6 +17,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
 import { CreateCompanyHandler } from '../../application/use-cases/create-company/create-company.handler';
 import { GetCompanyHandler } from '../../application/use-cases/get-company/get-company.handler';
@@ -25,6 +26,7 @@ import { CompanyResponseDto } from './dtos/company.response.dto';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 
 @ApiTags('Companies')
+@SkipThrottle()
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('companies')
@@ -58,6 +60,9 @@ export class CompanyController {
       identificationType: result.identificationType,
       identificationNumber: result.identificationNumber,
       status: result.status,
+      haciendaName: result.haciendaName,
+      haciendaVerifiedAt: result.haciendaVerifiedAt,
+      haciendaVerificationStatus: result.haciendaVerificationStatus,
       createdAt: result.createdAt,
     };
   }
@@ -78,6 +83,9 @@ export class CompanyController {
       identificationType: result.identificationType,
       identificationNumber: result.identificationNumber,
       status: result.status,
+      haciendaName: result.haciendaName,
+      haciendaVerifiedAt: result.haciendaVerifiedAt,
+      haciendaVerificationStatus: result.haciendaVerificationStatus,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,
     };

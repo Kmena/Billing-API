@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { ThrottlerException } from '@nestjs/throttler';
 import { Response, Request } from 'express';
 import { DomainException } from '../../modules/shared/domain/domain-exception';
 
@@ -42,7 +43,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     let message: string;
     let details: unknown;
 
-    if (exception instanceof DomainException) {
+    if (exception instanceof ThrottlerException) {
+      statusCode = HttpStatus.TOO_MANY_REQUESTS;
+      code = 'TOO_MANY_REQUESTS';
+      message = 'Too many requests — please slow down and try again later.';
+      this.logger.warn(
+        { correlationId, url: request.url, method: request.method },
+        'ThrottlerException: TOO_MANY_REQUESTS',
+      );
+    } else if (exception instanceof DomainException) {
       statusCode = exception.httpStatus;
       code = exception.code;
       message = exception.message;

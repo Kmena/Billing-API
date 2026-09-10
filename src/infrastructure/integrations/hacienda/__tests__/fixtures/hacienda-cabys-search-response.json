@@ -1,0 +1,26 @@
+{
+  "total": 1199,
+  "cantidad": 3,
+  "cabys": [
+    {
+      "categorias": [
+        "Comercio al por mayor y al por menor",
+        "Comercio al por mayor",
+        "Mercancías de consumo corriente"
+      ],
+      "codigo": "5209900000000",
+      "descripcion": "Mercancías de consumo corriente, n.e.p.",
+      "impuesto": 13,
+      "uri": "https://api.hacienda.go.cr/fe/cabys?codigo=5209900000000",
+      "estado": ""
+    },
+    {
+      "categorias": ["Servicios", "Servicios de tecnología"],
+      "codigo": "4909000000000",
+      "descripcion": "Servicios de tecnología de información",
+      "impuesto": 13,
+      "uri": "https://api.hacienda.go.cr/fe/cabys?codigo=4909000000000",
+      "estado": ""
+    }
+  ]
+}

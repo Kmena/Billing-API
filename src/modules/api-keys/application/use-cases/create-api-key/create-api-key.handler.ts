@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { validateApiKeyScopes } from '../../../domain/value-objects/api-key-scope.vo';
 import { v4 as uuidv4 } from 'uuid';
 import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
@@ -52,6 +53,9 @@ export class CreateApiKeyHandler {
   ) {}
 
   async execute(command: CreateApiKeyCommand): Promise<CreateApiKeyResult> {
+    // FR-012: Validate requested scopes against allowed list
+    validateApiKeyScopes(command.scopes);
+
     const { prefix, fullKey } = generateApiKeyComponents(command.environment);
 
     // Hash the full key with argon2id — BR-001: one-way hash

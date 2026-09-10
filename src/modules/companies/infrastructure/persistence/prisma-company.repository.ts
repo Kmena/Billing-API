@@ -2,8 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { TenantAwarePrismaRepository } from '../../../../infrastructure/database/tenant-aware-prisma.repository';
 import { ICompanyRepository } from '../../domain/ports/company.repository';
-import { Company } from '../../domain/entities/company.entity';
-import type { Company as PrismaCompany } from '@prisma/client';
+import { Company, HaciendaVerificationStatus } from '../../domain/entities/company.entity';
+import type {
+  Company as PrismaCompany,
+  HaciendaVerificationStatus as PrismaHaciendaStatus,
+} from '@prisma/client';
 
 @Injectable()
 export class PrismaCompanyRepository
@@ -47,6 +50,10 @@ export class PrismaCompanyRepository
         identificationType: company.identificationType,
         identificationNumber: company.identificationNumber,
         status: company.status,
+        haciendaName: company.haciendaName,
+        haciendaVerifiedAt: company.haciendaVerifiedAt,
+        haciendaVerificationStatus: company.haciendaVerificationStatus as
+          PrismaHaciendaStatus | undefined,
         createdAt: company.createdAt,
         updatedAt: company.updatedAt,
       },
@@ -54,6 +61,10 @@ export class PrismaCompanyRepository
         legalName: company.legalName,
         tradeName: company.tradeName,
         status: company.status,
+        haciendaName: company.haciendaName,
+        haciendaVerifiedAt: company.haciendaVerifiedAt,
+        haciendaVerificationStatus: company.haciendaVerificationStatus as
+          PrismaHaciendaStatus | undefined,
         updatedAt: company.updatedAt,
       },
     });
@@ -68,6 +79,10 @@ export class PrismaCompanyRepository
       identificationType: record.identificationType,
       identificationNumber: record.identificationNumber,
       status: record.status,
+      haciendaName: record.haciendaName,
+      haciendaVerifiedAt: record.haciendaVerifiedAt,
+      haciendaVerificationStatus:
+        record.haciendaVerificationStatus as HaciendaVerificationStatus | null,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     });

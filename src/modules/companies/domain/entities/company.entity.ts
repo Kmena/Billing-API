@@ -6,6 +6,8 @@ import {
 } from '../value-objects/identification-type.vo';
 
 export type CompanyStatus = 'ACTIVE' | 'INACTIVE';
+export type HaciendaVerificationStatus =
+  'VERIFIED' | 'NOT_FOUND' | 'UNAVAILABLE' | 'ERROR' | 'SKIPPED';
 
 interface CompanyProps {
   tenantId: string;
@@ -14,6 +16,9 @@ interface CompanyProps {
   identificationType: IdentificationType;
   identificationNumber: IdentificationNumber;
   status: CompanyStatus;
+  haciendaName?: string;
+  haciendaVerifiedAt?: Date;
+  haciendaVerificationStatus?: HaciendaVerificationStatus;
 }
 
 export interface CompanyReconstructProps {
@@ -24,6 +29,9 @@ export interface CompanyReconstructProps {
   identificationType: IdentificationTypeValue;
   identificationNumber: string;
   status: CompanyStatus;
+  haciendaName?: string | null;
+  haciendaVerifiedAt?: Date | null;
+  haciendaVerificationStatus?: HaciendaVerificationStatus | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +43,9 @@ export class Company extends AggregateRoot<string> {
   private readonly _identificationType: IdentificationType;
   private readonly _identificationNumber: IdentificationNumber;
   private _status: CompanyStatus;
+  private _haciendaName?: string;
+  private _haciendaVerifiedAt?: Date;
+  private _haciendaVerificationStatus?: HaciendaVerificationStatus;
 
   private constructor(id: string, props: CompanyProps, createdAt?: Date, updatedAt?: Date) {
     super(id, createdAt, updatedAt);
@@ -44,6 +55,9 @@ export class Company extends AggregateRoot<string> {
     this._identificationType = props.identificationType;
     this._identificationNumber = props.identificationNumber;
     this._status = props.status;
+    this._haciendaName = props.haciendaName;
+    this._haciendaVerifiedAt = props.haciendaVerifiedAt;
+    this._haciendaVerificationStatus = props.haciendaVerificationStatus;
   }
 
   get tenantId(): string {
@@ -68,6 +82,18 @@ export class Company extends AggregateRoot<string> {
 
   get status(): CompanyStatus {
     return this._status;
+  }
+
+  get haciendaName(): string | undefined {
+    return this._haciendaName;
+  }
+
+  get haciendaVerifiedAt(): Date | undefined {
+    return this._haciendaVerifiedAt;
+  }
+
+  get haciendaVerificationStatus(): HaciendaVerificationStatus | undefined {
+    return this._haciendaVerificationStatus;
   }
 
   static create(
@@ -104,6 +130,9 @@ export class Company extends AggregateRoot<string> {
         identificationType: idType,
         identificationNumber: idNumber,
         status: props.status,
+        haciendaName: props.haciendaName ?? undefined,
+        haciendaVerifiedAt: props.haciendaVerifiedAt ?? undefined,
+        haciendaVerificationStatus: props.haciendaVerificationStatus ?? undefined,
       },
       props.createdAt,
       props.updatedAt,

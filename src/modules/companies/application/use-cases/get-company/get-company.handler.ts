@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { ICompanyRepository, COMPANY_REPOSITORY } from '../../../domain/ports/company.repository';
 import { CompanyNotFoundException } from '../../../domain/exceptions/company-not-found.exception';
 import { TenantContext } from '../../../../../infrastructure/tenant/tenant-context';
+import type { HaciendaVerificationStatus } from '../../../domain/entities/company.entity';
 
 export interface GetCompanyQuery {
   readonly id: string;
@@ -15,6 +16,9 @@ export interface GetCompanyResult {
   readonly identificationType: string;
   readonly identificationNumber: string;
   readonly status: string;
+  readonly haciendaName?: string;
+  readonly haciendaVerifiedAt?: Date;
+  readonly haciendaVerificationStatus?: HaciendaVerificationStatus;
   readonly createdAt: Date;
   readonly updatedAt: Date;
 }
@@ -42,6 +46,9 @@ export class GetCompanyHandler {
       identificationType: company.identificationType,
       identificationNumber: company.identificationNumber,
       status: company.status,
+      haciendaName: company.haciendaName,
+      haciendaVerifiedAt: company.haciendaVerifiedAt,
+      haciendaVerificationStatus: company.haciendaVerificationStatus,
       createdAt: company.createdAt,
       updatedAt: company.updatedAt,
     };

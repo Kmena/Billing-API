@@ -1,4 +1,5 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOkResponse, ApiOperation, ApiTags, ApiUnauthorizedResponse } from '@nestjs/swagger';
 import { LoginHandler } from '../../application/use-cases/login/login.handler';
 import { RefreshTokenHandler } from '../../application/use-cases/refresh-token/refresh-token.handler';
@@ -16,6 +17,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ auth: { ttl: 60000, limit: 10 } })
   @ApiOperation({ summary: 'Authenticate a user and receive JWT tokens' })
   @ApiOkResponse({ type: AuthTokensResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials' })
@@ -35,6 +37,7 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ auth: { ttl: 60000, limit: 10 } })
   @ApiOperation({ summary: 'Refresh an access token using a refresh token' })
   @ApiOkResponse({ type: AuthTokensResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid or expired refresh token' })
