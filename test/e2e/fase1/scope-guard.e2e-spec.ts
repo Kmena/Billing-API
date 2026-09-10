@@ -46,9 +46,7 @@ describe('ScopeGuard (E2E)', () => {
 
   describe('GET /api/v1/taxpayers/:identification (scope: taxpayers:read)', () => {
     it('DEC-002: returns 401 when X-API-Key is absent', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/taxpayers/3101234567')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/taxpayers/3101234567').expect(401);
     });
 
     it('DEC-002: returns 401 when X-API-Key is invalid', async () => {
@@ -69,17 +67,13 @@ describe('ScopeGuard (E2E)', () => {
 
   describe('GET /api/v1/cabys (scope: cabys:read)', () => {
     it('DEC-002: returns 401 when X-API-Key is absent', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/cabys?search=servicios')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/cabys?search=servicios').expect(401);
     });
   });
 
   describe('GET /api/v1/exchange-rates (scope: exchange-rates:read)', () => {
     it('DEC-002: returns 401 when X-API-Key is absent', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/exchange-rates')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/exchange-rates').expect(401);
     });
   });
 });

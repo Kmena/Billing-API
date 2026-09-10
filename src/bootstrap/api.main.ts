@@ -94,10 +94,7 @@ async function bootstrap(): Promise<void> {
       .setVersion('1.0.0')
       .setContact('Billing Support', 'https://billing.example.com', 'support@billing.example.com')
       .setLicense('Proprietary', 'https://billing.example.com/license')
-      .addBearerAuth(
-        { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
-        'BearerAuth',
-      )
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'BearerAuth')
       .addApiKey({ type: 'apiKey', in: 'header', name: 'X-API-Key' }, 'X-API-Key')
       .addTag('Health', 'Service health and readiness')
       .addTag('Authentication', 'JWT authentication — login and refresh')
@@ -106,7 +103,10 @@ async function bootstrap(): Promise<void> {
       .addTag('API Keys', 'API key management (requires Bearer token)')
       .addTag('Taxpayers', 'Hacienda taxpayer lookup (requires X-API-Key with taxpayers:read)')
       .addTag('CABYS', 'CABYS catalogue lookup (requires X-API-Key with cabys:read)')
-      .addTag('Exchange Rates', 'Hacienda exchange rates (requires X-API-Key with exchange-rates:read)')
+      .addTag(
+        'Exchange Rates',
+        'Hacienda exchange rates (requires X-API-Key with exchange-rates:read)',
+      )
       .build();
 
     const document = SwaggerModule.createDocument(app, config);

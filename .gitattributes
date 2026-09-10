@@ -1,0 +1,2 @@
+# Match the TypeScript line endings required by Prettier.
+*.ts text eol=lf

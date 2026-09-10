@@ -62,9 +62,7 @@ describe('Hacienda Endpoints (E2E — mock)', () => {
     });
 
     it('AC-015: returns 401 (no API key) rather than exposing taxpayer data', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/taxpayers/3101234567')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/taxpayers/3101234567').expect(401);
     });
   });
 
@@ -78,9 +76,7 @@ describe('Hacienda Endpoints (E2E — mock)', () => {
     });
 
     it('AC-015: returns 401 when no API key supplied', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/cabys?search=servicios')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/cabys?search=servicios').expect(401);
     });
   });
 
@@ -96,9 +92,7 @@ describe('Hacienda Endpoints (E2E — mock)', () => {
 
   describe('GET /api/v1/exchange-rates', () => {
     it('AC-015: returns 401 when no API key supplied', async () => {
-      await request(app.getHttpServer())
-        .get('/api/v1/exchange-rates')
-        .expect(401);
+      await request(app.getHttpServer()).get('/api/v1/exchange-rates').expect(401);
     });
 
     it('returns 400 for invalid date format', async () => {

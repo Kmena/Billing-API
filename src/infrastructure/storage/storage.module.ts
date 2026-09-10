@@ -16,7 +16,10 @@ import type { StorageConfig } from '../config/storage.config';
           return new S3StorageAdapter(configService);
         }
         const storageCfg = configService.get<StorageConfig>('storage');
-        return new LocalStorageAdapter(storageCfg?.localStoragePath, storageCfg?.localStorageSecret);
+        return new LocalStorageAdapter(
+          storageCfg?.localStoragePath,
+          storageCfg?.localStorageSecret,
+        );
       },
       inject: [ConfigService],
     },

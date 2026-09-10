@@ -22,7 +22,9 @@ export class InvalidApiKeyScopeException extends DomainException {
   readonly httpStatus = 422;
 
   constructor(scopes: string[]) {
-    super(`Invalid API key scope(s): ${scopes.join(', ')}. Allowed scopes: ${ALLOWED_API_KEY_SCOPES.join(', ')}`);
+    super(
+      `Invalid API key scope(s): ${scopes.join(', ')}. Allowed scopes: ${ALLOWED_API_KEY_SCOPES.join(', ')}`,
+    );
   }
 }
 
