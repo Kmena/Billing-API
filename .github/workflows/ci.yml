@@ -27,6 +27,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma client
+        run: npx prisma generate
+
       - name: Run ESLint
         run: npm run lint:check
 
@@ -45,6 +48,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
 
       - name: Run TypeScript type check
         run: npm run typecheck
@@ -173,3 +179,4 @@ jobs:
           JWT_SECRET: ci-e2e-jwt-secret-32-chars-minimum
           NODE_ENV: test
           SECRET_PROVIDER: env
+          USE_REAL_HACIENDA: 'false'
