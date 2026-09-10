@@ -1,734 +1,552 @@
 # Current State
 
-> **Document owner:** hdd-architecture-agent-2c1857
-> **Last updated:** 2025-07-13 (post Fase 0 implementation)
-> **Reflects:** Fase 0: Foundation — all 19 tasks completed and verified
-
-This document describes only what is currently implemented and observable in the repository.
-It is the source of truth for current behavior and verified structure.
+> **Last updated:** post `pre-fase-2-hardening` implementation cycle.
+> This document describes only the actual, observable implementation as it exists in the repository today.
 
 ---
 
-## 1. System Overview
+## 1. System overview
 
-**Billing** is a multi-tenant SaaS platform for Costa Rica electronic invoicing
-(Comprobantes Electrónicos, governed by Hacienda / MH-DGT Versión 4.3).
-It is currently in **Fase 0: Foundation** — the infrastructure layer is complete
-and operational; no invoice-generation business logic has been implemented yet.
+Billing is a SaaS REST API for Costa Rican electronic invoicing (*facturación electrónica*).
+It is built as a **modular NestJS 10 monolith** structured according to hexagonal architecture (ports and adapters).
+
+**Completed implementation stages:**
+- Fase 0 — Foundation (multi-tenancy, identity, companies, API keys, audit, storage, queue)
+- Fase 1 — Public Hacienda API (taxpayer lookup, CABYS catalog, exchange rates, circuit breaker)
+- pre-fase-2-hardening — Configuration hardening, CORS fail-fast, circuit breaker configurability, CI improvements
+
+**Not yet implemented:** Fase 2 (HaciendaConnection per company), Fase 3+ (document submission, XML signing).
+
+The system:
+- Exposes a multi-tenant REST API under `/api/v1`
+- Authenticates via JWT Bearer (management endpoints) and API Keys (integration endpoints)
+- Integrates with Hacienda's public API for taxpayer lookup, CABYS catalog and exchange rates
+- Uses PostgreSQL 15 as its sole data store (via Prisma 5 ORM)
+- Uses pg-boss on the same PostgreSQL instance for background job queuing
+- Uses local filesystem or AWS S3 for object storage
+- Runs as two separate processes from the same compiled codebase: `billing-api` and `billing-worker`
+
+---
+
+## 2. Repository structure
+
+```
+C:\Users\kmena\Documents\proyectos\Billing\
+├── src/
+│   ├── api/                         # Cross-cutting HTTP layer
+│   │   ├── decorators/              # @Scopes()
+│   │   ├── filters/                 # GlobalExceptionFilter
+│   │   ├── guards/                  # ApiKeyAuthGuard, JwtAuthGuard, ScopeGuard, ApiKeyThrottlerGuard
+│   │   ├── health/                  # HealthController, PrismaHealthIndicator
+│   │   ├── interceptors/            # CorrelationIdInterceptor, TenantContextInterceptor, AuditInterceptor
+│   │   └── strategies/              # JwtStrategy (passport-jwt)
+│   ├── app.module.ts                # Root NestJS module
+│   ├── bootstrap/
+│   │   ├── api.main.ts              # HTTP API entry point (ConfigService-only, no process.env)
+│   │   └── worker.main.ts           # Background worker entry point (no job handlers registered yet)
+│   ├── infrastructure/
+│   │   ├── config/
+│   │   │   ├── __tests__/           # config.validation.spec.ts (10 tests)
+│   │   │   ├── config.module.ts     # NestJS ConfigModule wrapper; re-exports validationSchema
+│   │   │   ├── config.validation-schema.ts  # Standalone Joi schema (all env vars)
+│   │   │   ├── app.config.ts        # AppConfig factory (NODE_ENV, PORT, LOG_LEVEL)
+│   │   │   ├── auth.config.ts       # AuthConfig factory (JWT settings)
+│   │   │   ├── database.config.ts   # DatabaseConfig factory (DATABASE_URL)
+│   │   │   ├── hacienda.config.ts   # HaciendaConfig factory (incl. circuitBreaker + retry sub-objects)
+│   │   │   ├── secrets.config.ts    # SecretsConfig factory
+│   │   │   └── storage.config.ts    # StorageConfig factory (incl. localStoragePath + localStorageSecret)
+│   │   ├── database/
+│   │   │   ├── database.module.ts
+│   │   │   ├── prisma.service.ts
+│   │   │   └── tenant-aware-prisma.repository.ts
+│   │   ├── integrations/
+│   │   │   └── hacienda/
+│   │   │       ├── __tests__/       # adapter + circuit breaker + mock tests
+│   │   │       ├── adapters/        # HaciendaApiAdapter, MockHaciendaAdapter
+│   │   │       ├── exceptions/      # HaciendaUnavailableException
+│   │   │       ├── ports/           # HaciendaPort interface
+│   │   │       ├── hacienda-circuit-breaker.service.ts  # @Optional() ConfigService; 7 configurable thresholds
+│   │   │       └── hacienda.module.ts
+│   │   ├── queue/
+│   │   │   ├── __tests__/
+│   │   │   ├── adapters/            # PgBossJobQueueAdapter, InMemoryJobQueueAdapter
+│   │   │   ├── ports/               # JobQueuePort
+│   │   │   └── queue.module.ts
+│   │   ├── secrets/
+│   │   │   ├── __tests__/
+│   │   │   ├── adapters/            # EnvSecretProvider, AwsParameterStoreSecretProvider
+│   │   │   ├── ports/               # SecretProviderPort
+│   │   │   └── secrets.module.ts
+│   │   ├── signing/
+│   │   │   └── ports/               # XmlSignerPort (interface only — no adapter implemented)
+│   │   ├── storage/
+│   │   │   ├── adapters/            # LocalStorageAdapter (no process.env), S3StorageAdapter
+│   │   │   ├── ports/               # StoragePort
+│   │   │   └── storage.module.ts    # Injects StorageConfig values into LocalStorageAdapter via ConfigService
+│   │   └── tenant/
+│   │       ├── __tests__/
+│   │       └── tenant-context.ts
+│   └── modules/
+│       ├── api-keys/                # ApiKey CRUD + validation
+│       ├── audit/                   # Append-only audit trail
+│       ├── cabys/                   # CABYS catalog lookup
+│       ├── companies/               # Company registration + Hacienda verification at creation
+│       ├── exchange-rates/          # Exchange rate lookup
+│       ├── identity/                # Tenants, users, auth (login, refresh)
+│       ├── shared/                  # Base domain classes
+│       └── taxpayers/               # Taxpayer lookup
+├── prisma/
+│   ├── migrations/
+│   │   ├── 20250001000000_initial_foundation/   # All Fase 0 tables, ENUMs, indexes
+│   │   └── 20250002000000_company_hacienda_fields/  # Nullable Hacienda verification columns
+│   ├── schema.prisma
+│   └── seed.ts
+├── test/
+│   ├── e2e/
+│   │   ├── fase0/                   # auth, health, api-keys, tenant-isolation
+│   │   └── fase1/                   # hacienda-endpoints, scope-guard
+│   └── helpers/
+│       └── test-factories.ts
+├── .github/workflows/ci.yml         # 5-job pipeline (lint, typecheck, test, build, e2e)
+├── Dockerfile                       # 3-stage multi-stage build
+├── docker-compose.yml               # Dev stack (postgres, localstack, billing-api, billing-worker)
+├── .gitignore                       # Includes SIGNED_*.xml
+└── package.json
+```
+
+---
+
+## 3. Current architecture
+
+| Attribute | Value |
+|---|---|
+| Style | Modular NestJS monolith + hexagonal architecture |
+| Runtime | Node.js 20 + NestJS 10 + TypeScript 5 |
+| ORM | Prisma 5 (PostgreSQL) |
+| HTTP | Express (via @nestjs/platform-express) |
+| Config validation | Joi 17 (standalone schema; validated at startup) |
+| Auth | @nestjs/jwt + passport-jwt (JWT) + custom guards (API Key) |
+| Password hashing | Argon2 |
+| Rate limiting | @nestjs/throttler v6 (in-memory, two-tier) |
+| Logging | nestjs-pino + pino |
+| HTTP client | @nestjs/axios (Hacienda) |
+| Caching | cache-manager v7 (in-memory, Hacienda responses) |
+| Job queue | pg-boss v10 on PostgreSQL |
+| Object storage | Local filesystem (dev) / AWS S3 (production) |
+| Secrets | Environment variables (dev) / AWS SSM Parameter Store (production) |
+
+**Layer structure (per business module):**
+```
+Module
+├── domain/
+│   ├── entities/         Domain entities with lifecycle and invariants
+│   ├── value-objects/    Immutable value types with built-in validation
+│   ├── exceptions/       DomainException subclasses (map to HTTP status codes)
+│   ├── events/           Domain events (past-tense names)
+│   └── ports/            Repository interfaces (output ports)
+├── application/
+│   └── use-cases/        Command/Query handlers; no framework dependencies
+└── infrastructure/
+    ├── http/             NestJS controllers + request/response DTOs
+    └── persistence/      Prisma repository adapters
+```
+
+---
+
+## 4. Existing domains and modules
+
+### Identity (Core domain)
+**Responsibility:** Tenant registration, user management, JWT authentication, refresh token rotation.
+
+| Concept | Type | Location |
+|---|---|---|
+| Tenant | Aggregate root | `modules/identity/domain/entities/tenant.entity.ts` |
+| User | Entity | `modules/identity/domain/entities/user.entity.ts` |
+| Email | Value Object | `modules/identity/domain/value-objects/email.vo.ts` |
+| TenantName | Value Object | `modules/identity/domain/value-objects/tenant-name.vo.ts` |
+| TenantSlug | Value Object | `modules/identity/domain/value-objects/tenant-slug.vo.ts` |
+| TenantCreated | Domain event | `modules/identity/domain/events/tenant-created.event.ts` |
+| CreateTenantHandler | Use case | Application layer |
+| LoginHandler | Use case | Application layer |
+| RefreshTokenHandler | Use case | Application layer |
+
+### Companies (Core domain)
+**Responsibility:** Company registration within a tenant, Hacienda taxpayer verification at creation time.
+
+| Concept | Type | Location |
+|---|---|---|
+| Company | Aggregate root | `modules/companies/domain/entities/company.entity.ts` |
+| IdentificationNumber | Value Object | `modules/companies/domain/value-objects/identification-number.vo.ts` |
+| IdentificationType | Value Object | `modules/companies/domain/value-objects/identification-type.vo.ts` |
+| CreateCompanyHandler | Use case | Application layer (calls HaciendaPort for verification) |
+| GetCompanyHandler | Use case | Application layer |
+
+### API Keys (Core domain)
+**Responsibility:** API key lifecycle (create, list, revoke) and validation for inbound requests.
+
+| Concept | Type | Location |
+|---|---|---|
+| ApiKey | Aggregate root | `modules/api-keys/domain/entities/api-key.entity.ts` |
+| ApiKeyScope | Value Object | `modules/api-keys/domain/value-objects/api-key-scope.vo.ts` |
+| ValidateApiKeyHandler | Use case | Called by `ApiKeyAuthGuard` |
+
+**Key security property:** Full secret shown once only; stored as Argon2 hash via prefix model.
+
+### Audit (Supporting domain)
+**Responsibility:** Append-only audit trail for all API operations.
+
+| Concept | Type | Location |
+|---|---|---|
+| AuditLog | Entity | `modules/audit/domain/entities/audit-log.entity.ts` |
+| AuditService | Application service | `modules/audit/application/audit.service.ts` |
+| AuditInterceptor | Infrastructure | `api/interceptors/audit.interceptor.ts` |
+
+**ADR-009:** `EventClass` enum (`FISCAL_AUDIT`, `TECHNICAL`, `SECURITY`) classifies retention requirements.
+
+### Hacienda Integration (Supporting domain)
+**Responsibility:** Proxying and normalizing Hacienda public API calls; outbound resilience.
+
+| Concept | Type | Location |
+|---|---|---|
+| HaciendaPort | Output port (interface) | `infrastructure/integrations/hacienda/ports/hacienda.port.ts` |
+| HaciendaApiAdapter | Real HTTP adapter | `infrastructure/integrations/hacienda/adapters/hacienda-api.adapter.ts` |
+| MockHaciendaAdapter | Test adapter | `infrastructure/integrations/hacienda/adapters/mock-hacienda.adapter.ts` |
+| HaciendaCircuitBreaker | Infrastructure service | `infrastructure/integrations/hacienda/hacienda-circuit-breaker.service.ts` |
+| HaciendaUnavailableException | Domain exception | `infrastructure/integrations/hacienda/exceptions/` |
+
+**Circuit breaker config (all via env vars, Joi-validated):**
+
+| Variable | Default | Rule |
+|---|---|---|
+| `HACIENDA_CB_FAILURE_THRESHOLD` | 5 | Integer > 0 |
+| `HACIENDA_CB_RESET_TIMEOUT_MS` | 30000 | Integer > 0 |
+| `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND` | 8 | Integer > 0, max 10 |
+| `HACIENDA_RETRY_429_COUNT` | 2 | Integer > 0 |
+| `HACIENDA_RETRY_429_BASE_DELAY_MS` | 1000 | Integer > 0 |
+| `HACIENDA_RETRY_5XX_COUNT` | 1 | Integer > 0 |
+| `HACIENDA_RETRY_5XX_DELAY_MS` | 2000 | Integer > 0 |
+
+### Shared (Generic)
+Base domain abstractions: `AggregateRoot`, `BaseEntity`, `DomainException`, `ValueObject`, `DomainEvent`, `IRepository`.
+
+---
+
+## 5. Main use cases
+
+| Use Case | Endpoint | Auth | Module |
+|---|---|---|---|
+| Register tenant + first user | POST /api/v1/tenants | None | Identity |
+| Login | POST /api/v1/auth/login | None | Identity |
+| Refresh token | POST /api/v1/auth/refresh | None | Identity |
+| Get tenant | GET /api/v1/tenants/:id | JWT | Identity |
+| Create company | POST /api/v1/companies | JWT | Companies |
+| Get company | GET /api/v1/companies/:id | JWT | Companies |
+| Create API key | POST /api/v1/api-keys | JWT | API Keys |
+| List API keys | GET /api/v1/api-keys | JWT | API Keys |
+| Revoke API key | DELETE /api/v1/api-keys/:id | JWT | API Keys |
+| Validate API key | (internal, called by guard) | — | API Keys |
+| Lookup taxpayer | GET /api/v1/taxpayers/:id | API Key (taxpayers:read) | Taxpayers |
+| Get CABYS item | GET /api/v1/cabys/:code | API Key (cabys:read) | CABYS |
+| Search CABYS | GET /api/v1/cabys?search= | API Key (cabys:read) | CABYS |
+| Get exchange rate | GET /api/v1/exchange-rates | API Key (exchange-rates:read) | Exchange Rates |
+| Health check | GET /health | None | Health |
+
+---
+
+## 6. Current data flows
+
+### JWT-authenticated request flow
+```
+Client → [JwtAuthGuard → JwtStrategy]
+       → TenantContextInterceptor (set TenantContext)
+       → AuditInterceptor (begin audit)
+       → Controller → Use Case Handler → Prisma Repository
+       → AuditInterceptor (finalize audit)
+       → GlobalExceptionFilter (on error)
+```
+
+### API Key-authenticated request flow
+```
+Client (X-API-Key header)
+  → ApiKeyAuthGuard → ValidateApiKeyHandler (Argon2 verify, status check)
+    → attach apiKey + user.tenantId to request
+  → ScopeGuard (check @Scopes() decorator matches apiKey.scopes)
+  → TenantContextInterceptor
+  → AuditInterceptor
+  → Controller → Use Case Handler → HaciendaPort
+  → AuditInterceptor finalize
+```
+
+### Hacienda outbound request flow
+```
+Use Case Handler → HaciendaPort (injected adapter)
+  → cache lookup (cache-manager; miss → continue)
+  → HaciendaCircuitBreaker.execute()
+      → enforceOutboundRateLimit() (sliding window ≤ OUTBOUND_MAX_PER_SECOND req/s)
+      → circuit state check (OPEN → fast-fail with HaciendaUnavailableException)
+      → HTTP call via @nestjs/axios
+      → retry on 429 (linear backoff) or 5xx/network (fixed delay)
+      → onSuccess() / onFailure() (state machine transitions)
+  → map Hacienda fields → Billing-owned fields
+  → cache write
+  → return Billing-contract result
+```
+
+---
+
+## 7. Database and persistence
+
+**Engine:** PostgreSQL 15 via Prisma 5 (prisma-client-js)
+
+**Applied migrations (in order):**
+
+| Migration | Description |
+|---|---|
+| `20250001000000_initial_foundation` | All Fase 0 tables, ENUMs, indexes, FKs |
+| `20250002000000_company_hacienda_fields` | Nullable Hacienda verification columns on `companies` |
+
+**Tables:**
+
+| Table | Owner domain | Key properties |
+|---|---|---|
+| `tenants` | Identity | UUIDv4 PK, unique slug |
+| `users` | Identity | tenant-scoped, unique email per tenant, Argon2 password_hash |
+| `refresh_tokens` | Identity | unique token_hash, single-use (`used` flag), TTL enforced at app layer |
+| `companies` | Companies | tenant-scoped, unique identification_number per tenant; nullable Hacienda verification fields |
+| `api_keys` | API Keys | prefix/hash model, scopes array, status enum |
+| `api_key_companies` | API Keys | N:M join between api_keys and companies |
+| `audit_logs` | Audit | append-only; EventClass enum; 5 composite indexes |
+
+**ENUMs:** `TenantStatus`, `TenantPlan`, `UserStatus`, `UserRole`, `CompanyStatus`, `IdentificationType`, `ApiKeyStatus`, `ApiKeyEnv`, `HaciendaVerificationStatus`, `EventClass`
+
+**Tenant isolation:** enforced at `TenantAwarePrismaRepository` base class; all queries filter by `tenantId`. No row-level security in PostgreSQL.
+
+**Audit integrity:** No application-level UPDATE/DELETE on `audit_logs`. No database-level trigger enforcement.
+
+---
+
+## 8. APIs and integrations
+
+### Internal REST API
+
+- Base prefix: `/api/v1` (excluded: `/health`, `/health/ready`, `/health/live`)
+- Error response envelope: `{ error: { code, message, correlationId, timestamp, details? } }`
+- Request validation: `ValidationPipe` (whitelist=true, forbidNonWhitelisted=true, transform=true)
+- OpenAPI: `/api/docs` in non-production environments only
+- CORS: configured from `CORS_ALLOWED_ORIGINS`; wildcard rejected at startup in production/staging
+
+### External integration: Hacienda API
+
+| Endpoint | Use | Notes |
+|---|---|---|
+| `GET /fe/ae?identificacion=<id>` | Taxpayer lookup | HTTP 200 even for not-found; discriminated by body |
+| `GET /indicadores/tc/dolar` | Current exchange rate | — |
+| `GET /indicadores/tc/dolar/historico?d=<d>&h=<h>` | Historical exchange rate | — |
+| `GET /fe/cabys?codigo=<code>` | CABYS item by code | Returns array; empty = not found |
+| `GET /fe/cabys?q=<q>&top=<n>` | CABYS search | Use `total` not `cantidad` for count |
+
+**BR-014:** Hacienda returns HTTP 200 for not-found taxpayer with `body.code === 404`. Body inspection required.
+**BR-015:** CABYS codes (13 digits) differ from economic activity codes (e.g., `"9609.0"`). These must not be confused.
+
+**Stubs in HaciendaApiAdapter (Fase 3+):**
+- `submitDocument()` — throws `Error: Not implemented`
+- `getDocumentStatus()` — throws `Error: Not implemented`
+
+### Caching (in-memory, Hacienda only)
+
+| Cache key pattern | TTL default | Variable |
+|---|---|---|
+| `taxpayer:<id>` | 1 hour | `TAXPAYER_CACHE_TTL_MS` |
+| `exchange-rate:<currency>:<date>` | 4 hours | `EXCHANGE_RATE_CACHE_TTL_MS` |
+| `cabys:code:<code>` | 24 hours | `CABYS_ITEM_CACHE_TTL_MS` |
+| `cabys:search:<q>:<limit>` | 1 hour | `CABYS_SEARCH_CACHE_TTL_MS` |
+
+---
+
+## 9. Authentication and authorization
+
+### JWT (management endpoints)
 
 | Property | Value |
 |---|---|
-| Project name | billing |
-| Version | 0.1.0 |
-| Phase | Fase 0: Foundation (complete) |
-| Runtime | Node.js v20 LTS |
-| Framework | NestJS v10 |
-| Language | TypeScript 5.5 (strict mode) |
-| Database | PostgreSQL 15+ |
-| ORM | Prisma v5.17 |
-| Queue | pg-boss v10 (PostgreSQL-backed) |
-| Auth | JWT (access) + API Keys |
-| Storage | LocalStorageAdapter (dev) / S3StorageAdapter (prod) |
-| Secrets | EnvSecretProvider (dev) / AwsParameterStoreSecretProvider (prod) |
+| Library | @nestjs/jwt + passport-jwt |
+| Algorithm | HS256 (default; not explicitly overridden) |
+| Access token TTL | 15m (configurable `JWT_EXPIRES_IN`) |
+| Refresh token TTL | 7d (configurable `JWT_REFRESH_EXPIRES_IN`) |
+| Refresh token storage | Argon2 hash in `refresh_tokens` table |
+| Rotation | Single-use; new token issued on each refresh |
+| JWT_SECRET | Required >= 32 chars in production (Joi-enforced at startup) |
 
----
+### API Keys (integration endpoints)
 
-## 2. Repository Structure
-
-```
-billing/
-├── src/
-│   ├── app.module.ts                    — Root NestJS module
-│   ├── bootstrap/
-│   │   ├── api.main.ts                  — HTTP server entry point
-│   │   └── worker.main.ts               — Background worker entry point
-│   ├── api/                             — HTTP adapter layer (input)
-│   │   ├── filters/
-│   │   │   └── global-exception.filter.ts
-│   │   ├── guards/
-│   │   │   ├── api-key-auth.guard.ts
-│   │   │   └── jwt-auth.guard.ts
-│   │   ├── health/
-│   │   │   ├── health.controller.ts
-│   │   │   └── indicators/
-│   │   │       └── prisma.health-indicator.ts
-│   │   ├── interceptors/
-│   │   │   ├── audit.interceptor.ts
-│   │   │   ├── correlation-id.interceptor.ts
-│   │   │   └── tenant-context.interceptor.ts
-│   │   └── strategies/
-│   │       └── jwt.strategy.ts
-│   ├── infrastructure/                  — Cross-cutting infrastructure
-│   │   ├── config/                      — ConfigModule + Joi validation
-│   │   ├── database/                    — PrismaService + TenantAwarePrismaRepository
-│   │   ├── integrations/hacienda/       — HaciendaPort + Mock + API stub
-│   │   ├── queue/                       — JobQueuePort + pg-boss + InMemory adapters
-│   │   ├── secrets/                     — SecretProvider (env / SSM)
-│   │   ├── signing/                     — XmlSignerPort interface (no implementation)
-│   │   ├── storage/                     — StoragePort + Local + S3 adapters
-│   │   └── tenant/                      — TenantContext (AsyncLocalStorage)
-│   └── modules/                         — Business modules
-│       ├── shared/domain/               — Shared Domain Kernel
-│       ├── identity/                    — Tenant + User aggregates + Auth
-│       ├── companies/                   — Company aggregate
-│       ├── api-keys/                    — ApiKey entity + CRUD handlers
-│       └── audit/                       — AuditLog (append-only)
-├── prisma/
-│   ├── schema.prisma                    — 7 models, 9 ENUMs
-│   ├── migrations/
-│   │   └── 20250001000000_initial_foundation/migration.sql
-│   └── seed.ts                          — First admin user creation
-├── test/
-│   ├── e2e/fase0/                       — 4 E2E test suites
-│   └── helpers/test-factories.ts
-├── Dockerfile                           — 3-stage multi-stage build
-├── docker-compose.yml                   — postgres + localstack + api + worker
-├── package.json
-├── tsconfig.json
-├── .eslintrc.js
-└── .env.local.example
-```
-
----
-
-## 3. Current Architecture
-
-**Style:** Modular Monolith with Hexagonal Architecture (Ports & Adapters).
-
-There is one deployable application built from a single codebase.
-Two entry points exist:
-- `api.main.ts` — starts an Express HTTP server on port 3000 via NestJS.
-- `worker.main.ts` — starts a NestJS application context (no HTTP); intended for
-  background job workers. Currently no job handlers are registered.
-
-**Layer structure (from outer to inner):**
-
-```
-┌───────────────────────────────────────────────────────────┐
-│  Input Adapters (src/api/)                                │
-│  Controllers · Guards · Interceptors · Filters            │
-├───────────────────────────────────────────────────────────┤
-│  Application Layer (modules/*/application/)               │
-│  Use Case Handlers · Commands · Queries                   │
-├───────────────────────────────────────────────────────────┤
-│  Domain Layer (modules/*/domain/)                         │
-│  Entities · Value Objects · Aggregates · Domain Events    │
-│  Domain Exceptions · Port Interfaces                      │
-├───────────────────────────────────────────────────────────┤
-│  Output Adapters (modules/*/infrastructure/ +             │
-│  src/infrastructure/)                                     │
-│  Prisma Repositories · Queue · Storage · Secrets          │
-│  Hacienda Integration                                     │
-└───────────────────────────────────────────────────────────┘
-```
-
-**Request lifecycle:**
-1. HTTP request arrives at Express (NestJS platform).
-2. `CorrelationIdInterceptor` assigns or propagates `X-Correlation-ID`.
-3. `JwtAuthGuard` or `ApiKeyAuthGuard` validates credentials; populates
-   `request.user` / `request.apiKey`.
-4. `TenantContextInterceptor` wraps the handler in `TenantContext.run(tenantId, fn)`,
-   establishing AsyncLocalStorage for downstream tenant isolation.
-5. Controller delegates to the application use-case handler.
-6. Handler calls domain objects; domain calls repository ports.
-7. `TenantAwarePrismaRepository` automatically appends `WHERE tenant_id = $tenantId`
-   to every query.
-8. Response returns through NestJS pipeline.
-9. `AuditInterceptor` fires-and-forgets an audit log entry (success or failure).
-10. `GlobalExceptionFilter` maps `DomainException` → structured HTTP error. Unknown
-    exceptions produce 500 with no stack trace in production.
-
-**Global NestJS configuration (api.main.ts):**
-- Global API prefix: `/api/v1` (health endpoints excluded).
-- `GlobalExceptionFilter` registered globally.
-- `ValidationPipe` registered globally (whitelist + forbidNonWhitelisted + transform).
-- Interceptor registration order: `CorrelationIdInterceptor` → `TenantContextInterceptor`
-  → `AuditInterceptor` (resolved from DI container via `app.get()`).
-- Swagger/OpenAPI enabled at `/api/docs` in non-production environments only.
-- Graceful shutdown hooks enabled.
-
----
-
-## 4. Existing Domains and Modules
-
-### 4.1 Shared Domain Kernel (`src/modules/shared/domain/`)
-
-Not a NestJS module with business logic. A collection of pure TypeScript base classes
-and interfaces used by all domain modules.
-
-| Artifact | Description |
+| Property | Value |
 |---|---|
-| `BaseEntity<TId>` | Abstract base for all entities. Carries `id`, `createdAt`, `updatedAt`. Value equality by id. |
-| `AggregateRoot<TId>` | Extends `BaseEntity`. Adds domain event accumulation (`addDomainEvent`, `clearDomainEvents`). |
-| `ValueObject<T>` | Abstract base for value objects. Props are frozen. Structural equality via JSON comparison. |
-| `DomainEvent` | Base interface for domain events. |
-| `DomainException` | Abstract base class for domain exceptions. Carries `code`, `message`, `httpStatus`. Mapped to HTTP by `GlobalExceptionFilter`. |
-| `Repository<T>` | Minimal generic repository interface. |
+| Format | `{prefix}.{secret}` |
+| Prefix | Stored in DB (16-char, unique) |
+| Secret | Argon2 hash stored; full key shown once only |
+| Scopes | `taxpayers:read`, `cabys:read`, `exchange-rates:read` |
+| Status | ACTIVE / REVOKED / EXPIRED |
+| Expiry | Optional `expiresAt` |
+| Company scope | Optional N:M — key authorized for specific companies |
 
-### 4.2 ConfigModule (`src/infrastructure/config/`)
+### Rate limiting
 
-- NestJS `@Global` module wrapping `@nestjs/config`.
-- Joi schema validates all environment variables at startup; aborts immediately if invalid.
-- Named config factories: `app.config`, `database.config`, `auth.config`,
-  `storage.config`, `secrets.config`.
-- JWT_SECRET requires ≥ 32 chars in production; defaults to insecure value in development.
-- Imported in `AppModule`.
-
-### 4.3 DatabaseModule (`src/infrastructure/database/`)
-
-- NestJS `@Global` module.
-- Provides `PrismaService` (extends `PrismaClient`).
-- `TenantAwarePrismaRepository` — abstract base class for all tenant-scoped Prisma
-  repositories. Reads `tenantId` from `TenantContext` and applies it automatically
-  via `applyTenantFilter()`.
-- Imported in `AppModule`.
-
-### 4.4 TenantContext (`src/infrastructure/tenant/`)
-
-- `TenantContext` — static class backed by Node.js `AsyncLocalStorage`.
-- `TenantContext.run(tenantId, fn)` — wraps async execution in a tenant scope.
-- `TenantContext.getTenantId()` — throws `TenantContextNotSetException` if not set.
-- `TenantContext.getTenantIdOrNull()` — safe version for optional context.
-- `tenant-context.middleware.ts` exists but is NOT used; tenant context is established
-  through `TenantContextInterceptor` instead (dead file).
-- `TenantModule` (`tenant.module.ts`) exists but is minimal and not imported in `AppModule`.
-
-### 4.5 AuditModule (`src/modules/audit/`)
-
-- Registered in `AppModule`; decorated `@Global`.
-- **Domain:** `AuditLog` — immutable entity (all fields `readonly`). Not an aggregate;
-  does not extend `AggregateRoot`. No lifecycle methods.
-- **Application:** `AuditService` — `record()` is fire-and-forget; errors are logged
-  but do not propagate. `findByCorrelationId()` is a synchronous query.
-- **Port:** `IAuditLogRepository` — exposes only `insert()` and `findByCorrelationId()`.
-  No `update()` or `delete()` methods (append-only enforcement at interface level).
-- **Adapter:** `PrismaAuditLogRepository`.
-- **EventClass** values: `FISCAL_AUDIT` (≥5 years retention), `TECHNICAL` (configurable),
-  `SECURITY` (configurable).
-- All `AuditInterceptor` entries currently use `eventClass: 'TECHNICAL'`.
-
-### 4.6 IdentityModule (`src/modules/identity/`)
-
-Manages Tenants and Users plus JWT authentication.
-
-**Domain entities:**
-- `Tenant` — aggregate root. States: `ACTIVE`, `SUSPENDED`, `CANCELLED`.
-  Plans: `TRIAL`, `STARTER`, `PROFESSIONAL`, `ENTERPRISE`.
-  Factory: `Tenant.create()` → raises `TenantCreatedEvent`.
-  Methods: `suspend()`, `activate()`. Slug is immutable after creation (BR-008).
-- `User` — aggregate root. States: `ACTIVE`, `INACTIVE`, `PENDING_VERIFICATION`.
-  Roles: `TENANT_ADMIN`, `MEMBER`, `READ_ONLY`.
-  `passwordHash` never exposed in any DTO (BR-004).
-  Method: `recordLogin()`.
-
-**Value Objects:** `TenantName`, `TenantSlug` (kebab-case, 3–60 chars, globally unique),
-`Email` (lowercase, RFC-compliant format).
-
-**Domain Events:** `TenantCreatedEvent` (raised on creation, accumulated in aggregate,
-not yet dispatched to any bus).
-
-**Domain Exceptions:** `InvalidCredentialsException`, `InvalidRefreshTokenException`,
-`TenantNotFoundException`, `TenantSlugAlreadyExistsException`, `UserNotFoundException`.
-
-**Ports:** `ITenantRepository`, `IUserRepository`, `IRefreshTokenRepository`.
-
-**Use-case handlers:**
-- `CreateTenantHandler` — creates tenant + TENANT_ADMIN user atomically.
-- `GetTenantHandler` — fetches tenant by ID.
-- `CreateUserHandler` — creates additional users (internal use only).
-- `LoginHandler` — validates credentials (argon2id verify), issues JWT + refresh token.
-  JWT expiry read from `ConfigService`. Refresh token: 48-byte random, SHA-256 hashed.
-- `RefreshTokenHandler` — validates refresh token hash, marks used, issues new pair
-  (rotation). Reuse of a used token returns 401.
-
-**Controllers:** `AuthController` (`/api/v1/auth`), `TenantController` (`/api/v1/tenants`).
-Both secured with `JwtAuthGuard`.
-
-**Infrastructure adapters:** `PrismaTenantRepository`, `PrismaUserRepository`,
-`PrismaRefreshTokenRepository`.
-
-### 4.7 CompaniesModule (`src/modules/companies/`)
-
-**Domain entity:** `Company` — aggregate root. States: `ACTIVE`, `INACTIVE`.
-
-**Value Objects:** `IdentificationType`, `IdentificationNumber`.
-
-**CR identification validation (IdentificationNumber VO):**
-
-| Type | Length |
-|---|---|
-| FISICA (Cédula física) | 9 digits |
-| JURIDICA (Cédula jurídica) | 10 digits |
-| DIMEX | 11–12 digits |
-| NITE | 10 digits |
-
-Non-digit characters are stripped before validation.
-
-**Business rules:**
-- Tenant-level uniqueness on `(tenantId, identificationNumber)` enforced at DB level.
-
-**Domain Exceptions:** `CompanyAlreadyExistsException`, `CompanyNotFoundException`.
-
-**Use-case handlers:** `CreateCompanyHandler`, `GetCompanyHandler`.
-
-**Controller:** `CompanyController` (`/api/v1/companies`) secured with `JwtAuthGuard`.
-
-**Infrastructure adapters:** `PrismaCompanyRepository` extends `TenantAwarePrismaRepository`.
-
-### 4.8 ApiKeysModule (`src/modules/api-keys/`)
-
-**Domain entity:** `ApiKey` — aggregate root. States: `ACTIVE`, `REVOKED`, `EXPIRED`.
-Environments: `LIVE`, `TEST`.
-
-**Key format:** `bk_{env}_{prefix8}_{secret32}`
-- `prefix8`: 8-char hex stored in plaintext for fast lookup.
-- `secret32`: 32-char hex hashed with argon2id — shown only once at creation, never
-  stored in plaintext (BR-001).
-
-**Business rules:**
-- `revoke()` is idempotent — revoking an already-revoked key is a no-op (BR-005).
-- `recordUsage()` updates `lastUsedAt`.
-- Expiry: if `expiresAt` is set and current time > `expiresAt`, key is considered expired.
-
-**Domain Exceptions:** `ApiKeyExpiredException`, `ApiKeyInvalidException`,
-`ApiKeyNotFoundException`, `ApiKeyRevokedException`.
-
-**Port:** `IApiKeyRepository`.
-
-**Use-case handlers:**
-- `CreateApiKeyHandler` — generates prefix, hashes secret with argon2id, persists, returns
-  full raw key only once.
-- `ListApiKeysHandler` — returns all keys for current tenant (no secrets exposed).
-- `RevokeApiKeyHandler` — marks key revoked; idempotent.
-- `ValidateApiKeyHandler` — parses format, looks up by prefix, verifies argon2id hash,
-  checks status/expiry. Records usage timestamp.
-
-**Controller:** `ApiKeysController` (`/api/v1/api-keys`) secured with `JwtAuthGuard`.
-
-**Guard:** `ApiKeyAuthGuard` — validates `X-API-Key` header; populates `request.apiKey`
-(full `ApiKey` entity) and `request.user.tenantId`. Ready for `ScopeGuard` in Fase 1
-(scopes field exists in domain and DB but guard is not implemented).
-
-**Infrastructure adapters:** `PrismaApiKeyRepository` extends `TenantAwarePrismaRepository`.
-
-### 4.9 SecretsModule (`src/infrastructure/secrets/`)
-
-- NestJS `@Global` module. Imported in `AppModule`.
-- `SecretProvider` port: `get(key: string): Promise<string>`,
-  `getOptional(key: string): Promise<string | null>`.
-- `EnvSecretProvider` — reads from `process.env`.
-- `AwsParameterStoreSecretProvider` — reads from AWS SSM Parameter Store
-  (prefix: `SSM_PARAMETER_PREFIX`, default `/billing`).
-- Selection: `SECRET_PROVIDER=env` → `EnvSecretProvider`; `SECRET_PROVIDER=ssm` → AWS.
-
-### 4.10 QueueModule (`src/infrastructure/queue/`)
-
-- **NOT imported in `AppModule`.** Exists as implemented infrastructure but not connected.
-- `JobQueuePort` — `send(jobName, data, options?)` and `registerHandler(jobName, handler)`.
-- `PgBossJobQueue` — wraps `pg-boss` library; uses PostgreSQL for job storage.
-- `InMemoryJobQueue` — synchronous in-process execution for test environments.
-- Selection: `NODE_ENV=test` → `InMemoryJobQueue`; otherwise → `PgBossJobQueue`.
-- No job handlers are registered; this is Fase 0 scaffolding only.
-
-### 4.11 HaciendaModule (`src/infrastructure/integrations/hacienda/`)
-
-- **NOT imported in `AppModule`.** Exists as implemented infrastructure but not connected.
-- `HaciendaPort` — 6 operations defined:
-  - `getTaxpayer`, `getExchangeRate`, `getCabys`, `searchCabys` — Fase 1 targets.
-  - `submitDocument`, `getDocumentStatus` — Fase 2+ targets.
-- `MockHaciendaAdapter` — in-memory stub with predictable responses for all 6 methods.
-- `HaciendaApiAdapter` — HTTP stub; does not yet call real Hacienda endpoints.
-- Selection: `NODE_ENV=production` AND `USE_REAL_HACIENDA=true` → `HaciendaApiAdapter`;
-  otherwise → `MockHaciendaAdapter`.
-
-### 4.12 StorageModule (`src/infrastructure/storage/`)
-
-- NestJS `@Global` module — but **NOT imported in `AppModule`**.
-- `StoragePort` — `upload`, `download`, `delete`, `getSignedUrl` operations.
-- `LocalStorageAdapter` — filesystem-based; uses `./storage` directory.
-- `S3StorageAdapter` — AWS S3 or LocalStack; uses `@aws-sdk/client-s3`.
-- Selection: `STORAGE_TYPE=local` → `LocalStorageAdapter`; `STORAGE_TYPE=s3` → `S3StorageAdapter`.
-
-### 4.13 XmlSignerPort (`src/infrastructure/signing/`)
-
-- Interface only: `XmlSignerPort` — `sign(xml, cert)` and `verify(signedXml)`.
-- `Pkcs12Certificate` — `{ data: Buffer, passphrase: string }`.
-- No implementation exists (ADR-005: XAdES spike required).
-- Relevant for Fase 3 (electronic signature of invoices).
-
----
-
-## 5. Main Use Cases
-
-| Use Case | Handler | Endpoint | Auth | Status |
-|---|---|---|---|---|
-| Create Tenant | `CreateTenantHandler` | `POST /api/v1/tenants` | JWT | Implemented |
-| Get Tenant | `GetTenantHandler` | `GET /api/v1/tenants/:id` | JWT | Implemented |
-| Login | `LoginHandler` | `POST /api/v1/auth/login` | None | Implemented |
-| Refresh Token | `RefreshTokenHandler` | `POST /api/v1/auth/refresh` | None | Implemented |
-| Create User | `CreateUserHandler` | (internal — called by CreateTenant) | N/A | Implemented |
-| Create Company | `CreateCompanyHandler` | `POST /api/v1/companies` | JWT | Implemented |
-| Get Company | `GetCompanyHandler` | `GET /api/v1/companies/:id` | JWT | Implemented |
-| Create API Key | `CreateApiKeyHandler` | `POST /api/v1/api-keys` | JWT | Implemented |
-| List API Keys | `ListApiKeysHandler` | `GET /api/v1/api-keys` | JWT | Implemented |
-| Revoke API Key | `RevokeApiKeyHandler` | `DELETE /api/v1/api-keys/:id` | JWT | Implemented |
-| Validate API Key | `ValidateApiKeyHandler` | (internal — called by ApiKeyAuthGuard) | N/A | Implemented |
-| Liveness Check | `HealthController` | `GET /health`, `GET /health/live` | None | Implemented |
-| Readiness Check | `HealthController` | `GET /health/ready` | None | Implemented |
-
----
-
-## 6. Current Data Flows
-
-### Login flow
-1. `POST /api/v1/auth/login` → `AuthController.login()` → `LoginHandler.execute()`.
-2. `UserRepository.findByEmail(tenantId, email)` — Prisma query scoped to tenant.
-3. `argon2.verify(storedHash, inputPassword)` — generic 401 on any failure (BR-004).
-4. `JwtService.sign({ sub, tenantId, role, jti })` — access token.
-5. `crypto.randomBytes(48)` for refresh token; SHA-256 hash stored in `refresh_tokens`.
-6. Returns `{ accessToken, refreshToken, expiresIn: 900 }`.
-
-### Authenticated API request flow
-1. `Authorization: Bearer <jwt>` → `JwtStrategy.validate()` → `request.user = { userId, tenantId, role }`.
-2. `TenantContextInterceptor` wraps handler: `TenantContext.run(tenantId, () => lastValueFrom(next.handle()))`.
-3. Controller → handler → domain → `TenantAwarePrismaRepository.applyTenantFilter()`.
-4. All repository queries include `WHERE tenant_id = <tenantId>` automatically.
-
-### API Key request flow
-1. `X-API-Key: bk_{env}_{prefix8}_{secret32}` → `ApiKeyAuthGuard.canActivate()`.
-2. Parse prefix from key; query `api_keys WHERE key_prefix = prefix`.
-3. `argon2.verify(storedKeyHash, rawSecret)`.
-4. Set `request.apiKey` + `request.user = { tenantId: apiKey.tenantId }`.
-5. `TenantContextInterceptor` establishes async context.
-
-### Audit flow (fire-and-forget)
-1. `AuditInterceptor` captures request metadata before handler runs.
-2. On response (tap): calls `AuditService.record(...)` — catches errors internally.
-3. On error (tap): calls `AuditService.record(...)` with `errorMessage` and error status code.
-
----
-
-## 7. Database and Persistence
-
-### Technology
-- PostgreSQL 15+ with Prisma ORM v5.17 (Prisma Client JS).
-- Single database; single migration applied: `20250001000000_initial_foundation`.
-
-### Tables
-
-| Table | Description | Tenant-scoped |
+| Tier | Limit | Storage |
 |---|---|---|
-| `tenants` | Tenant registry. Slug unique globally. | No (root table) |
-| `users` | Users scoped to a tenant. Email unique per tenant. | Yes |
-| `companies` | Legal entities for invoicing. Identification unique per tenant. | Yes |
-| `api_keys` | API keys for system access. Prefix unique globally. | Yes |
-| `api_key_companies` | N:M join: which companies an API key can access. | Implicit |
-| `refresh_tokens` | Hashed refresh tokens; marked used on rotation. | Yes (tenantId stored) |
-| `audit_logs` | Immutable audit trail. Append-only. Optional tenant association. | Partial |
+| Layer A — per API Key | 100 req/60s | In-memory (throttler) |
+| Layer B — per IP (auth endpoints) | 10 req/60s | In-memory (throttler) |
 
-### PostgreSQL ENUMs (9 types)
-
-`TenantStatus`, `TenantPlan`, `UserStatus`, `UserRole`, `CompanyStatus`,
-`IdentificationType`, `ApiKeyStatus`, `ApiKeyEnv`, `EventClass`.
-
-### Key constraints and indexes
-
-- `tenants.slug` — UNIQUE.
-- `users(tenantId, email)` — UNIQUE.
-- `companies(tenantId, identificationNumber)` — UNIQUE.
-- `api_keys.keyPrefix` — UNIQUE.
-- `refresh_tokens.tokenHash` — UNIQUE.
-- Composite indexes on `(tenantId, status)` for `users`, `companies`, `api_keys`.
-- `audit_logs` indexes: `(tenantId, createdAt DESC)`, `(correlationId)`,
-  `(apiKeyId, createdAt DESC)`, `(action, createdAt DESC)`, `(eventClass, createdAt DESC)`.
-- `refresh_tokens` indexes: `(userId)`, `(expiresAt)`.
-- `api_keys`: additional index on `(keyPrefix)`.
-
-### Foreign key behavior
-- `companies.tenantId` → `tenants.id`: ON DELETE RESTRICT ON UPDATE CASCADE.
-- `users.tenantId` → `tenants.id`: ON DELETE RESTRICT ON UPDATE CASCADE.
-- `api_keys.tenantId` → `tenants.id`: ON DELETE RESTRICT ON UPDATE CASCADE.
-- `refresh_tokens.userId` → `users.id`: ON DELETE CASCADE ON UPDATE CASCADE.
-- `audit_logs.tenantId` → `tenants.id`: ON DELETE RESTRICT.
-- `audit_logs.apiKeyId` → `api_keys.id`: ON DELETE RESTRICT.
-
-### Persistence patterns
-- All tenant-aware repositories extend `TenantAwarePrismaRepository`.
-- Repositories call `this.applyTenantFilter(where)` which merges `tenantId`.
-- Domain entities are reconstructed from Prisma results via `.reconstruct(props)` factory
-  methods. Prisma models are never used as public contracts.
-- `AuditLog` only supports `insert()` and `findByCorrelationId()` through its port.
-- No soft-delete pattern; status fields represent logical state.
-
-### Seed data
-- `prisma/seed.ts` creates first tenant + `TENANT_ADMIN` user on empty databases.
-- Credentials: `admin@billing.local` / `ChangeMe123!` (override via env vars).
-- Idempotent: skips if any tenant already exists.
+Rate limits are configured via `THROTTLE_API_TTL`, `THROTTLE_API_LIMIT`, `THROTTLE_AUTH_TTL`, `THROTTLE_AUTH_LIMIT` (all Joi-validated).
 
 ---
 
-## 8. APIs and Integrations
+## 10. Events and background processing
 
-### REST API Endpoints
+### Domain events
+`TenantCreated` event is defined in `modules/identity/domain/events/tenant-created.event.ts`.
+**No event bus is wired.** The event is defined but not published or consumed.
 
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/health` | None | Liveness (always 200 if process alive) |
-| GET | `/health/live` | None | Liveness alias |
-| GET | `/health/ready` | None | Readiness — checks DB connectivity |
-| POST | `/api/v1/auth/login` | None | User login; returns JWT + refresh token |
-| POST | `/api/v1/auth/refresh` | None | Refresh access token with rotation |
-| POST | `/api/v1/tenants` | JWT | Create tenant + admin user |
-| GET | `/api/v1/tenants/:id` | JWT | Get tenant by ID |
-| POST | `/api/v1/companies` | JWT | Create company (CR identification validated) |
-| GET | `/api/v1/companies/:id` | JWT | Get company by ID (tenant-scoped) |
-| POST | `/api/v1/api-keys` | JWT | Create API key (raw key shown once) |
-| GET | `/api/v1/api-keys` | JWT | List API keys for current tenant |
-| DELETE | `/api/v1/api-keys/:id` | JWT | Revoke API key (idempotent) |
-| GET | `/api/docs` | None | Swagger UI (non-production only) |
+### Job queue infrastructure
+- Port: `JobQueuePort` (`infrastructure/queue/ports/job-queue.port.ts`)
+- Adapters: `PgBossJobQueue` (production), `InMemoryJobQueue` (test, selected automatically by ConfigService)
+- pg-boss creates its own schema in PostgreSQL; migration behavior under concurrent startup is untested
 
-**Uniform error response shape:**
-```json
-{
-  "error": {
-    "code": "DOMAIN_EXCEPTION_CODE",
-    "message": "Human-readable message",
-    "correlationId": "uuid",
-    "timestamp": "ISO-8601",
-    "details": {}
-  }
-}
-```
-
-**Versioning:** URL path-based (`/api/v1`). No header-based versioning currently.
-
-### External Integrations
-
-| Integration | Status | Active Adapter |
-|---|---|---|
-| Hacienda API (MH-DGT) | Interface defined; not wired in AppModule | `MockHaciendaAdapter` (all envs unless `USE_REAL_HACIENDA=true` in prod) |
-| AWS S3 | Adapter implemented; not wired in AppModule | `S3StorageAdapter` via `STORAGE_TYPE=s3` |
-| AWS SSM Parameter Store | Adapter implemented; active in `SecretsModule` | `AwsParameterStoreSecretProvider` via `SECRET_PROVIDER=ssm` |
-| pg-boss (queue) | Library implemented; not wired in AppModule | N/A (no active connection) |
+### Worker process
+`billing-worker` (`bootstrap/worker.main.ts`) creates a NestJS application context and enables shutdown hooks, but **registers no job handlers**. The worker is operational infrastructure without actual job processing.
 
 ---
 
-## 9. Authentication and Authorization
+## 11. Containers and deployment
 
-### JWT Authentication
-- Algorithm: HS256 (symmetric, via `@nestjs/jwt` / `passport-jwt`).
-- Access token TTL: 15 minutes (configurable via `JWT_EXPIRES_IN`).
-- Refresh token TTL: 7 days (configurable via `JWT_REFRESH_EXPIRES_IN`).
-- JWT payload: `{ sub: userId, tenantId, role, jti }`.
-- JWT secret loaded from `SecretProvider` in `JwtStrategy`.
-- Refresh token: 48-byte random (96 hex chars); SHA-256 hashed for storage.
-  Each use marks `used=true` and issues a new pair. Reuse → 401.
-- `JwtAuthGuard` extends NestJS `AuthGuard('jwt')`.
-
-### API Key Authentication
-- Header: `X-API-Key`.
-- Format: `bk_{env}_{prefix8}_{secret32}`.
-- Prefix (8 chars) stored in plaintext for O(1) lookup by `keyPrefix` index.
-- Secret (32 chars) hashed with argon2id; never stored in plaintext.
-- `ApiKeyAuthGuard` validates format, prefix lookup, hash verify, status and expiry.
-- On success: populates `request.apiKey` (full `ApiKey` entity) and
-  `request.user = { tenantId }` for downstream interceptor compatibility.
-
-### Authorization (current state)
-- **Tenant isolation** is the primary and only enforced authorization boundary.
-  `TenantContext` + `TenantAwarePrismaRepository` prevent any cross-tenant data access.
-- **Role-based access control (RBAC):** JWT carries `role` in payload but no
-  `RolesGuard` or `@Roles()` decorator is implemented. All roles have equivalent access.
-- **API key scope enforcement:** `scopes` field exists in `ApiKey` entity and `api_keys`
-  table but no `ScopeGuard` is implemented. All valid API keys have full access.
-
-### Password / Hash Security
-- Passwords hashed with argon2id (`argon2` npm v0.40, type `argon2id`).
-- API key secrets hashed with argon2id.
-- Refresh tokens hashed with SHA-256 (rotation provides security; not a secret value).
-- No plaintext credentials are logged or stored.
-
----
-
-## 10. Events and Background Processing
-
-### Domain Events
-- `TenantCreatedEvent` is the only implemented domain event.
-- Raised in `Tenant.create()`, accumulated in `AggregateRoot._domainEvents`.
-- No event bus, publisher, or subscriber exists in the system.
-- Events are never dispatched; accumulation is structural scaffolding only.
-
-### Background Processing
-- `worker.main.ts` starts a NestJS application context but registers no job handlers.
-- `QueueModule` is not imported in `AppModule`; pg-boss is never started.
-- `PgBossJobQueue` and `InMemoryJobQueue` exist and are unit-tested.
-- No background jobs are scheduled or processed in Fase 0.
-
----
-
-## 11. Containers and Deployment
-
-### Dockerfile (3 stages)
+### Dockerfile (3-stage multi-stage)
 
 | Stage | Base image | Purpose |
 |---|---|---|
-| `deps` | `node:20-alpine` | Install all deps (including dev); installs `python3 make g++` for argon2 native module |
-| `builder` | `node:20-alpine` | `prisma generate` + `npm run build` + `npm prune --production` |
-| `runner` | `node:20-alpine` | Minimal image; non-root user `billing:billing` (uid/gid 1001) |
+| `deps` | `node:20-alpine` | Install all deps + native build tools |
+| `builder` | `node:20-alpine` | Generate Prisma client, compile TypeScript, prune dev deps |
+| `runner` | `node:20-alpine` | Minimal production image; non-root user `billing:1001` |
 
-- Default CMD: `node dist/bootstrap/api.main.js`.
-- Worker service overrides CMD to `node dist/bootstrap/worker.main.js`.
-- Docker `HEALTHCHECK` on `/health` every 30s (10s timeout, 30s start period, 3 retries).
+Container runs as user `billing` (UID 1001, GID 1001). Port 3000. HEALTHCHECK via `wget`.
 
-### docker-compose.yml
+### docker-compose.yml (development stack)
 
-| Service | Image | Exposed Port | Health |
-|---|---|---|---|
-| `postgres` | `postgres:15-alpine` | 5432 | `pg_isready -U billing -d billing_dev` |
-| `localstack` | `localstack/localstack:3` | 4566 | curl `/_localstack/health` |
-| `billing-api` | Built from `Dockerfile` (target: `runner`) | 3000 | wget `/health` |
-| `billing-worker` | Built from `Dockerfile` (target: `runner`) | none | none |
-
-- No Redis (ADR-003: queue via pg-boss on the same PostgreSQL instance).
-- `billing-api` and `billing-worker` depend on `postgres` with `service_healthy`.
-
-### CI/CD
-- Implementation report (TASK-017) states a GitHub Actions pipeline was created with
-  5 gates: `lint` → `typecheck` → `test` → `build` → `e2e`.
-- **No `.github/workflows/` directory is present in the repository on disk.**
-  The CI file may not have been committed. Status: unverified.
-
----
-
-## 12. Current Testing Strategy
-
-### Unit Tests — 14 suites, 95 tests
-
-| Suite | File | Tests |
+| Service | Image | Notable config |
 |---|---|---|
-| ValueObject | `shared/domain/__tests__/value-object.spec.ts` | 5 |
-| AggregateRoot | `shared/domain/__tests__/aggregate-root.spec.ts` | 7 |
-| TenantContext | `infrastructure/tenant/__tests__/tenant-context.spec.ts` | 7 |
-| Tenant entity | `identity/domain/__tests__/tenant.entity.spec.ts` | 6 |
-| TenantSlug VO | `identity/domain/__tests__/tenant-slug.vo.spec.ts` | 6 |
-| IdentificationNumber VO | `companies/domain/__tests__/identification-number.vo.spec.ts` | 14 |
-| CreateTenantHandler | `identity/application/__tests__/create-tenant.handler.spec.ts` | 5 |
-| LoginHandler | `identity/application/__tests__/login.handler.spec.ts` | 4 |
-| ApiKey entity | `api-keys/domain/__tests__/api-key.entity.spec.ts` | 7 |
-| AuditService | `audit/application/__tests__/audit.service.spec.ts` | 2 |
-| CorrelationIdInterceptor | `api/interceptors/__tests__/correlation-id.interceptor.spec.ts` | 2 |
-| InMemoryJobQueue | `infrastructure/queue/__tests__/in-memory-job-queue.spec.ts` | 3 |
-| MockHaciendaAdapter | `infrastructure/integrations/hacienda/__tests__/mock-hacienda.spec.ts` | 9 |
-| EnvSecretProvider | `infrastructure/secrets/__tests__/env-secret-provider.spec.ts` | 3 |
+| `postgres` | `postgres:15-alpine` | Health check; `billing_dev` database |
+| `localstack` | `localstack/localstack:3` | S3 only; health check |
+| `billing-api` | Built from Dockerfile | `NODE_ENV=production`; S3 storage; `CORS_ALLOWED_ORIGINS` env var |
+| `billing-worker` | Built from Dockerfile | No HTTP port; same storage + DB config |
 
-Test runner: Jest v29 + `ts-jest`. All 95 pass per implementation report.
+`CORS_ALLOWED_ORIGINS` defaults to `http://localhost:3000` in docker-compose (non-wildcard, satisfies Joi production rule).
 
-### E2E Tests — 4 suites
+Hacienda circuit breaker vars (`HACIENDA_CB_FAILURE_THRESHOLD`, `HACIENDA_CB_RESET_TIMEOUT_MS`, `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND`) are configurable via environment in docker-compose.
 
-| Suite | Tests | Coverage |
-|---|---|---|
-| `health.e2e-spec.ts` | 3 | `/health`, `/health/ready`, `/health/live` |
-| `auth.e2e-spec.ts` | 5 | Login, 401 denial (no enumeration), refresh, rotation |
-| `api-keys.e2e-spec.ts` | 6 | Create, list, revoke, idempotency, correlation ID |
-| `tenant-isolation.e2e-spec.ts` | 4 | Cross-tenant company and API key isolation |
+### CI Pipeline (`.github/workflows/ci.yml`)
 
-E2E tests require a live PostgreSQL database (`DATABASE_URL`).
-Config: `test/jest-e2e.json`. Factories: `test/helpers/test-factories.ts`.
-
-### Testing gaps (identified)
-- No repository-level integration tests with Prisma (repositories covered by E2E only).
-- No test for `TenantAwarePrismaRepository` isolation at unit level.
-- `HaciendaApiAdapter` real HTTP integration not tested.
-- `S3StorageAdapter` not integration-tested (LocalStack available but not wired to tests).
-- No migration tests.
-
----
-
-## 13. Behavior to Preserve
-
-The following behaviors are correct and must not be altered:
-
-1. **Tenant isolation:** All tenant-scoped queries include `WHERE tenant_id = $tenantId`
-   via `TenantAwarePrismaRepository.applyTenantFilter()`.
-2. **argon2id hashing:** All passwords and API key secrets are hashed with argon2id exclusively.
-3. **Refresh token rotation:** Every use of a refresh token marks it `used=true` and
-   issues a new pair. Token reuse → 401.
-4. **Audit fire-and-forget:** Audit log failures do not fail the HTTP request.
-5. **DomainException mapping:** `GlobalExceptionFilter` maps `DomainException` subclasses
-   to their declared `httpStatus` and `code`. Unknown exceptions → 500 without stack trace
-   in production.
-6. **No email enumeration:** `LoginHandler` returns the same 401 `INVALID_CREDENTIALS`
-   for non-existent user, wrong password, or inactive user.
-7. **API key secret shown once:** Raw secret is returned only in `CreateApiKeyHandler`
-   response. Not stored in plaintext; cannot be retrieved later.
-8. **Revoke idempotency:** Revoking an already-revoked API key is a no-op (BR-005).
-9. **TenantSlug immutability:** Slug cannot be changed after creation (BR-008).
-10. **Correlation ID propagation:** `X-Correlation-ID` is generated if absent and always
-    returned in the response header.
-11. **Swagger in non-production only:** Disabled when `NODE_ENV=production`.
-12. **Joi config validation at startup:** Application fails to start on invalid env config.
-13. **No domain → framework imports:** ESLint `no-restricted-imports` rule enforces that
-    domain modules cannot import `@prisma/client`, `@nestjs/*`, `pg-boss`, or `axios`.
-
----
-
-## 14. Known Defects
-
-None verified. The implementation report records zero pre-existing failures and zero new
-failures after Fase 0.
-
-Four deviations from the original plan were self-corrected during implementation:
-1. `TenantController` now requires `JwtAuthGuard` (early version was unauthenticated).
-2. `LoginHandler` reads JWT expiry from `ConfigService` (early version had hardcoded `'15m'`).
-3. `TenantContextInterceptor` uses `lastValueFrom()` (deprecated `toPromise()` replaced).
-4. ESLint override includes `test/**` to allow Prisma usage in E2E factories.
-
-All four corrected before Fase 0 completion.
-
----
-
-## 15. Architectural Debt
-
-| ID | Severity | Description | Location |
+| Job | Depends on | PostgreSQL service | Notes |
 |---|---|---|---|
-| AD-001 | Low | `StorageModule` is `@Global` but NOT imported in `AppModule`. STORAGE_PORT is unavailable to any module. | `src/infrastructure/storage/storage.module.ts` |
-| AD-002 | Low | `QueueModule` is NOT imported in `AppModule`. pg-boss is never started; no jobs can be enqueued or processed. | `src/infrastructure/queue/queue.module.ts` |
-| AD-003 | Low | `HaciendaModule` is NOT imported in `AppModule`. HACIENDA_PORT is unreachable from use cases. | `src/infrastructure/integrations/hacienda/hacienda.module.ts` |
-| AD-004 | Low | `TenantCreatedEvent` is raised and stored in aggregate but never published. No event dispatcher exists. | `src/modules/identity/domain/events/` |
-| AD-005 | Low | `tenant-context.middleware.ts` exists but is unused (dead file). Active mechanism is `TenantContextInterceptor`. | `src/infrastructure/tenant/tenant-context.middleware.ts` |
-| AD-006 | Low | `TenantModule` (83 bytes) exists but is minimal and not imported anywhere. `TenantContext` is a static utility class. | `src/infrastructure/tenant/tenant.module.ts` |
-| AD-007 | Medium | Role-based access control not enforced. `role` is in JWT payload but no `RolesGuard` exists. | Application-wide |
-| AD-008 | Medium | API key scope enforcement not implemented. `scopes` field exists in domain and DB but no `ScopeGuard` is wired. | `src/api/guards/api-key-auth.guard.ts` |
-| AD-009 | Medium | No rate limiting on auth endpoints. Brute-force attacks on `/api/v1/auth/login` are not throttled. | `src/modules/identity/infrastructure/http/auth.controller.ts` |
-| AD-010 | Medium | No CORS configuration. Browser clients cannot make cross-origin requests. | `src/bootstrap/api.main.ts` |
-| AD-011 | Low | `XmlSignerPort` has no implementation. XAdES spike (ADR-005) not yet started. | `src/infrastructure/signing/` |
-| AD-012 | Low | No database-level integration tests for Prisma repositories. Repository correctness relies on E2E tests. | `test/` |
-| AD-013 | Low | CI/CD workflow (TASK-017) claimed as completed but no `.github/workflows/` directory exists on disk. | `.github/workflows/ci.yml` (missing) |
-| AD-014 | Low | No mechanism to clean up expired or used `refresh_tokens` rows. Table will grow unbounded. | `prisma/schema.prisma` (`refresh_tokens`) |
+| `lint` | — | No | ESLint + `npx prisma generate` |
+| `typecheck` | — | No | tsc --noEmit + `npx prisma generate` |
+| `test` | lint, typecheck | Yes (`billing_test`) | Jest unit tests; `SECRET_PROVIDER=env` |
+| `build` | lint, typecheck | No | `npm run build` |
+| `e2e` | test, build | Yes (`billing_e2e`) | Full E2E; `USE_REAL_HACIENDA=false` |
 
 ---
 
-## 16. Security Risks
+## 12. Current testing strategy
 
-| ID | Severity | Description | Status |
-|---|---|---|---|
-| SEC-001 | Medium | No rate limiting on `POST /api/v1/auth/login` or `POST /api/v1/auth/refresh`. Susceptible to brute-force. | Deferred to Fase 1 |
-| SEC-002 | Medium | No CORS policy configured. Any origin can make requests. | Deferred; must resolve before any browser client connects |
-| SEC-003 | Low | `JWT_SECRET` has an insecure development default. Enforced ≥ 32 chars only in production via Joi. | Acceptable; production safeguarded |
-| SEC-004 | Low | `docker-compose.yml` uses hardcoded PostgreSQL password (`billing_password`). | Dev-only; not used in production |
-| SEC-005 | Low | `worker.main.ts` has no HTTP server or health endpoint. No container-level liveness check for the worker. | Acceptable for Fase 0 (no job processing yet) |
-| SEC-006 | Low | `AuditLog.companyId` field is never populated by the current `AuditInterceptor`. Company-level audit trail absent. | By design for Fase 0 |
+### Unit tests (co-located in `__tests__/`)
 
----
+| Test file | What it tests |
+|---|---|
+| `config/config.validation.spec.ts` | Joi schema — 10 tests; CORS rules, JWT, CB defaults; no NestJS bootstrap |
+| `hacienda/hacienda-circuit-breaker.spec.ts` | State machine, configurable thresholds, rate limiter, retry logic |
+| `hacienda/hacienda-api.adapter.spec.ts` | HTTP adapter; BR-014 body discriminator; field mapping |
+| `hacienda/mock-hacienda.spec.ts` | Mock adapter contract compliance |
+| `api-keys/api-key.entity.spec.ts` | ApiKey entity lifecycle and invariants |
+| `companies/identification-number.vo.spec.ts` | IdentificationNumber validation rules |
+| `identity/tenant-slug.vo.spec.ts` | TenantSlug validation |
+| `identity/tenant.entity.spec.ts` | Tenant entity lifecycle |
+| `identity/create-tenant.handler.spec.ts` | CreateTenantHandler use case |
+| `identity/login.handler.spec.ts` | LoginHandler use case |
+| `shared/aggregate-root.spec.ts` | Base aggregate root |
+| `shared/value-object.spec.ts` | Base value object |
+| `interceptors/correlation-id.interceptor.spec.ts` | CorrelationId header behavior |
+| `guards/scope.guard.spec.ts` | ScopeGuard scope matching |
+| `audit/audit.service.spec.ts` | AuditService write behavior |
+| `queue/in-memory-job-queue.spec.ts` | InMemoryJobQueue adapter |
+| `secrets/env-secret-provider.spec.ts` | EnvSecretProvider adapter |
+| `tenant/tenant-context.spec.ts` | TenantContext lifecycle |
 
-## 17. Unknowns and Assumptions
+### E2E tests (`test/e2e/`)
 
-| ID | Area | Description |
+| File | Fase | Coverage |
 |---|---|---|
-| U-001 | CI/CD | GitHub Actions workflow was reported as implemented (TASK-017) but no `.github/` directory is visible on disk. Possibly not committed. |
-| U-002 | Specs directory | `specs/` directory listed as empty by tooling; however `specs/fase-0-foundation/implementation-report.md` was readable. Possible tooling filter on non-source directories. |
-| U-003 | Refresh token cleanup | No background job or DB retention policy exists to purge expired or used `refresh_tokens` rows. Table will grow unbounded. |
-| U-004 | pg-boss schema | `PgBossJobQueue` is defined but `QueueModule` is never imported. pg-boss system tables (created automatically by the library on first connection) may not be initialized in the database. |
-| U-005 | Hacienda real API | `HaciendaApiAdapter` is a stub. The real Hacienda authentication flow (OAuth2 + PKCS#12 certificate), endpoints, and rate limits are not yet defined in code. |
-| U-006 | Event publishing | No decision has been made on how `TenantCreatedEvent` or future domain events will be dispatched: in-process synchronous, via pg-boss, or external message bus. |
-| U-007 | `refresh_tokens.tenantId` | `tenantId` is stored in `refresh_tokens` for query efficiency but is not a foreign key to `tenants` in the migration SQL (only `userId` has a FK). Behavior on tenant deletion is undefined. |
+| `fase0/auth.e2e-spec.ts` | 0 | Login, refresh, invalid credentials |
+| `fase0/health.e2e-spec.ts` | 0 | Health endpoint status |
+| `fase0/api-keys.e2e-spec.ts` | 0 | API key create/list/revoke |
+| `fase0/tenant-isolation.e2e-spec.ts` | 0 | Cross-tenant data isolation |
+| `fase1/hacienda-endpoints.e2e-spec.ts` | 1 | Taxpayer, CABYS, exchange rate |
+| `fase1/scope-guard.e2e-spec.ts` | 1 | Scope enforcement |
+
+---
+
+## 13. Behavior to preserve
+
+1. **Multi-tenant data isolation**: All queries filter by `tenantId`. No cross-tenant access.
+2. **API key security**: Full secret shown once only; Argon2 hash stored; secret never recoverable.
+3. **Refresh token rotation**: Single-use; old token marked `used` before new one issued.
+4. **Hacienda contract isolation**: All Hacienda field names (`nombre`, `venta`, `compra`, `codigo`, `impuesto`) are confined to `HaciendaApiAdapter`. No Hacienda-internal names appear in API responses or use cases.
+5. **BR-014**: Hacienda taxpayer not-found is detected via `body.code === 404` (HTTP 200 with body discriminator), NOT via HTTP status code.
+6. **BR-015**: CABYS codes (13-digit numeric strings) must not be confused with economic activity codes (e.g., `"9609.0"`).
+7. **Audit immutability**: `audit_logs` is never updated or deleted at the application layer.
+8. **CORS fail-fast**: Production and staging environments must fail at startup if `CORS_ALLOWED_ORIGINS` is absent or set to `"*"`. No runtime fallback.
+9. **JWT minimum entropy**: Production requires `JWT_SECRET` >= 32 characters (Joi-enforced at startup).
+10. **Path traversal prevention**: `LocalStorageAdapter.resolveKey()` normalizes and strips leading `../` segments.
+
+---
+
+## 14. Known defects
+
+| ID | Severity | Location | Description |
+|---|---|---|---|
+| DEFECT-001 | Low | `api/filters/global-exception.filter.ts` | `GlobalExceptionFilter` reads `process.env.NODE_ENV` directly (`const isProduction = process.env.NODE_ENV === 'production'`). This bypasses the ConfigService pattern established by the hardening cycle. Functional, but architecturally inconsistent. |
+| DEFECT-002 | Medium | `bootstrap/worker.main.ts` | Worker process creates application context but registers no job handlers. It starts successfully but does nothing. This is intentional for Fase 0/1 but must be addressed before Fase 3 (async document processing). |
+
+---
+
+## 15. Architectural debt
+
+| ID | Severity | Location | Description |
+|---|---|---|---|
+| DEBT-001 | Low | `infrastructure/integrations/hacienda/hacienda.module.ts` | `CacheModule.register({ ttl: 3600000, max: 500 })` uses a hardcoded fallback TTL. Individual operations correctly override TTLs. The module-level default is only a fallback and is functionally correct, but the value is not validated by Joi. |
+| DEBT-002 | Medium | `modules/identity/domain/events/tenant-created.event.ts` | `TenantCreated` domain event is defined but never published or consumed. No event bus is wired. Domain events are effectively dead code at runtime. |
+| DEBT-003 | Low | `infrastructure/signing/ports/xml-signer.port.ts` | `XmlSignerPort` interface exists but has no adapter implementation. Required for Fase 3 document signing; currently unused. |
+| DEBT-004 | Medium | Rate limiter | `@nestjs/throttler` uses in-memory storage. State is lost on restart and does not propagate across multiple API instances. Acceptable for single-instance; must be addressed before horizontal scaling. |
+| DEBT-005 | Low | `prisma/seed.ts` | Seed script exists but its execution in CI/staging is not documented or automated. |
+
+---
+
+## 16. Security risks
+
+| ID | Severity | Finding | Status |
+|---|---|---|---|
+| SEC-001 | Medium | `GlobalExceptionFilter` reads `process.env.NODE_ENV` directly. If env is tampered after startup, the production/development branching in the filter could diverge from Joi-validated configuration. | Open (DEFECT-001) |
+| SEC-002 | Low | `docker-compose.yml` uses a predictable dev password (`billing_password`) with no enforcement of override via env var. Suitable for local dev only; must not be used in any shared environment. | Known; acceptable for dev |
+| SEC-003 | Low | Refresh tokens in DB are not automatically purged on expiry. Accumulated expired tokens increase table size but have no active security risk (hash comparison fails at application level). | Open; no cleanup job |
+| SEC-004 | Low | `@nestjs/throttler` in-memory rate limiting resets on restart. A motivated attacker could bypass auth rate limits by triggering a process restart. | Known limitation |
+| SEC-005 | Info | `SIGNED_*.xml` pattern added to `.gitignore` — fiscal documents cannot be accidentally committed. | ✅ Resolved (hardening) |
+| SEC-006 | Info | CORS wildcard now fails at startup in production/staging via Joi schema. No runtime console.warn fallback remains. | ✅ Resolved (hardening) |
+
+---
+
+## 17. Unknowns and assumptions
+
+| ID | Topic | Status |
+|---|---|---|
+| UNK-001 | JWT algorithm | Not explicitly set; defaults to HS256 via @nestjs/jwt. Verify if RS256 is required for Fase 2 external token validation or cross-service trust. |
+| UNK-002 | Refresh token cleanup | No cron job or background worker task purges expired refresh tokens. Behavior under large volumes is unverified. |
+| UNK-003 | pg-boss concurrent startup | PgBossJobQueue creates its schema on first startup. Concurrent API + Worker startup race condition is untested. |
+| UNK-004 | Hacienda OAuth (Fase 2) | The Hacienda authenticated submission API requires per-company OAuth tokens. Token acquisition, storage, and rotation mechanism are not yet designed. |
+| UNK-005 | Multi-instance rate limiting | If billing-api runs as multiple instances, throttler state is not shared. Redis or DB-backed throttler would be needed. |
+| UNK-006 | Prisma connection pooling | No explicit pool size configuration. Default Prisma behavior under concurrent load in production is not documented. |
