@@ -101,6 +101,10 @@ async function bootstrap(): Promise<void> {
       .addTag('Tenants', 'Tenant management (requires Bearer token)')
       .addTag('Companies', 'Company management (requires Bearer token)')
       .addTag('API Keys', 'API key management (requires Bearer token)')
+      .addTag(
+        'Hacienda Connection',
+        'Private Hacienda credential management (requires Bearer token)',
+      )
       .addTag('Taxpayers', 'Hacienda taxpayer lookup (requires X-API-Key with taxpayers:read)')
       .addTag('CABYS', 'CABYS catalogue lookup (requires X-API-Key with cabys:read)')
       .addTag(

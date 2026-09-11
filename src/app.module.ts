@@ -14,6 +14,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { TaxpayersModule } from './modules/taxpayers/taxpayers.module';
 import { CabysModule } from './modules/cabys/cabys.module';
 import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
+import { HaciendaConnectionModule } from './modules/hacienda-connection/hacienda-connection.module';
 import { HealthController } from './api/health/health.controller';
 import { PrismaHealthIndicator } from './api/health/indicators/prisma.health-indicator';
 import { CorrelationIdInterceptor } from './api/interceptors/correlation-id.interceptor';
@@ -61,6 +62,7 @@ import { ConfigService } from '@nestjs/config';
     IdentityModule,
     CompaniesModule,
     ApiKeysModule,
+    HaciendaConnectionModule,
 
     // Fase 1: Hacienda query endpoints
     TaxpayersModule,
