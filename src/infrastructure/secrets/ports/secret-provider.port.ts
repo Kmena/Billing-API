@@ -5,6 +5,8 @@ export interface SecretProvider {
    * The secret value is NEVER logged, even in debug mode.
    */
   getSecret(key: string): Promise<string>;
+  storeSecret(key: string, value: string): Promise<void>;
+  deleteSecret(key: string): Promise<void>;
 }
 
 export const SECRET_PROVIDER = Symbol('SecretProvider');

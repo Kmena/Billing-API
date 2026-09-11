@@ -45,10 +45,10 @@ enum CompanyStatus {
 }
 
 enum IdentificationType {
-  FISICA   // 01 – Cédula física (CR)
+  FISICA // 01 – Cédula física (CR)
   JURIDICA // 02 – Cédula jurídica (CR)
-  DIMEX    // 03 – DIMEX (extranjeros residentes)
-  NITE     // 04 – NITE
+  DIMEX // 03 – DIMEX (extranjeros residentes)
+  NITE // 04 – NITE
 }
 
 enum ApiKeyStatus {
@@ -64,35 +64,50 @@ enum ApiKeyEnv {
 
 // Fase 1: Hacienda verification outcome for company creation
 enum HaciendaVerificationStatus {
-  VERIFIED    // Taxpayer found and confirmed in Hacienda
-  NOT_FOUND   // Hacienda returned not-found (body code=404)
+  VERIFIED // Taxpayer found and confirmed in Hacienda
+  NOT_FOUND // Hacienda returned not-found (body code=404)
   UNAVAILABLE // HTTP 429, timeout, or transient 5xx from Hacienda
-  ERROR       // Unexpected / unclassified failure
-  SKIPPED     // Verification intentionally skipped (reserved for future use)
+  ERROR // Unexpected / unclassified failure
+  SKIPPED // Verification intentionally skipped (reserved for future use)
 }
 
 // ADR-009: Three-level audit retention classification
 enum EventClass {
   FISCAL_AUDIT // >= 5 years — fiscal lifecycle traceability
-  TECHNICAL    // configurable — general operational events
-  SECURITY     // configurable — security-related events
+  TECHNICAL // configurable — general operational events
+  SECURITY // configurable — security-related events
+}
+
+enum HaciendaConnectionStatus {
+  NOT_CONFIGURED
+  PENDING_VALIDATION
+  CONNECTED
+  INVALID_CREDENTIALS
+  UNAVAILABLE
+  DISABLED
+}
+
+enum HaciendaEnvironment {
+  PRODUCTION
+  SANDBOX
 }
 
 // ─── TENANT ─────────────────────────────────────────────────────────────────
 
 model Tenant {
-  id        String       @id @db.Uuid
-  name      String       @db.VarChar(255)
-  slug      String       @unique @db.VarChar(100)
-  status    TenantStatus @default(ACTIVE)
-  plan      TenantPlan   @default(TRIAL)
-  metadata  Json?
-  createdAt DateTime     @default(now()) @map("created_at")
-  updatedAt DateTime     @updatedAt @map("updated_at")
-  companies Company[]
-  users     User[]
-  apiKeys   ApiKey[]
-  auditLogs AuditLog[]
+  id                  String               @id @db.Uuid
+  name                String               @db.VarChar(255)
+  slug                String               @unique @db.VarChar(100)
+  status              TenantStatus         @default(ACTIVE)
+  plan                TenantPlan           @default(TRIAL)
+  metadata            Json?
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  companies           Company[]
+  users               User[]
+  apiKeys             ApiKey[]
+  auditLogs           AuditLog[]
+  haciendaConnections HaciendaConnection[]
 
   @@map("tenants")
 }
@@ -100,41 +115,63 @@ model Tenant {
 // ─── COMPANY ────────────────────────────────────────────────────────────────
 
 model Company {
-  id                   String             @id @db.Uuid
-  tenantId             String             @db.Uuid @map("tenant_id")
-  legalName            String             @db.VarChar(255) @map("legal_name")
-  tradeName            String?            @db.VarChar(255) @map("trade_name")
-  identificationType   IdentificationType @map("identification_type")
-  identificationNumber String             @db.VarChar(20) @map("identification_number")
-  status                      CompanyStatus              @default(ACTIVE)
+  id                         String                      @id @db.Uuid
+  tenantId                   String                      @map("tenant_id") @db.Uuid
+  legalName                  String                      @map("legal_name") @db.VarChar(255)
+  tradeName                  String?                     @map("trade_name") @db.VarChar(255)
+  identificationType         IdentificationType          @map("identification_type")
+  identificationNumber       String                      @map("identification_number") @db.VarChar(20)
+  status                     CompanyStatus               @default(ACTIVE)
   // Fase 1: Hacienda verification fields (nullable — backward-compatible with Fase 0 records)
-  haciendaName                String?                    @db.VarChar(255) @map("hacienda_name")
-  haciendaVerifiedAt          DateTime?                  @map("hacienda_verified_at")
-  haciendaVerificationStatus  HaciendaVerificationStatus? @map("hacienda_verification_status")
-  createdAt                   DateTime                   @default(now()) @map("created_at")
-  updatedAt                   DateTime                   @updatedAt @map("updated_at")
-  tenant                      Tenant                     @relation(fields: [tenantId], references: [id])
-  authorizedApiKeys           ApiKeyCompany[]
+  haciendaName               String?                     @map("hacienda_name") @db.VarChar(255)
+  haciendaVerifiedAt         DateTime?                   @map("hacienda_verified_at")
+  haciendaVerificationStatus HaciendaVerificationStatus? @map("hacienda_verification_status")
+  createdAt                  DateTime                    @default(now()) @map("created_at")
+  updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
+  authorizedApiKeys          ApiKeyCompany[]
+  haciendaConnections        HaciendaConnection[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
   @@map("companies")
 }
 
+model HaciendaConnection {
+  id                      String                   @id @db.Uuid
+  tenantId                String                   @map("tenant_id") @db.Uuid
+  companyId               String                   @map("company_id") @db.Uuid
+  environment             HaciendaEnvironment      @map("environment")
+  status                  HaciendaConnectionStatus @default(NOT_CONFIGURED) @map("status")
+  secretReference         String                   @map("secret_reference") @db.VarChar(500)
+  lastValidatedAt         DateTime?                @map("last_validated_at")
+  lastSuccessfulAuthAt    DateTime?                @map("last_successful_auth_at")
+  lastValidationErrorCode String?                  @map("last_validation_error_code") @db.VarChar(100)
+  createdAt               DateTime                 @default(now()) @map("created_at")
+  updatedAt               DateTime                 @updatedAt @map("updated_at")
+  tenant                  Tenant                   @relation(fields: [tenantId], references: [id])
+  company                 Company                  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, environment])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("hacienda_connections")
+}
+
 // ─── USER ───────────────────────────────────────────────────────────────────
 
 model User {
-  id           String     @id @db.Uuid
-  tenantId     String     @db.Uuid @map("tenant_id")
-  email        String     @db.VarChar(255)
-  passwordHash String     @map("password_hash") @db.VarChar(255)
-  firstName    String?    @db.VarChar(100) @map("first_name")
-  lastName     String?    @db.VarChar(100) @map("last_name")
-  role         UserRole   @default(MEMBER)
-  status       UserStatus @default(ACTIVE)
-  lastLoginAt  DateTime?  @map("last_login_at")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id            String         @id @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  email         String         @db.VarChar(255)
+  passwordHash  String         @map("password_hash") @db.VarChar(255)
+  firstName     String?        @map("first_name") @db.VarChar(100)
+  lastName      String?        @map("last_name") @db.VarChar(100)
+  role          UserRole       @default(MEMBER)
+  status        UserStatus     @default(ACTIVE)
+  lastLoginAt   DateTime?      @map("last_login_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
   tenant        Tenant         @relation(fields: [tenantId], references: [id])
   refreshTokens RefreshToken[]
 
@@ -146,21 +183,21 @@ model User {
 // ─── API KEY ────────────────────────────────────────────────────────────────
 
 model ApiKey {
-  id          String       @id @db.Uuid
-  tenantId    String       @db.Uuid @map("tenant_id")
-  name        String       @db.VarChar(255)
-  environment ApiKeyEnv    @default(LIVE) @map("environment")
-  keyPrefix   String       @unique @db.VarChar(16) @map("key_prefix")
-  keyHash     String       @db.VarChar(255) @map("key_hash")
+  id          String          @id @db.Uuid
+  tenantId    String          @map("tenant_id") @db.Uuid
+  name        String          @db.VarChar(255)
+  environment ApiKeyEnv       @default(LIVE) @map("environment")
+  keyPrefix   String          @unique @map("key_prefix") @db.VarChar(16)
+  keyHash     String          @map("key_hash") @db.VarChar(255)
   scopes      String[]
-  status      ApiKeyStatus @default(ACTIVE)
-  expiresAt   DateTime?    @map("expires_at")
-  lastUsedAt  DateTime?    @map("last_used_at")
-  revokedAt   DateTime?    @map("revoked_at")
-  revokedBy   String?      @db.Uuid @map("revoked_by")
-  createdAt   DateTime     @default(now()) @map("created_at")
-  updatedAt   DateTime     @updatedAt @map("updated_at")
-  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  status      ApiKeyStatus    @default(ACTIVE)
+  expiresAt   DateTime?       @map("expires_at")
+  lastUsedAt  DateTime?       @map("last_used_at")
+  revokedAt   DateTime?       @map("revoked_at")
+  revokedBy   String?         @map("revoked_by") @db.Uuid
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
   companies   ApiKeyCompany[]
   auditLogs   AuditLog[]
 
@@ -172,8 +209,8 @@ model ApiKey {
 // ─── API KEY ↔ COMPANY (N:M) ───────────────────────────────────────────────
 
 model ApiKeyCompany {
-  apiKeyId  String  @db.Uuid @map("api_key_id")
-  companyId String  @db.Uuid @map("company_id")
+  apiKeyId  String  @map("api_key_id") @db.Uuid
+  companyId String  @map("company_id") @db.Uuid
   apiKey    ApiKey  @relation(fields: [apiKeyId], references: [id])
   company   Company @relation(fields: [companyId], references: [id])
 
@@ -185,14 +222,14 @@ model ApiKeyCompany {
 // Stores hashed refresh tokens. On use, old token is marked used and a new one issued.
 
 model RefreshToken {
-  id         String   @id @db.Uuid
-  userId     String   @db.Uuid @map("user_id")
-  tenantId   String   @db.Uuid @map("tenant_id")
-  tokenHash  String   @unique @db.VarChar(255) @map("token_hash")
-  used       Boolean  @default(false)
-  expiresAt  DateTime @map("expires_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-  user       User     @relation(fields: [userId], references: [id])
+  id        String   @id @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash") @db.VarChar(255)
+  used      Boolean  @default(false)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([expiresAt])
@@ -205,17 +242,17 @@ model RefreshToken {
 
 model AuditLog {
   id            String     @id @db.Uuid
-  tenantId      String?    @db.Uuid @map("tenant_id")
-  companyId     String?    @db.Uuid @map("company_id")
-  apiKeyId      String?    @db.Uuid @map("api_key_id")
+  tenantId      String?    @map("tenant_id") @db.Uuid
+  companyId     String?    @map("company_id") @db.Uuid
+  apiKeyId      String?    @map("api_key_id") @db.Uuid
   actor         String?    @db.VarChar(255) // userId | apiKeyPrefix | "system"
   action        String     @db.VarChar(255) // "api-key.created" | "user.login"
   resource      String?    @db.VarChar(255) // "ApiKey:uuid" | "Tenant:uuid"
   endpoint      String?    @db.VarChar(500)
-  httpMethod    String?    @db.VarChar(10) @map("http_method")
+  httpMethod    String?    @map("http_method") @db.VarChar(10)
   statusCode    Int?       @map("status_code")
-  ipAddress     String?    @db.VarChar(45) @map("ip_address")
-  correlationId String?    @db.VarChar(36) @map("correlation_id")
+  ipAddress     String?    @map("ip_address") @db.VarChar(45)
+  correlationId String?    @map("correlation_id") @db.VarChar(36)
   durationMs    Int?       @map("duration_ms")
   eventClass    EventClass @default(TECHNICAL) @map("event_class")
   metadata      Json?

@@ -36,4 +36,14 @@ describe('EnvSecretProvider', () => {
       delete process.env.EMPTY_SECRET_KEY;
     });
   });
+  it('stores, overwrites, and deletes in-memory secrets without changing process.env', async () => {
+    await provider.storeSecret('hacienda-conn/test', 'first');
+    await provider.storeSecret('hacienda-conn/test', 'second');
+
+    expect(await provider.getSecret('hacienda-conn/test')).toBe('second');
+    expect(process.env['hacienda-conn/test']).toBeUndefined();
+
+    await provider.deleteSecret('hacienda-conn/test');
+    await expect(provider.getSecret('hacienda-conn/test')).rejects.toThrow('is not defined');
+  });
 });

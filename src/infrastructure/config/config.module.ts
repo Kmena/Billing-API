@@ -7,6 +7,7 @@ import authConfig from './auth.config';
 import storageConfig from './storage.config';
 import secretsConfig from './secrets.config';
 import haciendaConfig from './hacienda.config';
+import haciendaAuthConfig from './hacienda-auth.config';
 
 export { validationSchema } from './config.validation-schema';
 
@@ -14,7 +15,15 @@ export { validationSchema } from './config.validation-schema';
   imports: [
     NestConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, databaseConfig, authConfig, storageConfig, secretsConfig, haciendaConfig],
+      load: [
+        appConfig,
+        databaseConfig,
+        authConfig,
+        storageConfig,
+        secretsConfig,
+        haciendaConfig,
+        haciendaAuthConfig,
+      ],
       validationSchema,
       validationOptions: {
         abortEarly: true,
