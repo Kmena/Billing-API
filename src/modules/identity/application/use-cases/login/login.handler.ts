@@ -10,6 +10,7 @@ import {
   REFRESH_TOKEN_REPOSITORY,
 } from '../../../domain/ports/refresh-token.repository';
 import { InvalidCredentialsException } from '../../../domain/exceptions/invalid-credentials.exception';
+import { addAuthDurationToDate } from '../shared/auth-token-duration';
 
 export interface LoginCommand {
   readonly tenantId: string;
@@ -33,7 +34,7 @@ export interface JwtPayload {
 @Injectable()
 export class LoginHandler {
   private readonly jwtExpiresIn: string;
-  private readonly refreshExpiresInDays: number;
+  private readonly jwtRefreshExpiresIn: string;
 
   constructor(
     @Inject(USER_REPOSITORY)
@@ -44,8 +45,7 @@ export class LoginHandler {
     private readonly configService: ConfigService,
   ) {
     this.jwtExpiresIn = this.configService.get<string>('auth.jwtExpiresIn') ?? '15m';
-    const refreshExp = this.configService.get<string>('auth.jwtRefreshExpiresIn') ?? '7d';
-    this.refreshExpiresInDays = parseInt(refreshExp.replace('d', ''), 10) || 7;
+    this.jwtRefreshExpiresIn = this.configService.get<string>('auth.jwtRefreshExpiresIn') ?? '7d';
   }
 
   async execute(command: LoginCommand): Promise<LoginResult> {
@@ -83,8 +83,7 @@ export class LoginHandler {
     const refreshTokenRaw = crypto.randomBytes(48).toString('hex');
     const refreshTokenHash = crypto.createHash('sha256').update(refreshTokenRaw).digest('hex');
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + this.refreshExpiresInDays);
+    const expiresAt = addAuthDurationToDate(new Date(), this.jwtRefreshExpiresIn);
 
     await this.refreshTokenRepository.save({
       tokenHash: refreshTokenHash,

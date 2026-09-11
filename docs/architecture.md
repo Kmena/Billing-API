@@ -1,382 +1,259 @@
 # Architecture
 
-> **Scope:** Active architecture governing the Billing system as of the `pre-fase-2-hardening` implementation cycle (Fase 0 + Fase 1 + hardening).
-> This document describes only implemented, currently operative architecture and active decisions.
-> Future-state proposals belong in `docs/action-plan.md` and `docs/future-architecture.md`.
+> **Synchronized:** post `pre-fase-2-hardening`.
+> This document describes only the architecture currently implemented or actively governing the system through explicit decisions. Future-state proposals belong in `docs/action-plan.md` and `docs/future-architecture.md`.
 
 ---
 
-## 1. Purpose and scope
+## 1. Purpose and Scope
 
-This document is the authoritative reference for:
-- The current active architectural style and module boundaries
-- Enforced dependency rules
-- Current domain map and responsibilities
-- Active architectural decisions that govern the system today
-- Known architectural limitations
+This document is the authoritative record of:
+- The architectural style and module boundaries **currently implemented**.
+- The dependency rules **currently enforced**.
+- The active decisions that **currently govern** the system.
+- Known limitations that affect the current architecture.
 
-**In-scope:** Everything implemented through Fase 1 + pre-fase-2-hardening.
-**Out-of-scope:** Fase 2 HaciendaConnection, Fase 3+ document submission, UI layers.
+It does not document proposed future states, aspirational bounded contexts, or unapproved changes.
 
 ---
 
-## 2. Current active architecture summary
+## 2. Current Active Architecture Summary
 
-Billing is a **NestJS 10 modular monolith** structured according to **hexagonal architecture** (ports and adapters).
+Billing is an **API-first modular monolith** built with NestJS / TypeScript / Prisma / PostgreSQL.
 
-Key properties of the current architecture:
-- All business domains are compiled into a single deployable artifact
-- The HTTP API server and background worker are separate OS processes launched from the same compiled code
-- Configuration is centrally validated at process startup by a standalone Joi schema; invalid or insecure configuration causes immediate startup failure
-- Domain logic is framework-free; the domain layer has no NestJS, Prisma, or Axios dependencies
-- All external integration field names are confined to adapter implementations; no external field names leak into the domain or application layers
-- Tenant isolation is enforced at the persistence layer in every repository
+The architectural style is **hexagonal (ports and adapters)**, applied incrementally per module. The domain layer is isolated from infrastructure. Application use cases coordinate domain objects through port interfaces. Infrastructure adapters implement those ports.
+
+Two separate runtime processes are built from the same codebase:
+- **API process** (`api.main.ts`) — serves HTTP, manages CORS, authentication, rate limiting, Swagger, and global interceptors.
+- **Worker process** (`worker.main.ts`) — bootstraps NestJS application context; no job handlers are implemented yet.
 
 ---
 
-## 3. Active architectural style and module boundaries
+## 3. Active Architectural Style and Module Boundaries
 
-### Overall style
+**Style:** Modular monolith. No microservices.
 
+**Hexagonal implementation per business module:**
 ```
-NestJS Modular Monolith
-  └── Hexagonal Architecture (Ports and Adapters)
-        ├── Domain layer (framework-free)
-        ├── Application layer (use-case handlers; NestJS-injectable but not NestJS-dependent)
-        └── Infrastructure layer (adapters, controllers, Prisma repos)
+modules/{name}/
+  domain/           ← entities, value objects, exceptions, repository port interfaces
+  application/      ← use-case handlers (single execute() method, inject ports only)
+  infrastructure/
+    http/           ← controllers + DTOs (input adapters)
+    persistence/    ← Prisma repositories (output adapters)
+    auth/           ← auth adapters (HaciendaConnection only)
 ```
 
-No microservices. No event bus. No CQRS framework (manual command/query pattern only).
+**Cross-cutting infrastructure** (`src/infrastructure/`) is decoupled from all business modules:
+- `config/` — Joi-validated typed ConfigModule
+- `database/` — PrismaService, TenantAwarePrismaRepository
+- `integrations/hacienda/` — HaciendaPort, adapters, HaciendaCircuitBreaker
+- `queue/` — JobQueuePort, PgBossJobQueue, InMemoryJobQueue
+- `secrets/` — SecretProviderPort, EnvSecretProvider, AwsSsmSecretProvider
+- `signing/ports/` — XmlSignerPort (stub only, no adapter)
+- `storage/` — StoragePort, LocalStorageAdapter, AwsS3StorageAdapter
+- `tenant/` — TenantContext (AsyncLocalStorage)
 
-### Layer rules (enforced)
-
-| Rule | Enforcement mechanism |
-|---|---|
-| Domain must not import NestJS, Prisma, Axios, or any infrastructure | Code structure; verified by ESLint import rules |
-| Application layer must not import controllers, Prisma client, or HTTP libraries | Code structure |
-| Controllers must not contain business logic | Code review convention |
-| Repository ports (output ports) are defined in the domain layer | File location: `domain/ports/` |
-| Prisma repository adapters are in the infrastructure layer | File location: `infrastructure/persistence/` |
-| External API field names are confined to the adapter implementation | BR-012 (Hacienda) |
-| ConfigService is the sole configuration source in bootstrap and application code | Established by pre-fase-2-hardening; one known violation: DEFECT-001 |
-
-### Module boundary map
-
-```
-src/
-├── api/                    ← Cross-cutting HTTP (no business logic)
-│     guards/               ← ApiKeyAuthGuard, JwtAuthGuard, ScopeGuard, ApiKeyThrottlerGuard
-│     filters/              ← GlobalExceptionFilter
-│     interceptors/         ← CorrelationIdInterceptor, TenantContextInterceptor, AuditInterceptor
-│     strategies/           ← JwtStrategy
-│     health/               ← HealthController
-│
-├── bootstrap/              ← Process entry points only (api.main.ts, worker.main.ts)
-│
-├── infrastructure/         ← Shared cross-cutting adapters (owned by no single domain)
-│     config/               ← Joi schema + NestJS ConfigModule + typed config factories
-│     database/             ← PrismaService + TenantAwarePrismaRepository
-│     integrations/hacienda/ ← HaciendaPort + adapters + HaciendaCircuitBreaker
-│     queue/                ← JobQueuePort + PgBoss + InMemory adapters
-│     secrets/              ← SecretProviderPort + Env + SSM adapters
-│     signing/              ← XmlSignerPort (stub, no adapter)
-│     storage/              ← StoragePort + LocalStorage + S3 adapters
-│     tenant/               ← TenantContext
-│
-└── modules/                ← Business domains (each self-contained hexagon)
-      identity/             → Core: tenants, users, auth
-      companies/            → Core: company management
-      api-keys/             → Core: API key lifecycle
-      audit/                → Supporting: audit trail
-      cabys/                → Supporting: CABYS catalog queries
-      exchange-rates/       → Supporting: exchange rate queries
-      taxpayers/            → Supporting: taxpayer lookup queries
-      shared/               → Generic: base domain classes
-```
+**HTTP cross-cutting** (`src/api/`):
+- `guards/` — JwtAuthGuard, ApiKeyAuthGuard, ScopeGuard, ApiKeyThrottlerGuard
+- `filters/` — GlobalExceptionFilter
+- `interceptors/` — CorrelationIdInterceptor, TenantContextInterceptor, AuditInterceptor
+- `strategies/` — JwtStrategy (passport-jwt)
+- `decorators/` — @Scopes()
+- `health/` — HealthController (outside `/api/v1` prefix)
 
 ---
 
-## 4. Current domain map
+## 4. Current Domain Map
 
-| Domain | Classification | Bounded Context | Data Ownership |
+| Domain / Module | Classification | Responsibility | Code Location |
 |---|---|---|---|
-| Identity | **Core** | Identity | tenants, users, refresh_tokens |
-| Companies | **Core** | Companies | companies |
-| API Keys | **Core** | API Keys | api_keys, api_key_companies |
-| Audit | **Supporting** | Audit | audit_logs |
-| Hacienda Integration | **Supporting** | Hacienda | No owned tables; caches in-memory |
-| CABYS | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Exchange Rates | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Taxpayers | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Shared | **Generic** | — | No tables |
-
-**Cross-domain dependency rules:**
-- `Companies` uses `HaciendaPort` (injected) to verify taxpayer at creation time
-- `API Keys` uses `CompanyRepository` (injected) to validate company association
-- `Audit` has no dependency on other business domains; receives audit data via `AuditService`
+| Identity | Core-supporting | Tenant + user lifecycle, JWT auth, refresh tokens | `src/modules/identity` |
+| Companies | Core | Company aggregate, identification validation, Hacienda verification metadata | `src/modules/companies` |
+| API Keys | Core-supporting | External credential lifecycle, scopes, revocation, authentication | `src/modules/api-keys` |
+| Taxpayers | Supporting | Public Hacienda taxpayer lookup | `src/modules/taxpayers` |
+| CABYS | Supporting | Public CABYS catalogue lookup/search | `src/modules/cabys` |
+| Exchange Rates | Supporting | Public Hacienda exchange rate lookup | `src/modules/exchange-rates` |
+| Hacienda Connection | Core-enabling | Per-company Hacienda OIDC credential management, connection lifecycle | `src/modules/hacienda-connection` |
+| Audit | Generic-supporting | Append-only audit log, event classification, retention tagging | `src/modules/audit` |
+| Hacienda Integration | Generic-supporting | Outbound Hacienda API calls, resilience, mocking, caching | `src/infrastructure/integrations/hacienda` |
+| Shared Infrastructure | Generic | Config, DB, queue, secrets, signing (stub), storage, tenant context, health | `src/infrastructure`, `src/api` |
+| Shared Domain Primitives | Generic | AggregateRoot, BaseEntity, ValueObject, DomainEvent, DomainException | `src/modules/shared/domain` |
 
 ---
 
-## 5. Current runtime components and responsibilities
+## 5. Current Runtime Components and Responsibilities
 
-| Component | Process | Responsibilities |
+| Component | Entrypoint | Responsibility |
 |---|---|---|
-| `billing-api` | `node dist/bootstrap/api.main.js` | Serve HTTP requests; all inbound REST API; CORS; rate limiting; auth; audit |
-| `billing-worker` | `node dist/bootstrap/worker.main.js` | Infrastructure shell; no job handlers registered yet |
-| `PostgreSQL 15` | External service | Primary data store; pg-boss job queue schema |
-| `LocalStack` (dev) | External service | S3-compatible mock for development |
-| `AWS S3` (production) | External service | Object storage for signed documents (Fase 3+) |
-| `AWS SSM` (production) | External service | Secrets provider (optional; `env` used in dev/test) |
+| billing-api | `dist/bootstrap/api.main.js` | HTTP API, validation, guards, interceptors, CORS, Swagger (non-prod), health checks |
+| billing-worker | `dist/bootstrap/worker.main.js` | Application context bootstrap; no job handlers yet |
+| PostgreSQL 15 | External container | System of record; also pg-boss queue backend |
+| LocalStack / S3 | External container | Document storage mock (dev/test); not yet used for fiscal documents |
+| Hacienda Public API | `api.hacienda.go.cr` | Source for taxpayer, CABYS, exchange rate data (mock in dev/test) |
+| Hacienda Private IDP | `idp.comprobanteselectronicos.go.cr` | OIDC token issuance for authenticated Hacienda operations (mock in dev/test) |
 
 ---
 
-## 6. Current dependency rules
+## 6. Current Dependency Rules
 
-### Dependency flow (desired)
-
+### Intended Direction
 ```
-HTTP Client
-    │
-    ▼
-Input Adapter (Controller)
-    │
-    ▼
-Input Port (Use Case Handler)
-    │
-    ▼
-Domain (Entities, Value Objects, Domain Services)
-    │
-    ▼
-Output Port (Repository Interface / HaciendaPort / StoragePort)
-    ▲
-    │
-Output Adapter (Prisma Repo / HaciendaApiAdapter / S3StorageAdapter)
+HTTP Controller (Input Adapter)
+        ↓
+  Use Case Handler (Application)
+        ↓
+  Domain Entity / Value Object
+        ↓
+  Repository Port / External Port (Output Port interface)
+        ↑
+  Prisma Repository / API Adapter / Auth Adapter (Output Adapter)
 ```
 
-### Active enforced rules
+### Active Rules
+1. **Domain layer must not import:** NestJS decorators, Prisma types, ORM models, controllers, cloud SDKs, messaging frameworks, HTTP clients, or infrastructure configuration.
+2. **Application layer must not import:** Prisma types, HTTP request/response types, ORM models, or concrete adapter implementations.
+3. **Controllers must not contain business logic.** Parse → call handler → map to DTO.
+4. **Repositories must not make business decisions.** Query persistence only.
+5. **Port interfaces use Symbol tokens** (e.g., `COMPANY_REPOSITORY`, `HACIENDA_PORT`) — not class references.
 
-1. **Domain layer**: No imports from NestJS, Prisma, Axios, or any infrastructure package.
-2. **Application layer**: No imports from NestJS HTTP decorators, Prisma client, or HTTP libraries. Uses injected port interfaces only.
-3. **Controllers**: No business rules. Delegate entirely to use-case handlers.
-4. **Hacienda field names**: Only in `HaciendaApiAdapter` (adapter file + fixture files). Never in use cases, domain entities, or API DTOs (BR-012).
-5. **Config source in bootstrap/application**: Only `ConfigService`. No `process.env` reads outside `registerAs()` factories.
-6. **Configuration security**: Joi schema validates all env vars at startup. Application will not start with invalid config. CORS wildcard is rejected in production/staging.
-
-### Known active violation
-
-| ID | Location | Rule violated | Severity |
-|---|---|---|---|
-| DEFECT-001 | `api/filters/global-exception.filter.ts` | Reads `process.env.NODE_ENV` directly instead of using ConfigService | Low |
+### Active Deviations (Accepted Limitations)
+- Some application use-case handlers import NestJS `Logger` and `Injectable` — accepted; these are non-behavioral annotations.
+- `CreateCompanyHandler` imports `HaciendaUnavailableException` from the infrastructure layer to distinguish unavailability from other errors. This is a known boundary softness (tracked in TASK-010 as Proposed).
+- `HaciendaConnectionController` imports domain entity type `HaciendaConnection` for internal mapping — acceptable; the domain entity is not exposed directly in the response.
 
 ---
 
-## 7. Current database ownership and transaction boundaries
+## 7. Current Database Ownership and Transaction Boundaries
 
-### Ownership
-
-Each domain module owns and queries only its designated tables through its Prisma repository adapter. No cross-domain Prisma queries exist in the current implementation.
-
-| Module | Tables |
-|---|---|
-| Identity | `tenants`, `users`, `refresh_tokens` |
-| Companies | `companies` |
-| API Keys | `api_keys`, `api_key_companies` |
-| Audit | `audit_logs` |
-
-### Transaction boundaries
-
-- All current use cases operate within single-table transactions (Prisma default implicit transaction per operation).
-- No cross-table, cross-domain transaction spans are used.
-- Audit log writes are independent fire-and-forget operations (via `AuditInterceptor`).
-
-### Schema version
-
-PostgreSQL schema version 1.1 (ADR-009: `event_class` in `audit_logs` from migration 001).
-Two applied migrations:
-1. `20250001000000_initial_foundation` — all Fase 0 tables
-2. `20250002000000_company_hacienda_fields` — nullable Hacienda verification columns on `companies`
-
-### Integrity constraints active
-
-- All FKs enforced at PostgreSQL level (ON DELETE RESTRICT or CASCADE where noted)
-- Unique indexes: tenant slug, user email per tenant, company identification per tenant, API key prefix, refresh token hash
-- ENUMs: all status fields use PostgreSQL ENUMs (type-safe)
-- `audit_logs`: no FK enforcement on `company_id` column (column exists; no FK constraint in migration)
+- **Schema:** Centralized in `prisma/schema.prisma`. All migrations applied via Prisma migrate.
+- **Module ownership:** Each module's Prisma repository owns the mapping between its domain entities and Prisma models.
+- **Cross-module data access:** Modules never read another module's tables directly. Use cases access other modules through exported handlers (e.g., `ConfigureConnectionHandler` injects `GetCompanyHandler`).
+- **Tenant-scoped tables:** All tables except `tenants` include `tenant_id` with a foreign key. `TenantAwarePrismaRepository.applyTenantFilter()` enforces this consistently.
+- **Transaction boundaries:** Currently implicit — each use case executes one or more repository calls sequentially without explicit Prisma transactions. Multi-step operations (e.g., configure + audit) are not atomic (known limitation).
+- **Audit log:** Write-once via `AuditService.record()`. No UPDATE or DELETE exposed in `PrismaAuditLogRepository`. DB-level enforcement is absent (AUD-DB01).
 
 ---
 
-## 8. Current API and integration contracts
+## 8. Current API and Integration Contracts
 
-### REST API contract
+### HTTP API
+- **Prefix:** `/api/v1` for all business endpoints.
+- **Unprefixed:** `/health`, `/health/ready`, `/health/live`.
+- **Auth schemes:** Bearer JWT (management), `X-API-Key` (fiscal query endpoints).
+- **Rate limiting:** Layer A — 100 req/min per API key (ThrottlerModule, `api` throttler). Layer B — 10 req/min per IP on `/auth/login` and `/auth/refresh` (`auth` throttler).
+- **Standard error envelope:** `{ error: { code, message, correlationId, timestamp, details? } }`
+- **Swagger:** Available at `/api/docs` when `NODE_ENV !== 'production'`.
 
-| Property | Value |
-|---|---|
-| Base path | `/api/v1` |
-| Health path | `/health` (excluded from prefix) |
-| Content type | `application/json` |
-| Auth headers | `Authorization: Bearer <jwt>` or `X-API-Key: <key>` |
-| Idempotency | `Idempotency-Key` header accepted (infrastructure present; not enforced in Fase 0/1) |
-| Correlation | `X-Correlation-ID` (generated if absent; echoed in response) |
-| Error shape | `{ error: { code: string, message: string, correlationId?, timestamp: string, details? } }` |
-| Swagger | `GET /api/docs` (non-production only) |
+### Hacienda Public API Contract
+- All outbound calls go through `HaciendaPort`. Adapters (real/mock) implement the port.
+- **Billing-owned field names only** (BR-012): no Hacienda Spanish field names (`nombre`, `venta`, `compra`, `codigo`, `impuesto`, `identificacion`) appear outside the adapter.
+- Not-found detection via `response.data.code === 404` in adapter (BR-014) — not via HTTP status.
 
-### Rate limiting contracts
-
-| Layer | Guard | Limit | Window |
-|---|---|---|---|
-| Layer A — API Key | `ApiKeyThrottlerGuard` | 100 requests | 60s (configurable) |
-| Layer B — IP (auth) | `@Throttle()` on `AuthController` | 10 requests | 60s (configurable) |
-
-### Hacienda integration contract (outbound)
-
-| Property | Value |
-|---|---|
-| Base URL | `https://api.hacienda.go.cr` (configurable `HACIENDA_API_BASE_URL`) |
-| Timeout | 10s default (configurable `HACIENDA_TIMEOUT_MS`) |
-| TLS | HTTPS enforced by URL scheme |
-| Retry 429 | Linear backoff: `HACIENDA_RETRY_429_BASE_DELAY_MS × (attempt + 1)` |
-| Retry 5xx | Fixed delay: `HACIENDA_RETRY_5XX_DELAY_MS` |
-| Circuit breaker | CLOSED → OPEN after `HACIENDA_CB_FAILURE_THRESHOLD` consecutive failures |
-| Reset | OPEN → HALF_OPEN after `HACIENDA_CB_RESET_TIMEOUT_MS` ms |
-| Rate limit | ≤ `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND` req/s (max 10; Joi-enforced) |
+### Hacienda Auth Contract
+- All auth operations go through `HaciendaAuthPort`. Adapters selected via `USE_REAL_HACIENDA` flag.
+- Raw access tokens are never persisted or returned to API clients.
+- `secretReference` stored in `hacienda_connections` is a pointer to credentials in `SecretProviderPort`, not the credentials themselves.
 
 ---
 
-## 9. Current security boundaries
+## 9. Current Security Boundaries
 
-### Authentication boundary
-
-```
-Public (no auth): POST /auth/login, POST /auth/refresh, GET /health, POST /tenants
-JWT-protected:    POST/GET /companies, POST/GET/DELETE /api-keys, GET /tenants/:id
-API-Key-protected: GET /taxpayers/:id, GET /cabys/:code, GET /cabys?search=, GET /exchange-rates
-```
-
-### Authorization boundary
-
-- JWT endpoints: tenant-scoped — users can only access their own tenant's resources
-- API Key endpoints: scope-gated + company-authorized via `ScopeGuard`
-- No RBAC within tenants is enforced beyond the UserRole enum (read-only not yet gated)
-
-### Data isolation boundary
-
-`TenantAwarePrismaRepository` base class appends `tenantId` condition to all queries. This is the sole mechanism for multi-tenant isolation (no PostgreSQL row-level security).
-
-### Configuration security boundary
-
-Joi schema (`config.validation-schema.ts`) is the enforcement gate at startup:
-- `DATABASE_URL`: always required
-- `JWT_SECRET`: >= 32 chars in `production`; insecure default only in dev/test
-- `CORS_ALLOWED_ORIGINS`: required and non-wildcard in `production` and `staging`; defaults to `*` in dev/test
-- `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND`: capped at 10 (Hacienda API rate limit compliance)
-
-### Storage security boundary
-
-- All files stored privately (no public ACL)
-- Access via presigned URLs (S3 AWS SDK `getSignedUrl`) or HMAC-signed local URLs
-- `LocalStorageAdapter` prevents path traversal via `path.normalize` + leading `../` strip
+- **Passwords:** argon2id (never stored in plaintext)
+- **Refresh tokens:** SHA-256 hash stored; raw token returned once, never retrievable
+- **API key secrets:** argon2id hash stored; raw key returned once at creation, never retrievable
+- **JWT secret:** resolved via `SecretProviderPort` — not hardcoded in code
+- **Hacienda credentials:** stored via `SecretProviderPort`; only `secretReference` string in DB; never in API responses
+- **CORS production guard:** `CORS_ALLOWED_ORIGINS` must be an explicit non-wildcard origin in `production`/`staging`; app refuses to start otherwise (Joi fatal validation, pre-fase-2-hardening)
+- **Tenant isolation:** `AsyncLocalStorage` + `TenantAwarePrismaRepository.applyTenantFilter()` on every tenant-scoped query
+- **Scope enforcement:** `ScopeGuard` — AND semantics, fail-closed; no scope bypass possible
+- **No `helmet` middleware** (AUD-SEC01 — open)
+- **Cross-tenant read risk** on `GET /tenants/:id` (AUD-API01 — open)
+- **Swagger excluded from production:** no API schema exposure in production environments
 
 ---
 
-## 10. Current container and deployment architecture
+## 10. Current Container and Deployment Architecture
 
-### Image build
+### Dockerfile
+- Multi-stage (deps → builder → runner), Node 20 Alpine
+- `runner` stage: non-root user `billing:billing` (UID 1001), `ENV NODE_ENV=production`, `EXPOSE 3000`
+- `HEALTHCHECK`: `wget -qO- http://localhost:3000/health`
+- Default `CMD`: `node dist/bootstrap/api.main.js` (override to `worker.main.js` for worker)
 
-| Stage | Base | Output |
+### Docker Compose (development)
+- `postgres:15-alpine` with `billing_dev` database + health check
+- `localstack:3` with S3 only + health check
+- `billing-api` and `billing-worker` sharing the same image, different CMD
+- All circuit breaker parameters overridable via shell variables
+- `CORS_ALLOWED_ORIGINS` set via shell variable substitution (default: `http://localhost:3000`)
+
+### CI (GitHub Actions)
+- **Node:** 20, npm cache, `npm ci`
+- **Gates:** lint → typecheck → [test ‖ build] → e2e (all gates include `npx prisma generate`)
+- **No deployment gate** (AUD-D02)
+
+---
+
+## 11. Current Testing Strategy
+
+### Unit Tests
+- 163 tests, 24 suites under `src/`
+- Cover: domain invariants, value objects, use-case handlers (mocked ports), guards, interceptors, filter, config Joi schema, Hacienda adapters, circuit breaker state machine, tenant context, secret providers, queue adapters
+
+### E2E Tests
+- 7 suites under `test/e2e/` against real PostgreSQL
+- Use `test/helpers/test-factories.ts` for fixture setup
+- Validate: full authentication flows, API key lifecycle, scope enforcement, Hacienda public endpoints (mock), Hacienda connection lifecycle
+
+### Known Test Gaps
+- No tests for worker job handlers
+- No XmlSignerPort adapter tests
+- No fiscal document domain tests (not implemented)
+- No contract/schema tests for Hacienda API responses
+
+---
+
+## 12. Active Architectural Decisions
+
+| Decision | Description | Status |
 |---|---|---|
-| `deps` | `node:20-alpine` | All npm deps + native build tools |
-| `builder` | `node:20-alpine` | Compiled `dist/`, Prisma client, production `node_modules` |
-| `runner` | `node:20-alpine` | Final image; non-root `billing:1001`; port 3000 |
-
-### Runtime security (Dockerfile)
-
-- Non-root user enforced (`USER billing`)
-- Secrets injected via environment variables at container start; no secrets in image
-- HEALTHCHECK via `wget` on `/health`
-
-### Configuration injection model
-
-All runtime configuration is injected via environment variables. The Joi schema validates all variables at startup. No secrets are baked into the image.
-
-### CI/CD gates (`.github/workflows/ci.yml`)
-
-Gate sequence: `lint` + `typecheck` (parallel) → `test` + `build` (parallel) → `e2e`
-
-All gates must pass before the `e2e` job executes. No deployment step is automated in the current workflow.
+| DEC-001 | API key scopes use AND semantics (all declared scopes must be present) | Active |
+| DEC-002 | ScopeGuard is fail-closed: no API key present → deny if scopes declared | Active |
+| DEC-003 / FR-015 | Company creation must not fail due to Hacienda unavailability (best-effort verification) | Active |
+| DEC-004 | Hacienda verification applies to all identification types, not just JURIDICA | Active |
+| ADR-003 | No Redis — queue backend is pg-boss on the same PostgreSQL instance | Active |
+| ADR-004 | HaciendaPort abstracts all Hacienda calls; Billing-owned field names only (BR-012) | Active |
+| ADR-005 | XmlSignerPort contract defined; implementation deferred pending technical spike | Active (stub) |
+| ADR-009 | AuditLog has EventClass (FISCAL_AUDIT / TECHNICAL / SECURITY) for retention classification | Active |
+| — | Modular monolith before microservices | Active |
+| — | API prefix `/api/v1`; health endpoints unprefixed | Active |
+| — | Swagger disabled in production | Active |
+| — | JWT secret resolved via SecretProviderPort, not hardcoded | Active |
+| — | CORS_ALLOWED_ORIGINS must be explicit (non-wildcard) in production/staging (Joi fatal) | Active (pre-fase-2-hardening) |
+| — | HaciendaCircuitBreaker parameters fully configurable via ConfigService (7 env vars) | Active (pre-fase-2-hardening) |
+| — | config.validation-schema.ts is a standalone exported module (testable without NestJS) | Active (pre-fase-2-hardening) |
 
 ---
 
-## 11. Current testing strategy
+## 13. Known Architectural Limitations
 
-### Philosophy
-
-- Domain logic tested in isolation (no NestJS bootstrap, no database)
-- Configuration schema tested without NestJS bootstrap (import `validationSchema` directly)
-- Integration and E2E tests use real PostgreSQL; Hacienda always mocked
-
-### Test coverage by type
-
-| Type | Location | Framework |
-|---|---|---|
-| Unit (domain entities) | `modules/*/domain/__tests__/` | Jest |
-| Unit (use-case handlers) | `modules/*/application/__tests__/` | Jest |
-| Unit (infrastructure) | `infrastructure/**/__tests__/` | Jest |
-| Unit (API layer) | `api/**/__tests__/` | Jest |
-| Config validation | `infrastructure/config/__tests__/` | Jest + Joi (no NestJS) |
-| E2E | `test/e2e/fase*/` | Jest + Supertest + real PostgreSQL |
-
-### Hacienda in tests
-
-Hacienda is always mocked:
-- Unit tests: `MockHaciendaAdapter` or jest mocks
-- E2E tests: `USE_REAL_HACIENDA=false` → `MockHaciendaAdapter` selected at startup
+1. **No explicit transaction management:** Multi-step use cases (e.g., save + audit) are not wrapped in Prisma transactions. A failure after the first write could leave partial state.
+2. **AuditInterceptor eventClass hardcoded to TECHNICAL:** All HTTP events are recorded as `TECHNICAL`. Business-specific events (e.g., API key creation = SECURITY) emit audit records via direct `AuditService.record()` calls in use cases, not through the interceptor.
+3. **HaciendaTokenCache is single-process:** In-memory cache does not survive process restart or horizontal scaling. Accepted for current single-instance deployment.
+4. **Domain events not dispatched:** `TenantCreated` is defined but never published to any event bus. No event-driven integration exists.
+5. **Worker is a shell:** `worker.main.ts` exists and boots but processes no jobs. PgBoss is initialized but no handlers are attached.
+6. **No helmet middleware:** HTTP security headers are absent. Mitigated partially by CORS enforcement.
+7. **Cross-tenant read risk on GET /tenants/:id:** No ownership check validates that the requested tenant ID matches the authenticated user's tenant.
+8. **Application layer framework imports:** Some use-case handlers import NestJS `Logger` — acceptable as non-behavioral. `CreateCompanyHandler` imports `HaciendaUnavailableException` from infrastructure — a boundary softness.
 
 ---
 
-## 12. Active architectural decisions
+## 14. Open Decisions Requiring Clarification
 
-| ID | Decision | Rationale | Scope |
-|---|---|---|---|
-| ADR-003 | No Redis. Queue via pg-boss on same PostgreSQL. | Reduces operational complexity at current scale. | Queue |
-| ADR-009 | `event_class` column in `audit_logs` from the start. Three retention tiers: FISCAL_AUDIT, TECHNICAL, SECURITY. | Legal compliance for fiscal records. | Audit |
-| DEC-007 | Two-tier rate limiting: per-API-Key (throttler) + per-IP on auth endpoints. | Prevent API Key abuse and auth brute-force independently. | Security |
-| BR-012 | Hacienda field names confined to HaciendaApiAdapter only. | Contract isolation; Billing owns its API contract. | Hacienda |
-| BR-014 | Hacienda not-found detected via `body.code === 404`, not HTTP status. | Hacienda API quirk: HTTP 200 for not-found taxpayers. | Hacienda |
-| BR-015 | CABYS codes (13-digit) ≠ economic activity codes. | Distinct formats; must not be substituted. | Hacienda |
-| NFR-009 | All stored files are private. Access via signed URLs. | Security; no public object exposure. | Storage |
-| HARD-001 | Joi schema extracted to `config.validation-schema.ts` (standalone). | Enables unit testing of Joi rules without NestJS bootstrap. | Config |
-| HARD-002 | CORS wildcard is a startup-time fatal error in production/staging. | Eliminates warn-only fallback; fail-fast security policy. | Security |
-| HARD-003 | `api.main.ts` uses ConfigService exclusively (zero direct process.env reads). | Single configuration source of truth. | Bootstrap |
-| HARD-004 | HaciendaCircuitBreaker all 7 thresholds are configurable via env vars with safe defaults. | Enables per-environment tuning without code changes. | Hacienda |
-| HARD-005 | LocalStorageAdapter accepts config via constructor params (not process.env). | ConfigService → StorageModule → adapter; no Joi bypass. | Storage |
-| HARD-006 | `SIGNED_*.xml` added to `.gitignore`. | Prevent accidental commit of fiscal documents. | Security |
-| HARD-007 | `npx prisma generate` added to lint + typecheck CI jobs. | Eliminates type errors in lint/typecheck due to missing Prisma client. | CI |
-| HARD-008 | `USE_REAL_HACIENDA=false` explicitly set in E2E CI job. | Prevents accidental real Hacienda calls in CI. | CI |
-
----
-
-## 13. Known architectural limitations
-
-| ID | Limitation | Impact | Required for |
-|---|---|---|---|
-| LIM-001 | No event bus; domain events are defined but not published or consumed. | TenantCreated event is dead code at runtime. | Fase 4 (webhooks) |
-| LIM-002 | Rate limiter is in-memory (not shared across instances). | Cannot scale to multiple API instances with consistent rate limits. | Multi-instance deployment |
-| LIM-003 | Worker process registers no job handlers. | Worker is operational infrastructure with no actual behavior. | Fase 3 (async doc processing) |
-| LIM-004 | XmlSignerPort has no adapter implementation. | Document signing is not possible. | Fase 3 |
-| LIM-005 | No Prometheus metrics, no distributed tracing. | Observability limited to structured logs. | Production monitoring |
-| LIM-006 | No refresh token cleanup job. | Expired tokens accumulate in the database over time. | Operational hygiene |
-| LIM-007 | HaciendaModule CacheModule module-level TTL is hardcoded (1h). Individual ops override correctly. | Hardcoded value not validated by Joi; could diverge from actual cache behavior if adapter logic changes. | Config consistency |
-| LIM-008 | `GlobalExceptionFilter` reads `process.env.NODE_ENV` directly (DEFECT-001). | Architectural inconsistency; minor security edge case. | Config consistency |
-
----
-
-## 14. Open decisions requiring clarification
-
-| ID | Question | Why it matters |
-|---|---|---|
-| OD-001 | Is HS256 acceptable for production JWT, or is RS256 required for external token validation in Fase 2? | Affects HaciendaConnection OAuth token handling design. |
-| OD-002 | How are expired refresh tokens purged? Scheduled job, TTL-based cleanup, or manual? | Operational hygiene; uncontrolled growth in high-volume tenants. |
-| OD-003 | For multi-instance API deployment, will Redis be adopted for throttler state, or is single-instance the target? | Contradicts ADR-003 (no Redis); requires explicit decision before scaling. |
-| OD-004 | How will per-company Hacienda OAuth tokens be stored and refreshed in Fase 2? | Token rotation strategy; affects SecretsModule and HaciendaConnection design. |
-| OD-005 | Will pg-boss schema initialization race conditions (API + Worker simultaneous start) be resolved via migration or startup ordering? | Production reliability for worker deployment. |
-| OD-006 | Should Prisma connection pooling be explicitly configured for production? | Performance and stability under concurrent load. |
+1. **AUD-API01 fix scope:** Should `GET /tenants/:id` simply validate `id === req.user.tenantId`, or is there a future multi-tenant admin role that needs cross-tenant reads? Fix strategy depends on the answer.
+2. **AUD-DB01 approach:** DB-level append-only enforcement (PostgreSQL trigger vs. append-only role vs. RLS). Requires DBA/infra decision before implementation.
+3. **AUD-SEC02 resolution:** Should `HaciendaTokenCache` be backed by Redis, SSM, or PostgreSQL for multi-instance deployments? Depends on deployment topology decision.
+4. **XmlSignerPort technical spike (ADR-005):** Which XAdES-EPES library? `xmldsigjs`, `xades4j` (Java, via subprocess), `signpdf`? Spike results must feed `specs/fase-2-2-fiscal-document-core`.
+5. **Worker job handler design:** What jobs should the worker process? Design decisions required before `specs/fase-2-2-fiscal-document-core` implementation begins.
+6. **CD pipeline:** Is deployment managed externally or intentionally deferred? Repository contains no deployment step.

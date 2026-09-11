@@ -1,5 +1,25 @@
 import * as Joi from 'joi';
 
+const productionOrStaging = Joi.valid('production', 'staging');
+
+const haciendaAuthUrl = (defaultValue: string): Joi.Schema =>
+  Joi.when('NODE_ENV', {
+    is: productionOrStaging,
+    then: Joi.string()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string()
+      .uri({ scheme: ['https'] })
+      .default(defaultValue),
+  });
+
+const haciendaAuthClientId = (defaultValue: string): Joi.Schema =>
+  Joi.when('NODE_ENV', {
+    is: productionOrStaging,
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().trim().min(1).default(defaultValue),
+  });
+
 /**
  * Joi validation schema for all environment variables.
  * Exported separately so unit tests can validate rules without booting NestJS.
@@ -71,4 +91,18 @@ export const validationSchema = Joi.object({
   HACIENDA_RETRY_429_BASE_DELAY_MS: Joi.number().integer().positive().default(1000),
   HACIENDA_RETRY_5XX_COUNT: Joi.number().integer().positive().default(1),
   HACIENDA_RETRY_5XX_DELAY_MS: Joi.number().integer().positive().default(2000),
+
+  // Hacienda private IDP authentication
+  HACIENDA_IDP_PRODUCTION_URL: haciendaAuthUrl(
+    'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token',
+  ),
+  HACIENDA_IDP_SANDBOX_URL: haciendaAuthUrl(
+    'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token',
+  ),
+  HACIENDA_IDP_CLIENT_ID_PRODUCTION: haciendaAuthClientId('api-prod'),
+  HACIENDA_IDP_CLIENT_ID_SANDBOX: haciendaAuthClientId('api-stag'),
+  HACIENDA_AUTH_TIMEOUT_MS: Joi.number().integer().positive().default(10000),
+  HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS: Joi.number().integer().positive().default(30000),
+  HACIENDA_AUTH_RETRY_5XX_COUNT: Joi.number().integer().positive().default(1),
+  HACIENDA_AUTH_RETRY_5XX_DELAY_MS: Joi.number().integer().positive().default(2000),
 });

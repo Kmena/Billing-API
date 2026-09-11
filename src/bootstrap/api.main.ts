@@ -45,7 +45,7 @@ async function bootstrap(): Promise<void> {
   });
 
   // Global exception filter — FR-014
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter(nodeEnv));
 
   // Global validation pipe — FR from architecture § 8
   app.useGlobalPipes(

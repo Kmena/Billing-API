@@ -17,7 +17,10 @@ import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
-import type { HaciendaEnvironment } from '../../domain/entities/hacienda-connection.entity';
+import type {
+  HaciendaConnection,
+  HaciendaEnvironment,
+} from '../../domain/entities/hacienda-connection.entity';
 import { ConfigureConnectionHandler } from '../../application/use-cases/configure-connection/configure-connection.handler';
 import { GetConnectionHandler } from '../../application/use-cases/get-connection/get-connection.handler';
 import { ValidateConnectionHandler } from '../../application/use-cases/validate-connection/validate-connection.handler';
@@ -44,7 +47,13 @@ export class HaciendaConnectionController {
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
     @Body() body: ConfigureConnectionRequestDto,
   ) {
-    return this.configure.execute({ tenantId: req.user.tenantId, companyId, environment, ...body });
+    const connection = await this.configure.execute({
+      tenantId: req.user.tenantId,
+      companyId,
+      environment,
+      ...body,
+    });
+    return this.toResponseDto(connection);
   }
   @Get() @ApiOkResponse({ type: HaciendaConnectionResponseDto }) async get(
     @Param('companyId') companyId: string,
@@ -52,7 +61,7 @@ export class HaciendaConnectionController {
   ) {
     const result = await this.getConnection.execute(companyId, environment);
     if (!result) throw new NotFoundException({ code: 'HACIENDA_CONNECTION_NOT_FOUND' });
-    return result;
+    return this.toResponseDto(result);
   }
   @Post('validate')
   @HttpCode(HttpStatus.OK)
@@ -62,7 +71,8 @@ export class HaciendaConnectionController {
     @Param('companyId') companyId: string,
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
   ) {
-    return this.validate.execute(req.user.tenantId, companyId, environment);
+    const connection = await this.validate.execute(req.user.tenantId, companyId, environment);
+    return this.toResponseDto(connection);
   }
   @Delete()
   @HttpCode(HttpStatus.OK)
@@ -72,6 +82,22 @@ export class HaciendaConnectionController {
     @Param('companyId') companyId: string,
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
   ) {
-    return this.disable.execute(req.user.tenantId, companyId, environment);
+    const connection = await this.disable.execute(req.user.tenantId, companyId, environment);
+    return this.toResponseDto(connection);
+  }
+
+  private toResponseDto(connection: HaciendaConnection): HaciendaConnectionResponseDto {
+    return {
+      id: connection.id,
+      tenantId: connection.tenantId,
+      companyId: connection.companyId,
+      environment: connection.environment,
+      status: connection.status,
+      lastValidatedAt: connection.lastValidatedAt,
+      lastSuccessfulAuthAt: connection.lastSuccessfulAuthAt,
+      lastValidationErrorCode: connection.lastValidationErrorCode,
+      createdAt: connection.createdAt,
+      updatedAt: connection.updatedAt,
+    };
   }
 }

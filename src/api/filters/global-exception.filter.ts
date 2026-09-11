@@ -29,6 +29,8 @@ interface ErrorResponse {
 export class GlobalExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(GlobalExceptionFilter.name);
 
+  constructor(private readonly nodeEnv = 'development') {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
@@ -36,7 +38,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     const correlationId = request.correlationId;
     const timestamp = new Date().toISOString();
-    const isProduction = process.env.NODE_ENV === 'production';
+    const isProduction = this.nodeEnv === 'production';
 
     let statusCode: number;
     let code: string;
