@@ -1,9 +1,9 @@
 # Current State
 
-> **Synchronized:** post `pre-fase-2-hardening` — all implementation phases through this milestone are complete.
+> **Synchronized:** post `chore/docs-versioning` — all implementation phases through this milestone are complete.
 > **Validated baseline:** `npm test -- --silent` ✅ 163 tests / 24 suites; `npm run typecheck` ✅; `npm run lint:check` ✅; `npm run build` ✅.
-> **Audit score:** 8.2 / 10 (improved from 7.4 after pre-fase-2-hardening; no regressions).
-> **Audit report:** `docs/audit/current-code-audit.md` — referenced by the implementation agent but **not yet committed** to the repository (directory is empty).
+> **Audit score:** 8.8 / 10 (corrected from initial 8.2; CI/CD and Documentation dimensions had false-negative scores due to tool bug — see `docs/audit/current-code-audit.md`).
+> **Audit report:** `docs/audit/current-code-audit.md` — committed to the repository (commit `9854900`).
 
 ---
 
@@ -20,6 +20,7 @@ Billing is a multi-tenant SaaS platform for electronic invoicing (facturación e
 | fase-2-1-hacienda-connection | Per-company per-environment HaciendaConnection (configure/get/validate/disable), HaciendaTokenCache (in-memory), HaciendaOidcAuthAdapter + MockHaciendaAuthAdapter, AuditLog on all connection operations, HaciendaConnectionController (JWT-protected), XmlSignerPort stub |
 | post-fase-2-1-remediation | Auth token duration service, refresh token rotation improvement, GlobalExceptionFilter NODE_ENV fix, AuditInterceptor categorical action fix, E2E test factory (createTestCompany generates valid 10-digit JURIDICA IDs), HaciendaConnectionController response DTO fix, Docker Compose updates |
 | pre-fase-2-hardening | CORS production enforcement fatal startup error via Joi, HaciendaCircuitBreaker fully configurable via ConfigService (7 parameters), CI `npx prisma generate` in all jobs, `.env.local.example` documented (31+ env vars), Docker Compose CORS shell variable substitution |
+| chore/docs-versioning | `.gitignore` explicit policy: removed broad `docs/**` rule, changed `specs/**` → `specs/`. Project documentation now versioned: `changelog.md`, `coding-standards.md`, `future-architecture.md`, `docs/audit/current-code-audit.md` added to git. Local machine path sanitized from audit report. Audit score corrected from 8.2 to 8.8 (CI/CD and Documentation dimensions had false-negative scores). |
 
 **Not yet implemented:**
 - Fiscal document generation (XML, signing, Hacienda submission) — `specs/fase-2-2-fiscal-document-core` is the next planned phase.
@@ -491,7 +492,7 @@ Any authenticated HTTP request:
 
 | ID | Severity | Location | Description |
 |---|---|---|---|
-| DEFECT-001 | Medium | `src/modules/identity/application/use-cases/refresh-token/refresh-token.handler.ts:L91` | `expiresIn` in `RefreshTokenResult` is hardcoded to `15 * 60` (900s). Does not derive from `JWT_EXPIRES_IN` env var. If access token duration is changed via config, clients receive a stale `expiresIn` hint. |
+| DEFECT-001 | Medium | `src/modules/identity/application/use-cases/refresh-token/refresh-token.handler.ts:L98` and `src/modules/identity/application/use-cases/login/login.handler.ts` | `expiresIn` in `RefreshTokenResult` and `LoginResult` is hardcoded to `15 * 60` (900s) in both handlers. Does not derive from `JWT_EXPIRES_IN` env var. `auth-token-duration.ts` was added and correctly used to compute refresh token `expiresAt`, but the response hint field `expiresIn` still uses the literal `15 * 60` in both handlers. |
 
 ---
 
@@ -522,7 +523,7 @@ Any authenticated HTTP request:
 
 ## 17. Unknowns and Assumptions
 
-1. **Audit report file:** `docs/audit/current-code-audit.md` is referenced in the implementation context but not committed to the repository (directory is empty). Audit score and finding IDs are accepted as stated.
+1. **Audit score corrected:** `docs/audit/current-code-audit.md` is committed (commit `9854900`). Score corrected from 8.2 to 8.8 — the `baseline-audit-agent` tool returned empty listings for existing directories (environment bug); CI/CD scored 3.0 and Documentation scored 5.0 erroneously. Corrected scores: CI/CD 8.0 (pipeline fully committed, only missing CD deployment step), Documentation 7.0 (4 docs tracked; others gitignored by policy).
 2. **AUD-D02 (CD pipeline):** It is unknown whether a deployment pipeline exists externally. Assumed intentionally deferred.
 3. **Worker job handler design:** No specification exists for what jobs the worker processes. Assumed: fiscal document submission and Hacienda status polling are the expected use cases (Fase 2+).
 4. **XmlSignerPort library:** ADR-005 references a pending technical spike. Library selection (e.g., `xades4j`, `xmldsigjs`) has not been decided. No implementation is committed.
