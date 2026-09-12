@@ -92,6 +92,20 @@ enum HaciendaEnvironment {
   SANDBOX
 }
 
+enum FiscalDocumentType {
+  INVOICE
+  TICKET
+}
+
+enum FiscalDocumentStatus {
+  READY_FOR_XML
+}
+
+enum FiscalIdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
 // ─── TENANT ─────────────────────────────────────────────────────────────────
 
 model Tenant {
@@ -108,6 +122,10 @@ model Tenant {
   apiKeys             ApiKey[]
   auditLogs           AuditLog[]
   haciendaConnections HaciendaConnection[]
+  fiscalIssuancePoints FiscalIssuancePoint[]
+  fiscalSequences FiscalSequence[]
+  fiscalDocuments FiscalDocument[]
+  fiscalIdempotencyKeys FiscalIdempotencyKey[]
 
   @@map("tenants")
 }
@@ -131,10 +149,116 @@ model Company {
   tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
   authorizedApiKeys          ApiKeyCompany[]
   haciendaConnections        HaciendaConnection[]
+  fiscalIssuancePoints       FiscalIssuancePoint[]
+  fiscalSequences            FiscalSequence[]
+  fiscalDocuments            FiscalDocument[]
+  fiscalIdempotencyKeys      FiscalIdempotencyKey[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
   @@map("companies")
+}
+
+model FiscalIssuancePoint {
+  id           String              @id @db.Uuid
+  tenantId     String              @map("tenant_id") @db.Uuid
+  companyId    String              @map("company_id") @db.Uuid
+  environment  HaciendaEnvironment @map("environment")
+  branchCode   String              @map("branch_code") @db.Char(3)
+  terminalCode String              @map("terminal_code") @db.Char(5)
+  name         String?             @db.VarChar(120)
+  active       Boolean             @default(true)
+  isDefault    Boolean             @default(false) @map("is_default")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  company      Company             @relation(fields: [companyId], references: [id])
+  documents    FiscalDocument[]
+
+  @@unique([companyId, environment, branchCode, terminalCode])
+  @@index([tenantId, companyId, environment, active])
+  @@map("fiscal_issuance_points")
+}
+
+model FiscalSequence {
+  id           String              @id @db.Uuid
+  tenantId     String              @map("tenant_id") @db.Uuid
+  companyId    String              @map("company_id") @db.Uuid
+  environment  HaciendaEnvironment @map("environment")
+  branchCode   String              @map("branch_code") @db.Char(3)
+  terminalCode String              @map("terminal_code") @db.Char(5)
+  documentType FiscalDocumentType  @map("document_type")
+  nextValue    BigInt              @map("next_value")
+  lastAssigned BigInt?             @map("last_assigned")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  tenant       Tenant              @relation(fields: [tenantId], references: [id])
+  company      Company             @relation(fields: [companyId], references: [id])
+
+  @@unique([tenantId, companyId, environment, branchCode, terminalCode, documentType])
+  @@index([tenantId, companyId, environment])
+  @@map("fiscal_sequences")
+}
+
+model FiscalDocument {
+  id                    String               @id @db.Uuid
+  tenantId              String               @map("tenant_id") @db.Uuid
+  companyId             String               @map("company_id") @db.Uuid
+  environment           HaciendaEnvironment  @map("environment")
+  type                  FiscalDocumentType   @map("type")
+  status                FiscalDocumentStatus @default(READY_FOR_XML)
+  issuancePointId       String               @map("issuance_point_id") @db.Uuid
+  branchCode            String               @map("branch_code") @db.Char(3)
+  terminalCode          String               @map("terminal_code") @db.Char(5)
+  sequenceValue         BigInt               @map("sequence_value")
+  consecutive           String               @db.Char(20)
+  clave                 String               @unique @db.Char(50)
+  securityCode          String               @map("security_code") @db.Char(8)
+  situation             String               @default("1") @db.Char(1)
+  issueDate             DateTime             @default(now()) @map("issue_date")
+  issuerSnapshot        Json                 @map("issuer_snapshot")
+  receiverSnapshot      Json?                @map("receiver_snapshot")
+  currency              String               @db.Char(3)
+  exchangeRate          Decimal?             @map("exchange_rate") @db.Decimal(18, 5)
+  saleCondition         String               @map("sale_condition") @db.Char(2)
+  paymentMethod         String               @map("payment_method") @db.Char(2)
+  lines                 Json
+  totals                Json
+  idempotencyKey        String?              @map("idempotency_key") @db.VarChar(255)
+  requestHash           String?              @map("request_hash") @db.Char(64)
+  createdAt             DateTime             @default(now()) @map("created_at")
+  updatedAt             DateTime             @updatedAt @map("updated_at")
+  tenant                Tenant               @relation(fields: [tenantId], references: [id])
+  company               Company              @relation(fields: [companyId], references: [id])
+  issuancePoint         FiscalIssuancePoint  @relation(fields: [issuancePointId], references: [id])
+  idempotencyKeys       FiscalIdempotencyKey[]
+
+  @@index([tenantId, companyId, createdAt(sort: Desc)])
+  @@index([tenantId, companyId, status])
+  @@index([tenantId, companyId, idempotencyKey])
+  @@unique([tenantId, companyId, environment, consecutive])
+  @@map("fiscal_documents")
+}
+
+model FiscalIdempotencyKey {
+  id             String                  @id @db.Uuid
+  tenantId       String                  @map("tenant_id") @db.Uuid
+  companyId      String                  @map("company_id") @db.Uuid
+  key            String                  @db.VarChar(255)
+  apiKeyId       String?                 @map("api_key_id") @db.Uuid
+  operation      String                  @db.VarChar(60)
+  requestHash    String                  @map("request_hash") @db.Char(64)
+  status         FiscalIdempotencyStatus @default(IN_PROGRESS)
+  fiscalDocumentId String?               @map("fiscal_document_id") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at")
+  updatedAt      DateTime                @updatedAt @map("updated_at")
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id])
+  company        Company                 @relation(fields: [companyId], references: [id])
+  fiscalDocument FiscalDocument?         @relation(fields: [fiscalDocumentId], references: [id])
+  apiKey         ApiKey?                 @relation(fields: [apiKeyId], references: [id])
+
+  @@unique([tenantId, companyId, apiKeyId, operation, key])
+  @@map("fiscal_idempotency_keys")
 }
 
 model HaciendaConnection {
@@ -200,6 +324,7 @@ model ApiKey {
   tenant      Tenant          @relation(fields: [tenantId], references: [id])
   companies   ApiKeyCompany[]
   auditLogs   AuditLog[]
+  fiscalIdempotencyKeys FiscalIdempotencyKey[]
 
   @@index([tenantId, status])
   @@index([keyPrefix])

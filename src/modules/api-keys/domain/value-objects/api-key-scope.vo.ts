@@ -11,6 +11,8 @@ export const ALLOWED_API_KEY_SCOPES = [
   // Fase 2+ stubs — reserved but not yet active
   'invoices:read',
   'invoices:write',
+  'tickets:read',
+  'tickets:write',
   'documents:read',
   'documents:write',
 ] as const;
