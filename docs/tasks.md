@@ -1,292 +1,444 @@
 # Tasks
 
-> **Synchronized:** post `pre-fase-2-hardening`.
-> Tasks TASK-001 through TASK-007 are from previous implementation cycles. Statuses reflect the validated post-hardening baseline.
-> TASK-008 through TASK-017 are newly scoped proposed tasks for open audit findings.
-> All proposed tasks require explicit approval before implementation.
+> **Synchronized:** Documentation-only ownership reconciliation for canonical `specs/post-f2-2-remediation` by `sdd-implementation-agent-c13b28` on 2026-09-12. No production code, tests or Prisma migrations modified.
+> Current validation evidence reported by user: `npm ci`, Prisma generate/validate, clean `billing_e2e` reset plus migration deploy, lint/lint:check, typecheck, unit suite (181/28), build and full E2E (57/11) all pass; npm audit vulnerabilities remain pre-existing/out of scope. Latest Post-F2.2 continuation audit score: **9.0/10**. New future tasks below remain **Proposed** until explicitly approved.
 
 ---
 
-## TASK-005: Validate focused HaciendaConnection E2E after PostgreSQL unblock
+## TASK-024: Refresh architecture documentation after F2.2 implementation
 **Status:** Completed
-**Priority:** High
-**Domain:** Hacienda Connection / Companies Testing
-**Requirement:** Confirm HaciendaConnection E2E works with valid company identification fixtures.
-**Reason:** Direct regression target for the post-fase-2-1 DB/E2E blocker.
-**Current problem:** Resolved. E2E companies are now generated with valid 10-digit JURIDICA IDs.
-**Proposed change:** Completed by implementation cycle; no further production change proposed.
-**Affected files:** `test/helpers/test-factories.ts`, `test/e2e/fase2/hacienda-connection.e2e-spec.ts`
-**Dependencies:** PostgreSQL container readiness; Prisma migrations deployed.
-**Database impact:** None to schema.
+**Priority:** Medium
+**Domain:** Architecture Documentation
+**Requirement:** Phase 7 documentation refresh after implementation of `fase-2-2-fiscal-document-core`.
+**Reason:** Root architecture-facing docs were stale and still described F2.2 as future work.
+**Current problem:** Resolved by this documentation-only refresh.
+**Proposed change:** Completed update of current state, active architecture, action plan and tasks to reflect actual F2.2 state.
+**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`
+**Dependencies:** F2.2 implementation report and post-implementation audit.
+**Database impact:** None.
 **API impact:** None.
 **Container impact:** None.
-**Security impact:** None.
-**Acceptance criteria:** Focused HaciendaConnection E2E passes.
-**Required tests:** `npm run test:e2e -- hacienda-connection`
+**Security impact:** Documents that prior fiscal `securityCode`/`requestHash` response exposure has been corrected and records remaining follow-up tasks.
+**Acceptance criteria:** Docs distinguish implemented F2.2 behavior from proposed future work; no production code modified.
+**Required tests:** Documentation review only. No commands executed by this refresh.
 **Migration considerations:** None.
-**Rollback or mitigation:** Do not roll back — would reintroduce E2E blocker.
-**Risk:** Low (completed).
+**Rollback or mitigation:** Revert documentation files if inaccurate.
+**Risk:** Low.
 
 ---
 
-## TASK-006: Run full E2E and full quality gates after remediation
+## TASK-036: Document F2.2 hardening corrections
+**Status:** Completed
+**Priority:** Medium
+**Domain:** Architecture Documentation / Fiscal Documents
+**Requirement:** Refresh docs after hardening corrections for `fase-2-2-fiscal-document-core`.
+**Reason:** Corrected issues should not remain listed as open High risks.
+**Current problem:** Resolved by this documentation-only refresh.
+**Proposed change:** Completed documentation update reflecting response sanitization and idempotency scope hardening.
+**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`, `docs/future-architecture.md`.
+**Dependencies:** User-provided validation and final audit evidence.
+**Database impact:** Documentation records new migration `prisma/migrations/20260911143000_fiscal_idempotency_scope/migration.sql`.
+**API impact:** Documentation records that fiscal document responses remove `securityCode` and `requestHash`.
+**Container impact:** None.
+**Security impact:** Removes corrected response exposure from open High risks. Later Post-F2.2 continuation tests now also cover fiscal E2E/API security scenarios; remaining risk is explicit DTO/formal contract debt.
+**Acceptance criteria:** Corrected response exposure and idempotency-scope issues are marked closed/completed; remaining risks still documented.
+**Required tests:** Documentation review only. This agent did not execute validation commands.
+**Migration considerations:** None for docs.
+**Rollback or mitigation:** Revert documentation files if inaccurate.
+**Risk:** Low.
+
+---
+
+## TASK-042: Refresh architecture docs after Post-F2.2 remediation documentation reconciliation
+**Status:** Completed
+**Priority:** Medium
+**Domain:** Architecture Documentation / Fiscal Documents
+**Requirement:** Documentation ownership reconciliation after completed Post-F2.2 remediation tasks under canonical `specs/post-f2-2-remediation`.
+**Reason:** Root architecture-facing docs needed to reflect the confirmed implementation state, validation evidence and audit score for the fiscal continuation cycle.
+**Current problem:** Resolved by this documentation-only refresh.
+**Proposed change:** Updated current-state, active architecture, action plan, tasks, changelog and audit addendum to record canonical Post-F2.2 ownership, fiscal E2E/concurrency coverage, response sanitization, bigint serialization, pre-sequence idempotency reservation, final schema constraints and clean full-E2E validation.
+**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`, `docs/changelog.md`, `docs/audit/current-code-audit.md`.
+**Dependencies:** User-provided implementation summary, validation evidence and baseline audit result.
+**Database impact:** Documentation only; records clean `billing_e2e` reset and migration deploy evidence.
+**API impact:** Documentation only; records sanitized fiscal response behavior.
+**Container impact:** None.
+**Security impact:** Documentation records closure of fiscal response exposure and fiscal E2E security-evidence gaps for this scope; npm audit vulnerabilities remain open repository-level risk.
+**Acceptance criteria:** Architecture-facing docs distinguish actual completed Post-F2.2 behavior from remaining proposed Fase 1/future architecture work; no production code modified.
+**Required tests:** Documentation review only. This architecture agent did not execute validation commands.
+**Migration considerations:** None for docs.
+**Rollback or mitigation:** Revert documentation changes if inaccurate.
+**Risk:** Low.
+
+---
+
+## TASK-043: Final architecture documentation refresh for canonical Post-F2.2 remediation
+**Status:** Completed
+**Priority:** Low
+**Domain:** Architecture Documentation / Fiscal Documents
+**Requirement:** Final-only architecture refresh for canonical `specs/post-f2-2-remediation` after Post-F2.2 remediation completion and ownership reconciliation.
+**Reason:** Ensure architecture-facing docs cannot be misread as assigning Post-F2.2 ownership to historical Fase 1 records and confirm future-state documentation references the canonical spec.
+**Current problem:** Mostly resolved before this refresh; one future-architecture header still referenced the older F2.2 hardening refresh label and one historical Fase 1 implementation-report note could be read ambiguously.
+**Proposed change:** Completed documentation-only update to align final architecture-facing records with canonical Post-F2.2 ownership.
+**Affected files:** `docs/future-architecture.md`, `docs/changelog.md`, `specs/fase-1-hacienda-consultas/implementation-report.md`, `docs/tasks.md`.
+**Dependencies:** Canonical Post-F2.2 reconciliation and supplied validation/audit evidence.
+**Database impact:** None.
+**API impact:** None.
+**Container impact:** None.
+**Security impact:** None directly; preserves documentation of existing npm audit vulnerabilities as repository-level risk.
+**Acceptance criteria:** Future-state and historical Fase 1 docs consistently point to `specs/post-f2-2-remediation/` as canonical owner; no production code modified.
+**Required tests:** Documentation review only. This architecture refresh did not execute validation commands.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert documentation changes if inaccurate.
+**Risk:** Low.
+
+---
+
+## TASK-025: Add fiscal E2E/API characterization tests
+**Status:** Completed
+**Priority:** High
+**Domain:** Fiscal Documents / API / Security
+**Requirement:** F2.2 FR-021, FR-022, FR-023, FR-024, FR-025, FR-029; Post-F2.2 continuation tasks TASK-F2.2-003 through TASK-F2.2-007.
+**Reason:** Fiscal endpoint-level evidence was needed for creation, retrieval, authorization, idempotency, management boundaries and clean full-E2E execution.
+**Current problem:** Resolved for the completed Post-F2.2 continuation scope.
+**Proposed change:** Implemented fiscal E2E coverage for invoice/ticket workflows, retrieval, idempotency replay/conflict, negative authorization paths, type-specific scopes, tenant isolation, management endpoint boundaries and PostgreSQL-backed concurrency races.
+**Affected files:** `test/helpers/fiscal-e2e-helpers.ts`, `test/e2e/fase2/fiscal-documents.e2e-spec.ts`, `test/e2e/fase2/fiscal-management.e2e-spec.ts`, `test/e2e/fase2/fiscal-concurrency.e2e-spec.ts`, `src/modules/fiscal-documents/application/fiscal-document.service.ts`.
+**Dependencies:** Clean `billing_e2e` reset and applied migrations.
+**Database impact:** Test data only; no schema change in this continuation cycle. Service behavior now reserves idempotency before sequence allocation using PostgreSQL conflict-safe insert semantics.
+**API impact:** Fiscal responses are verified to omit `securityCode` and `requestHash`; top-level bigint fields serialize as strings.
+**Container impact:** None.
+**Security impact:** High positive impact by proving fiscal authorization boundaries and response sanitization.
+**Acceptance criteria:** Fiscal E2E suite covers happy/negative paths and passes on a clean database; full E2E suite no longer blocked by duplicate tenant slug.
+**Required tests:** Reported PASS: `npm run test:e2e -- --silent` (57 tests / 11 suites), `npm test -- --silent` (181 tests / 28 suites), plus lint, typecheck, build and Prisma gates.
+**Migration considerations:** Clean reset plus `npx prisma migrate deploy` reported PASS with 6 migrations applied.
+**Rollback or mitigation:** Revert continuation test/service changes if inaccurate; preserve current conflict-safe idempotency reservation behavior because it prevents sequence gaps on idempotency races.
+**Risk:** Low after validation; residual architectural risk is service size/maintainability.
+
+---
+
+## TASK-037: Verify and enforce auth endpoint rate limiting for Fase 1
+**Status:** Proposed
+**Priority:** High
+**Domain:** Identity/Auth / Security
+**Requirement:** Fase 1 layered rate limiting; authentication brute-force protection for `/auth/login` and `/auth/refresh`.
+**Reason:** Phase-specific audit found `@Throttle` decorators on `AuthController`, but no visible global `ThrottlerGuard`/`APP_GUARD` application in inspected code.
+**Current problem:** Auth endpoint rate limiting may not be enforced at runtime despite declared `@Throttle({ auth: { ttl: 60000, limit: 10 } })` metadata.
+**Proposed change:** First add a focused failing/passing characterization test for login/refresh throttling. If enforcement is inactive, apply the smallest approved NestJS throttler guard registration or auth-specific guard strategy and keep the public auth contract unchanged.
+**Affected files:** `src/app.module.ts`, `src/modules/identity/infrastructure/http/auth.controller.ts`, auth E2E tests under `test/e2e/**`, possibly test setup helpers.
+**Dependencies:** Approval to modify production code after characterization; clean/isolated E2E database recommended.
+**Database impact:** Test data only.
+**API impact:** Runtime behavior should return `429 TOO_MANY_REQUESTS` after the configured auth threshold; request/response success contracts remain unchanged.
+**Container impact:** None.
+**Security impact:** High positive impact; closes brute-force protection gap.
+**Acceptance criteria:** Login and refresh exceed-threshold tests prove 429 behavior; normal requests below threshold still work; global throttling does not unintentionally throttle skipped/non-auth endpoints.
+**Required tests:** Focused auth throttling E2E; `npm run lint:check`; `npm run typecheck`; unit suite; build; relevant E2E suite.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert guard registration if it causes broad endpoint regressions; keep tests documenting expected behavior before retrying with a narrower guard.
+**Risk:** Medium implementation risk; High security risk if left unresolved.
+
+---
+
+## TASK-038: Prove API-key per-key throttling and named-throttler semantics
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** API Keys / Hacienda Public Queries / Security
+**Requirement:** Fase 1 inbound per-API-key rate limiting for Hacienda query endpoints.
+**Reason:** `ApiKeyThrottlerGuard` is applied to Fase 1 controllers and tracks by API-key id, but phase audit flagged ambiguity around the named throttler bucket and actual threshold behavior.
+**Current problem:** The intended `api` throttler configuration may not be the bucket actually enforced by the inherited `ThrottlerGuard`; no threshold E2E currently proves configured behavior.
+**Proposed change:** Add endpoint-level tests with low test-only throttle limits to prove same-key 429 behavior and different-key independent buckets. If tests reveal incorrect bucket selection, make the guard's named-throttler behavior explicit in the smallest approved change.
+**Affected files:** `src/api/guards/api-key-throttler.guard.ts`, Fase 1 E2E tests, test configuration/helpers.
+**Dependencies:** Clean/isolated E2E database; TASK-037 may affect global throttling interactions.
+**Database impact:** Test API keys only.
+**API impact:** Runtime behavior should return 429 after configured per-key threshold; no successful response contract changes.
+**Container impact:** None.
+**Security impact:** Medium positive impact by limiting abusive API-key traffic and protecting Hacienda outbound capacity.
+**Acceptance criteria:** Tests prove configured per-key threshold, independent API-key buckets and IP fallback behavior if no key reaches throttler after auth failures where applicable.
+**Required tests:** Fase 1 throttling E2E; unit tests for tracker behavior if practical; lint/typecheck/unit/build gates.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert guard changes if threshold behavior regresses; retain characterization tests to guide a narrower fix.
+**Risk:** Medium.
+
+---
+
+## TASK-039: Add positive Fase 1 Hacienda endpoint E2E coverage
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Hacienda Public Queries / API Contracts
+**Requirement:** Fase 1 taxpayer, CABYS and exchange-rate endpoints must expose stable normalized Billing-owned contracts.
+**Reason:** Existing Fase 1 E2E files cover route registration, invalid input and missing/invalid API-key behavior, but positive endpoint response evidence is incomplete.
+**Current problem:** Audit evidence gaps remain for successful taxpayer lookup, CABYS direct lookup/search and exchange-rate response shapes.
+**Proposed change:** Add mock-adapter-backed positive E2E tests for `GET /api/v1/taxpayers/:identification`, `GET /api/v1/cabys/:code`, `GET /api/v1/cabys?search=...` and `GET /api/v1/exchange-rates`, including scope success and normalized field assertions.
+**Affected files:** `test/e2e/fase1/hacienda-endpoints.e2e-spec.ts`, fixtures/helpers if needed.
+**Dependencies:** Clean/isolated E2E database; stable mock Hacienda adapter fixtures.
+**Database impact:** Test tenant/company/API-key records only.
+**API impact:** None intended; tests document current public contract.
+**Container impact:** None.
+**Security impact:** Low/Medium positive impact by proving scoped positive access in addition to denial paths.
+**Acceptance criteria:** Positive E2E tests pass without external Hacienda calls; responses contain Billing-owned field names and no raw Hacienda DTO leakage.
+**Required tests:** Focused Fase 1 E2E; unit suite; lint/typecheck/build gates.
+**Migration considerations:** None.
+**Rollback or mitigation:** If tests reveal contract defects, document and split defect fixes into separate approved tasks.
+**Risk:** Low/Medium.
+
+---
+
+## TASK-040: Add Fase 1 CORS preflight E2E coverage
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** API / Browser Integration / Security
+**Requirement:** Fase 1 CORS configuration must enable browser clients safely with configured origins, methods and headers.
+**Reason:** CORS is configured in `src/bootstrap/api.main.ts`, but phase audit identified missing positive preflight evidence.
+**Current problem:** No current E2E verifies `OPTIONS` preflight behavior, allowed headers such as `X-API-Key` and `Idempotency-Key`, or credential/wildcard behavior.
+**Proposed change:** Add E2E tests bootstrapping the app with explicit test CORS settings and asserting preflight responses for allowed and, where supported by config, disallowed origins.
+**Affected files:** `test/e2e/**`, test app bootstrap helpers; production CORS code only if tests reveal a defect and a later approval permits correction.
+**Dependencies:** Test configuration strategy for `CORS_ALLOWED_ORIGINS`.
+**Database impact:** None.
+**API impact:** None intended; documents browser integration behavior.
+**Container impact:** None.
+**Security impact:** Medium positive impact by preventing unsafe CORS regressions.
+**Acceptance criteria:** Preflight tests prove expected `Access-Control-Allow-*` headers for configured origins/methods/headers and no credentials with wildcard configuration.
+**Required tests:** CORS E2E; lint/typecheck/unit/build gates.
+**Migration considerations:** None.
+**Rollback or mitigation:** If framework-level behavior is hard to assert in current test bootstrap, document limitation and add integration-level bootstrap test using `api.main.ts` equivalent config.
+**Risk:** Low/Medium.
+
+---
+
+## TASK-041: Characterize company Hacienda verification status outcomes
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Companies / Hacienda Integration / Persistence
+**Requirement:** Fase 1 company verification must persist typed outcomes: `VERIFIED`, `NOT_FOUND`, `UNAVAILABLE`, `ERROR`, and reserved `SKIPPED` behavior where applicable.
+**Reason:** Phase audit identified evidence gaps around company verification statuses.
+**Current problem:** Domain/schema fields exist, but E2E/integration evidence for all status mappings and non-blocking behavior is incomplete.
+**Proposed change:** Add tests using mock Hacienda outcomes to prove company creation persists expected `haciendaName`, `haciendaVerifiedAt` and `haciendaVerificationStatus` values, including non-blocking behavior for unavailable/error cases.
+**Affected files:** `test/e2e/**` or company application/integration tests; mock Hacienda adapter/test fixtures; production company code only if defects are discovered and separately approved.
+**Dependencies:** Ability to control Hacienda adapter outcome in tests.
+**Database impact:** Test company rows only.
+**API impact:** None intended; response/status fields become characterized.
+**Container impact:** None.
+**Security impact:** Low/Medium positive impact through data integrity and predictable external-integration failure handling.
+**Acceptance criteria:** Tests cover found, not-found, transient unavailable and unexpected error mappings; company creation remains non-blocking where specified; reserved `SKIPPED` semantics are either tested if reachable or documented as currently reserved.
+**Required tests:** Company verification application/integration or E2E tests; lint/typecheck/unit/build gates.
+**Migration considerations:** None.
+**Rollback or mitigation:** If tests reveal mismapping, split production fix into a small approved task and avoid changing existing migration history.
+**Risk:** Medium.
+
+---
+
+## TASK-026: Formalize fiscal response DTOs after response sanitization
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / API / Security
+**Requirement:** F2.2 FR-023, FR-024, FR-026, NFR-004; residual audit concern: response contract remains ad-hoc.
+**Reason:** Hardening corrections now remove `securityCode` and `requestHash` from fiscal document responses, but the response contract is still implemented as a compact sanitizer rather than explicit DTO classes/mappers.
+**Current problem:** Sensitive field exposure is corrected; residual debt is lack of stable documented response DTOs/OpenAPI response classes and regression tests for omitted fields.
+**Proposed change:** Add response DTOs/mappers for fiscal documents, issuance points and sequences. Public fiscal document responses must continue to omit `securityCode` and `requestHash` while exposing approved normalized fiscal fields such as `clave`, `consecutive`, status, snapshots, lines and totals.
+**Affected files:** `src/modules/fiscal-documents/infrastructure/http/dtos/fiscal-document.dtos.ts`, fiscal controllers, fiscal service return mapping or new mapper file, tests.
+**Dependencies:** TASK-025 fiscal E2E/API characterization recommended.
+**Database impact:** None.
+**API impact:** Yes — formalizes current sanitized response shape. Compatibility risk is lower because sensitive-field removal is already implemented.
+**Container impact:** None.
+**Security impact:** Medium positive impact by preventing regression and documenting public contract.
+**Acceptance criteria:** Explicit response DTOs/OpenAPI response decorators exist; fiscal responses continue to exclude `securityCode` and `requestHash`; tests assert response shape.
+**Required tests:** Fiscal controller/unit tests and E2E/API response assertions.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert mapper/DTO wiring if contract mismatch is found; preserve sanitizer until DTO tests pass.
+**Risk:** Low/Medium.
+
+---
+
+## TASK-027: Extract fiscal use cases and policies from compact service
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Architecture
+**Requirement:** Architectural objective: align fiscal module with repository modular hexagonal conventions; audit concern: compact Prisma-backed service divergence.
+**Reason:** `FiscalDocumentService` currently combines multiple responsibilities: validation, authorization, idempotency, sequence allocation, calculation, persistence and audit.
+**Current problem:** High cohesion risk and lower testability; use-case boundaries are implicit.
+**Proposed change:** Introduce focused application use cases/services while preserving public behavior: `CreateFiscalDocumentUseCase`, `GetFiscalDocumentUseCase`, `ConfigureDefaultIssuancePointUseCase`, `ConfigureFiscalSequenceUseCase`, `FiscalAuthorizationService`, `FiscalIdempotencyService`, and `FiscalCalculator` or equivalents.
+**Affected files:** `src/modules/fiscal-documents/application/**`, fiscal controllers, fiscal unit tests.
+**Dependencies:** TASK-025 characterization tests should be in place first.
+**Database impact:** None.
+**API impact:** None intended.
+**Container impact:** None.
+**Security impact:** Positive if authorization policy becomes explicit and testable.
+**Acceptance criteria:** Public fiscal behavior and tests remain unchanged; responsibilities are separated into focused classes; no domain helper imports framework/infrastructure.
+**Required tests:** Existing fiscal E2E/API tests, unit tests for new services/use cases, full unit suite.
+**Migration considerations:** None.
+**Rollback or mitigation:** Refactor incrementally; keep old service as facade until all tests pass.
+**Risk:** Medium.
+
+---
+
+## TASK-028: Extract fiscal persistence ports and Prisma adapters
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Persistence Architecture
+**Requirement:** Architectural objective: application layer should depend on output ports rather than concrete Prisma infrastructure.
+**Reason:** Current fiscal application service injects `PrismaService` directly.
+**Current problem:** Application logic is coupled to Prisma operations and raw SQL details, making isolated tests and future persistence changes harder.
+**Proposed change:** Define output ports for fiscal documents, issuance points, sequences and idempotency. Implement Prisma adapters that encapsulate Prisma queries and raw SQL atomic sequence allocation. Use dependency injection tokens following repository conventions.
+**Affected files:** `src/modules/fiscal-documents/domain/ports/**` or `application/ports/**`, `src/modules/fiscal-documents/infrastructure/persistence/**`, `src/modules/fiscal-documents/fiscal-documents.module.ts`, application use cases.
+**Dependencies:** TASK-027 recommended first; TASK-025 required for regression safety.
+**Database impact:** None if behavior-preserving.
+**API impact:** None.
+**Container impact:** None.
+**Security impact:** Neutral/positive through improved testability.
+**Acceptance criteria:** Fiscal application layer no longer imports `PrismaService`; raw SQL sequence allocation is isolated in a Prisma adapter; tests prove unchanged behavior.
+**Required tests:** Unit tests with mocked ports; integration tests for Prisma adapters and sequence allocation; fiscal E2E.
+**Migration considerations:** None.
+**Rollback or mitigation:** Preserve original Prisma queries until adapter tests pass; refactor one port at a time.
+**Risk:** Medium.
+
+---
+
+## TASK-029: Harden fiscal idempotency scope
+**Status:** Completed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Database / API
+**Requirement:** F2.2 FR-019 and FR-020 require idempotency scoped by tenant, company, actor/API key, operation and idempotency key.
+**Reason:** Prior implementation scoped idempotency by tenant+company+key only.
+**Current problem:** Resolved. Fiscal idempotency now includes `apiKeyId` and `operation` in Prisma schema, migration and service lookups/creates.
+**Proposed change:** Completed through forward-only migration `prisma/migrations/20260911143000_fiscal_idempotency_scope/migration.sql` and service/schema updates.
+**Affected files:** `prisma/schema.prisma`, `prisma/migrations/20260911143000_fiscal_idempotency_scope/migration.sql`, `src/modules/fiscal-documents/application/fiscal-document.service.ts`.
+**Dependencies:** F2.2 fiscal core migration.
+**Database impact:** Adds `api_key_id`, `operation`, API-key FK and unique index `(tenant_id, company_id, api_key_id, operation, key)` to `fiscal_idempotency_keys`.
+**API impact:** None for request contract; idempotency semantics now match specified actor/API-key/operation scope.
+**Container impact:** None.
+**Security impact:** Positive; aligns replay/conflict scope with spec.
+**Acceptance criteria:** Migration deploy succeeds; service looks up/creates idempotency by tenant/company/apiKeyId/operation/key.
+**Required tests:** Reported validation now includes Prisma generate/validate/migrate deploy pass, full unit suite pass (181/28), full E2E pass (57/11), and fiscal E2E/concurrency coverage under TASK-025.
+**Migration considerations:** Existing F2.2 migration was not edited; hardening used forward-only migration.
+**Rollback or mitigation:** Use compensating migration if needed; do not edit applied migration.
+**Risk:** Low after completion; residual test coverage risk covered by TASK-025.
+
+---
+
+## TASK-030: Enforce default issuance-point uniqueness at database level
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Database Integrity
+**Requirement:** F2.2 FR-009, FR-011, FR-012; architectural objective: preserve active default issuance-point invariant under concurrency.
+**Reason:** Current code upserts default `001`/`00001`, but schema does not enforce only one active/default issuance point per company/environment.
+**Current problem:** Future endpoints or data changes could create multiple defaults for a company/environment.
+**Proposed change:** Add a forward-only PostgreSQL partial unique index for active default issuance point per tenant/company/environment, or document why only the unique branch/terminal default MVP endpoint makes this unnecessary for now.
+**Affected files:** `prisma/schema.prisma` if representable, new migration SQL, tests.
+**Dependencies:** Product/database decision; no old migration edits.
+**Database impact:** Yes — partial unique index likely raw SQL.
+**API impact:** None intended; duplicate default attempts should fail deterministically.
+**Container impact:** None.
+**Security impact:** Low positive via data integrity.
+**Acceptance criteria:** Database prevents two active default issuance points per company/environment; service maps violation to deterministic error if reachable.
+**Required tests:** Migration deploy, integration test for duplicate default prevention.
+**Migration considerations:** Pre-migration cleanup/backfill may be needed if duplicates exist.
+**Rollback or mitigation:** If duplicate data exists, create report/cleanup before index; use non-concurrent index carefully per environment.
+**Risk:** Medium.
+
+---
+
+## TASK-031: Decide and implement fiscal line persistence strategy
+**Status:** Proposed
+**Priority:** Low
+**Domain:** Fiscal Documents / Database / Reporting
+**Requirement:** F2.2 FR-006 and FR-027 mention fiscal document lines; current schema stores lines as JSON snapshots.
+**Reason:** JSON line snapshots may be sufficient for immutability but less convenient for constraints, reporting and future XML/query needs.
+**Current problem:** No separate `fiscal_document_lines` table exists, despite original persistence-model requirement.
+**Proposed change:** Make an explicit architecture/product decision: keep JSON snapshots for F2.2/F2.3, or add a relational `fiscal_document_lines` table in a forward-only migration before XML/reporting. If adding, backfill from existing JSON lines.
+**Affected files:** `docs/architecture.md`, `docs/action-plan.md`, potentially `prisma/schema.prisma`, new migration, fiscal persistence code, tests.
+**Dependencies:** Decision on reporting/query/XML generation needs.
+**Database impact:** Potentially high if relational table is added.
+**API impact:** None intended.
+**Container impact:** None.
+**Security impact:** Neutral.
+**Acceptance criteria:** Decision is documented. If implemented, relational lines are persisted and consistent with document snapshots.
+**Required tests:** Migration/backfill tests if implemented; fiscal creation/retrieval tests.
+**Migration considerations:** Use forward-only migration; avoid modifying F2.2 migration.
+**Rollback or mitigation:** Keep JSON as source of truth until relational backfill is verified.
+**Risk:** Low if decision-only; Medium/High if migration/backfill implemented.
+
+---
+
+## TASK-032: Expand Hacienda v4.4 fiscal validation coverage
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Domain Validation
+**Requirement:** F2.2 FR-007, FR-008, AC-011, AC-019.
+**Reason:** Current validation covers formats and MVP allowed lists but does not fully validate all official v4.4 catalog/tax/exemption combinations.
+**Current problem:** Invalid fiscal combinations may pass local creation and fail later XML/Hacienda validation.
+**Proposed change:** Add domain/application validation policies and fixtures for official v4.4 catalog values, unit measures, CABYS strategy, receiver identification/address rules, tax/exemption combinations and totals reconciliation.
+**Affected files:** `src/modules/fiscal-documents/domain/**`, `src/modules/fiscal-documents/application/**`, fiscal tests, possibly Hacienda/CABYS integration ports if catalog validation is needed.
+**Dependencies:** Clarify required validation depth before XML phase.
+**Database impact:** None expected.
+**API impact:** May add deterministic 400/422 validation errors.
+**Container impact:** None.
+**Security impact:** Positive through reduced invalid data persistence.
+**Acceptance criteria:** Documented validation matrix; invalid v4.4 combinations fail deterministically; valid fixtures pass.
+**Required tests:** Domain/application validation unit tests and API negative tests.
+**Migration considerations:** None expected.
+**Rollback or mitigation:** Introduce validation incrementally and monitor compatibility with existing persisted documents.
+**Risk:** Medium.
+
+---
+
+## TASK-033: Clean/reset local E2E database and re-run full gates
 **Status:** Completed
 **Priority:** High
 **Domain:** Cross-cutting Verification
-**Requirement:** Confirm full system gates pass after PostgreSQL/E2E unblock.
-**Reason:** Ensures remediation preserved full system behavior.
-**Current problem:** Resolved. All gates confirmed passing.
-**Proposed change:** Completed; no further production change.
-**Affected files:** No production files. Validation only.
-**Dependencies:** TASK-005, PostgreSQL readiness, Prisma migrations.
-**Database impact:** None to schema.
+**Requirement:** F2.2 AC-024; Post-F2.2 continuation TASK-F2.2-006 and TASK-F2.2-007.
+**Reason:** Full E2E status needed to be proven after local database contamination had previously blocked the suite.
+**Current problem:** Resolved for this cycle; full E2E passed after explicit clean `billing_e2e` reset and migration deploy.
+**Proposed change:** Completed: fiscal E2E suites avoid destructive suite-level global resets, use collision-resistant fixtures, and full gates were rerun after clean reset.
+**Affected files:** `test/helpers/fiscal-e2e-helpers.ts`, fiscal E2E suites, spec documentation files.
+**Dependencies:** Access to local E2E DB and explicit reset safety.
+**Database impact:** Test database reset/cleanup only; 6 migrations applied via `npx prisma migrate deploy`.
 **API impact:** None.
 **Container impact:** None.
-**Security impact:** None.
-**Acceptance criteria:** Full E2E (7 suites), lint, typecheck, unit tests (163/24), build all pass.
-**Required tests:** `npm run test:e2e -- --silent`, `npm run lint:check`, `npm run typecheck`, `npm test -- --silent`, `npm run build`
-**Migration considerations:** `npx prisma migrate deploy` must remain successful.
-**Rollback or mitigation:** Investigate new regression separately; preserve fixture fix.
-**Risk:** Low (completed).
+**Security impact:** Positive verification impact by proving security/authorization E2E paths in the full suite.
+**Acceptance criteria:** Full E2E suite passes on a clean database and validation commands are recorded.
+**Required tests:** Reported PASS: `npm ci`; `npx prisma generate && npx prisma validate`; clean `billing_e2e` reset + `npx prisma migrate deploy`; `npm run lint`; `npm run lint:check`; `npm run typecheck`; `npm test -- --silent` (181/28); `npm run build`; `npm run test:e2e -- --silent` (57/11).
+**Migration considerations:** Test DB ran all 6 current migrations.
+**Rollback or mitigation:** Continue resetting only designated local/test DBs; never reset shared/production DB.
+**Risk:** Low after completion.
 
 ---
 
-## TASK-007: Architecture documentation refresh (post-fase-2-1-remediation)
-**Status:** Completed
-**Priority:** Medium
-**Domain:** Architecture Documentation
-**Requirement:** Refresh all docs after post-fase-2-1 remediation.
-**Reason:** Documentation must reflect completed implementation and separate from future proposals.
-**Current problem:** Resolved. Documentation reflected post-fase-2-1-remediation state.
-**Proposed change:** Completed documentation-only update.
-**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`, `docs/future-architecture.md`
-**Dependencies:** None.
-**Database impact:** None.
-**API impact:** None.
-**Container impact:** None.
-**Security impact:** Documents remaining 7.4/10 audit baseline risk.
-**Acceptance criteria:** Docs separate completed remediation from proposed future work.
-**Required tests:** Documentation review only.
-**Migration considerations:** None.
-**Rollback or mitigation:** Revert documentation files if inaccurate.
-**Risk:** Low (completed).
-
----
-
-## TASK-008: Architecture documentation refresh (post-pre-fase-2-hardening)
-**Status:** Completed
-**Priority:** High
-**Domain:** Architecture Documentation
-**Requirement:** Refresh all docs to reflect post-pre-fase-2-hardening state (8.2/10, 163 tests).
-**Reason:** Previous docs were stale (referenced 7.4/10 score, did not document CORS fatal enforcement, configurable circuit breaker, or specific audit finding IDs).
-**Current problem:** Resolved by this update.
-**Proposed change:** Completed documentation-only update.
-**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`, `docs/future-architecture.md`
-**Dependencies:** Implementation completion confirmed by `sdd-implementation-agent-c13b28`.
-**Database impact:** None.
-**API impact:** None.
-**Container impact:** None.
-**Security impact:** Accurately documents AUD-D02, AUD-API01, AUD-SEC01, AUD-API04, AUD-DB01, AUD-SEC02, DEFECT-001 as proposed future work.
-**Acceptance criteria:** All five docs accurately reflect current repository state; no mixing of current reality with future proposals.
-**Required tests:** Documentation review only.
-**Migration considerations:** None.
-**Rollback or mitigation:** Revert documentation files if inaccurate.
-**Risk:** Low (completed).
-
----
-
-## TASK-009: Harden company-scoped resource authorization policies
-**Status:** Proposed
-**Priority:** Medium
-**Domain:** Security / Companies / Hacienda Connection
-**Requirement:** Ensure tenant/company-scoped resource handlers cannot serve data across tenant boundaries.
-**Reason:** Current architecture uses tenant context and guards, but explicit resource-level ownership checks are not consistently enforced in all handlers.
-**Current problem:** Some handlers accept resource IDs (companyId, etc.) and rely on repository-level tenant filtering. If the tenant filter were ever bypassed or misconfigured, cross-tenant access could occur. E2E tenant-isolation tests cover the main case but may not cover all ID-based lookups.
-**Proposed change:** Add characterization tests for every handler that accepts a resource ID. If gaps are found, add explicit ownership assertions at the application layer.
-**Affected files:** `src/modules/companies/`, `src/modules/hacienda-connection/`, E2E isolation tests.
-**Dependencies:** None. Can be done independently.
-**Database impact:** None expected. New DB constraints only if gaps are confirmed.
-**API impact:** Possible error-contract clarification (403 vs 404 on unauthorized access).
-**Container impact:** None.
-**Security impact:** Positive — reduces tenant isolation risk surface.
-**Acceptance criteria:** All resource ID-based handlers have explicit ownership tests; cross-tenant access tests exist and pass.
-**Required tests:** Unit/application ownership tests, E2E tenant-isolation tests for company and Hacienda connection flows.
-**Migration considerations:** New migrations only if DB constraints are identified as needed.
-**Rollback or mitigation:** Apply incrementally; feature-flag policy changes if compatibility issues arise.
-**Risk:** Medium — broad scope; scope it to identified gaps only.
-
----
-
-## TASK-010: Remove infrastructure exception import from CreateCompanyHandler
-**Status:** Proposed
-**Priority:** Low
-**Domain:** Architecture / Companies
-**Requirement:** Align `CreateCompanyHandler` with hexagonal architecture dependency rules (application layer must not import infrastructure exception classes).
-**Reason:** `CreateCompanyHandler` imports `HaciendaUnavailableException` from `src/infrastructure/integrations/hacienda/exceptions/` to distinguish Hacienda unavailability from other errors. This violates the application → infrastructure boundary.
-**Current problem:** Application layer coupled to infrastructure exception class.
-**Proposed change:** Define a domain or application-level exception (e.g., `ExternalServiceUnavailableException`) and throw it from the HaciendaPort adapter; catch it in the handler without importing from infrastructure.
-**Affected files:** `src/modules/companies/application/use-cases/create-company/create-company.handler.ts`, `src/infrastructure/integrations/hacienda/exceptions/hacienda-unavailable.exception.ts`, potentially `src/modules/shared/domain/`.
-**Dependencies:** None.
-**Database impact:** None.
-**API impact:** None (behavior unchanged).
-**Container impact:** None.
-**Security impact:** None.
-**Acceptance criteria:** `create-company.handler.ts` does not import from `src/infrastructure`. Tests confirm same error classification behavior.
-**Required tests:** Update unit test for CreateCompanyHandler to use the new exception type.
-**Migration considerations:** None.
-**Rollback or mitigation:** Revert handler file only. Low risk.
-**Risk:** Low.
-
----
-
-## TASK-011: Add tenant ownership check on GET /tenants/:id
+## TASK-034: Harden Docker Compose production-mode secrets/defaults
 **Status:** Proposed
 **Priority:** High
-**Domain:** Identity / Security
-**Requirement:** Prevent potential cross-tenant read on `GET /api/v1/tenants/:id` (AUD-API01).
-**Reason:** The `TenantController.getById()` handler does not validate that the requested `:id` matches the authenticated user's `tenantId` from the JWT. A user holding a valid JWT for tenant A could request tenant B's data by passing B's ID.
-**Current problem:** No ownership check exists. The handler passes `:id` directly to `GetTenantHandler.execute()` without comparing to `req.user.tenantId`.
-**Proposed change:** In `GetTenantHandler` or in the controller before invoking the handler, assert that the requested tenant ID equals the authenticated user's `tenantId`. Return 403 (to avoid tenant enumeration via 404 timing) or 404 consistently.
-**Affected files:** `src/modules/identity/infrastructure/http/tenant.controller.ts`, `src/modules/identity/application/use-cases/get-tenant/get-tenant.handler.ts`.
-**Dependencies:** None.
+**Domain:** Containers / Deployment / Security
+**Requirement:** Existing audit concern: Docker Compose production-mode fallback/default secrets if reused as production.
+**Reason:** Compose currently risks being mistaken for production deployment while containing local defaults.
+**Current problem:** Public/default credentials or secrets could be active if Compose is used outside local development.
+**Proposed change:** Choose one approved path: mark Compose local-only and set non-production env; remove sensitive fallbacks and require external env; or split local and production Compose files.
+**Affected files:** `docker-compose.yml`, `.env.local.example`, optionally `docs/deployment.md`.
+**Dependencies:** Deployment strategy decision.
 **Database impact:** None.
-**API impact:** `GET /tenants/:id` — cross-tenant requests now return 403 or 404 (currently they may return 200). Requires decision on response code (see architecture.md §14).
-**Container impact:** None.
-**Security impact:** Eliminates AUD-API01 cross-tenant read risk.
-**Acceptance criteria:** E2E test: user from tenant A attempting `GET /tenants/{tenant-B-id}` receives 403 or 404; user requesting their own tenant ID receives 200.
-**Required tests:** Add E2E test to `test/e2e/fase0/tenant-isolation.e2e-spec.ts` for cross-tenant GET.
+**API impact:** None.
+**Container impact:** Yes.
+**Security impact:** High positive impact.
+**Acceptance criteria:** Production-mode services cannot start with public/default JWT secret; documentation clearly states Compose use; CORS production guard remains intact.
+**Required tests:** Config validation tests if changed; `docker compose config`/startup smoke test if available.
 **Migration considerations:** None.
-**Rollback or mitigation:** Revert controller/handler change. No DB changes.
-**Risk:** Low change risk; High business impact of NOT fixing.
+**Rollback or mitigation:** Revert Compose/docs changes if local workflow breaks; require explicit `.env` values meanwhile.
+**Risk:** Medium implementation risk; High if left unresolved for production.
 
 ---
 
-## TASK-012: Add helmet middleware
+## TASK-035: Triage and remediate npm audit vulnerabilities
 **Status:** Proposed
 **Priority:** High
-**Domain:** Security / HTTP Layer
-**Requirement:** Add HTTP security headers via `helmet` (AUD-SEC01).
-**Reason:** No HTTP security headers are currently set. CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and X-DNS-Prefetch-Control are all absent.
-**Current problem:** API responses carry no security headers, exposing clients to clickjacking, MIME-sniffing, and information disclosure risks.
-**Proposed change:** Install `helmet` package; call `app.use(helmet())` in `api.main.ts` after CORS configuration. Configure CSP to allow Swagger UI in non-production environments.
-**Affected files:** `src/bootstrap/api.main.ts`, `package.json`.
-**Dependencies:** `helmet` npm package.
-**Database impact:** None.
-**API impact:** HTTP responses gain new security headers. Non-breaking. May need CSP tuning for Swagger UI.
-**Container impact:** None.
-**Security impact:** Eliminates AUD-SEC01 by adding all standard security headers.
-**Acceptance criteria:** HTTP responses include `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `X-DNS-Prefetch-Control`. Swagger UI still works in non-production. Unit/E2E tests pass.
-**Required tests:** Unit test verifying security headers present in test environment; confirm Swagger UI accessible in non-production.
+**Domain:** Supply Chain Security
+**Requirement:** Existing audit concern: npm vulnerabilities.
+**Reason:** Known dependency vulnerabilities remain a repository-level risk.
+**Current problem:** Previous validation reported existing npm audit vulnerabilities; not addressed by F2.2.
+**Proposed change:** Run `npm audit`, classify findings, update dependencies safely, and document any accepted risk where upgrades are blocked.
+**Affected files:** `package.json`, `package-lock.json`, possibly code/tests if major upgrades are needed.
+**Dependencies:** Approval to update dependencies.
+**Database impact:** None expected.
+**API impact:** None intended.
+**Container impact:** Potential image dependency changes after lockfile update.
+**Security impact:** High positive impact.
+**Acceptance criteria:** Vulnerability count reduced or accepted with documented rationale; full gates pass after dependency changes.
+**Required tests:** `npm audit`, `npm ci`, `npm run lint:check`, `npm run typecheck`, `npm test -- --silent`, `npm run test:e2e -- --silent`, `npm run build`.
 **Migration considerations:** None.
-**Rollback or mitigation:** Remove `app.use(helmet())` call. No DB changes.
-**Risk:** Low — well-established library; CSP misconfiguration could break Swagger UI (mitigated by testing).
-
----
-
-## TASK-013: Implement first worker job handler
-**Status:** Proposed
-**Priority:** Medium
-**Domain:** Worker / Background Processing
-**Requirement:** Register at least one job handler in `worker.main.ts` (AUD-API04).
-**Reason:** The worker process currently boots but processes no work. PgBossJobQueue is initialized but no handlers are attached. The worker is a shell.
-**Current problem:** Worker provides no value and may confuse operators into thinking work is being processed when it is not.
-**Proposed change:** Design decision required on what the first job type should be (e.g., Hacienda connection health-check polling, or a placeholder no-op job for infra validation). Implement the handler and register it in `worker.main.ts`.
-**Affected files:** `src/bootstrap/worker.main.ts`, new handler file, `src/infrastructure/queue/`.
-**Dependencies:** ADR or spec decision on first job type. Cannot implement without clarity on what job to run.
-**Database impact:** pg-boss creates its own tables (handled by PgBoss library automatically).
-**API impact:** None.
-**Container impact:** Worker container gains actual functionality.
-**Security impact:** Positive — reduces risk of silent failure in background processing.
-**Acceptance criteria:** Worker starts, registers handler, processes a test job. Unit test for handler. No impact on API E2E tests.
-**Required tests:** Unit test for job handler; optionally a worker integration test.
-**Migration considerations:** pg-boss manages its own schema migration automatically.
-**Rollback or mitigation:** Remove handler registration. No DB changes.
-**Risk:** Medium — depends on job type decision.
-
----
-
-## TASK-014: DB-level audit log append-only enforcement
-**Status:** Proposed
-**Priority:** Medium
-**Domain:** Audit / Database
-**Requirement:** Enforce `audit_logs` append-only at the database level (AUD-DB01).
-**Reason:** Currently append-only is enforced only in `PrismaAuditLogRepository` at the application layer. A compromised application process or direct DB access could mutate or delete fiscal audit records, violating audit integrity.
-**Current problem:** No PostgreSQL-level constraint prevents UPDATE or DELETE on `audit_logs`.
-**Proposed change:** Choose one of: (a) PostgreSQL trigger on `audit_logs` that raises exception on UPDATE/DELETE; (b) dedicated append-only PostgreSQL role for the application database user; (c) Row-Level Security policy.
-**Affected files:** New Prisma migration (raw SQL DDL), `prisma/migrations/`, potentially `prisma/schema.prisma`.
-**Dependencies:** DBA/infra decision on enforcement mechanism. This task requires approval before mechanism selection.
-**Database impact:** New migration with DDL (trigger or role grant or RLS). Must not block INSERT. Must not affect existing data.
-**API impact:** None.
-**Container impact:** None. (If a new DB role is chosen, CI DATABASE_URL user must be updated.)
-**Security impact:** Eliminates AUD-DB01 — audit log integrity enforced at DB level.
-**Acceptance criteria:** Direct SQL `UPDATE audit_logs SET ...` fails with an error. Application can still INSERT. All existing tests pass.
-**Required tests:** Migration verification test attempting direct mutation. CI must validate migration deploys cleanly.
-**Migration considerations:** New migration only. Never modify applied migrations.
-**Rollback or mitigation:** Drop trigger/RLS via a new down-migration. Revert code if needed.
-**Risk:** Medium — DDL change in production schema; requires testing in staging before production.
-
----
-
-## TASK-015: Shared Hacienda token cache for multi-instance deployments
-**Status:** Proposed
-**Priority:** Medium
-**Domain:** Hacienda Connection / Infrastructure
-**Requirement:** Replace in-memory `HaciendaTokenCache` with a shared backend (AUD-SEC02).
-**Reason:** `HaciendaTokenCache` is per-process in memory. In a multi-instance deployment, each instance independently authenticates to Hacienda IDP, potentially causing token storms and exceeding IDP rate limits.
-**Current problem:** No shared token state between API instances. Token expiry is checked per-process only.
-**Proposed change:** Replace the in-memory Map with a backend-backed store. Options: Redis (new dependency), PostgreSQL (existing; store token in `hacienda_connections` table or a new `hacienda_tokens` table), or SSM Parameter Store (for low-frequency refresh). Recommendation: PostgreSQL-backed cache using `hacienda_connections.last_successful_auth_at` + a new encrypted `access_token` field, or a dedicated `hacienda_tokens` table. Requires design decision.
-**Affected files:** `src/modules/hacienda-connection/infrastructure/auth/hacienda-token-cache.service.ts`, potentially new migration.
-**Dependencies:** Design decision on storage backend (Redis vs. PostgreSQL vs. other). Cannot implement without decision.
-**Database impact:** Possibly new `hacienda_tokens` table or additional column in `hacienda_connections` (new migration required).
-**API impact:** None observable.
-**Container impact:** If Redis is chosen: add Redis service to Docker Compose and CI.
-**Security impact:** Reduces Hacienda IDP rate limit risk in multi-instance deployments.
-**Acceptance criteria:** Two API instances share token state. One instance obtaining a token prevents unnecessary re-authentication on the other instance. Unit tests for shared cache adapter.
-**Required tests:** Unit test for shared cache adapter; integration test confirming token sharing across simulated instances.
-**Migration considerations:** New migration if PostgreSQL-backed. Never modify applied migrations.
-**Rollback or mitigation:** Revert to in-memory cache (acceptable for single-instance deployments).
-**Risk:** Medium — design decision required; new infrastructure component if Redis is chosen.
-
----
-
-## TASK-016: Fix hardcoded expiresIn in RefreshTokenHandler (DEFECT-001)
-**Status:** Proposed
-**Priority:** Medium
-**Domain:** Identity / Authentication
-**Requirement:** Fix DEFECT-001: `RefreshTokenHandler.execute()` returns `expiresIn: 15 * 60` hardcoded instead of deriving from `JWT_EXPIRES_IN`.
-**Reason:** If `JWT_EXPIRES_IN` is changed to a value other than 15 minutes, clients receive an incorrect `expiresIn` hint in the refresh token response, causing incorrect token refresh scheduling.
-**Current problem:** `return { accessToken, refreshToken, expiresIn: 15 * 60 };` — line 91 of `refresh-token.handler.ts`. The `addAuthDurationToDate` utility and `jwtExpiresIn` field are both available in the handler but not used for the response `expiresIn`.
-**Proposed change:** Parse `this.jwtExpiresIn` string (e.g., `'15m'`, `'1h'`) into seconds using `addAuthDurationToDate` or a dedicated utility, and return the computed value in `expiresIn`.
-**Affected files:** `src/modules/identity/application/use-cases/refresh-token/refresh-token.handler.ts`
-**Dependencies:** `auth-token-duration.ts` utility (already exists).
-**Database impact:** None.
-**API impact:** `POST /auth/refresh` response — `expiresIn` value changes only if `JWT_EXPIRES_IN` is not `15m`. Semantics correction; not a breaking change.
-**Container impact:** None.
-**Security impact:** Corrects misleading `expiresIn` value. Prevents client over-trust of stale token lifetimes.
-**Acceptance criteria:** Unit test: when `JWT_EXPIRES_IN=30m`, `RefreshTokenHandler.execute()` returns `expiresIn: 1800`. When `JWT_EXPIRES_IN=15m`, returns `expiresIn: 900`.
-**Required tests:** Update `src/modules/identity/application/__tests__/refresh-token.handler.spec.ts` to assert computed `expiresIn`.
-**Migration considerations:** None.
-**Rollback or mitigation:** Revert handler file. No DB changes.
-**Risk:** Low — isolated, well-tested handler.
-
----
-
-## TASK-017: Commit CI/CD deployment stage or document deployment strategy
-**Status:** Proposed
-**Priority:** Low
-**Domain:** Containers / Deployment / CI
-**Requirement:** Address AUD-D02: CI pipeline has no deployment stage.
-**Reason:** The GitHub Actions pipeline validates code quality but has no deployment step. It is unclear whether deployment is managed externally or intentionally absent.
-**Current problem:** Cannot distinguish "deployment intentionally deferred" from "deployment managed elsewhere". Risk of deployment process drift if undocumented.
-**Proposed change:** One of: (a) Add a deployment gate to `ci.yml` (e.g., deploy to staging after E2E passes on `main`); (b) Add a `docs/deployment.md` file documenting the external deployment strategy; (c) Add a placeholder comment in `ci.yml` explaining the decision.
-**Affected files:** `.github/workflows/ci.yml` and/or new `docs/deployment.md`.
-**Dependencies:** Requires decision on deployment strategy (ECS, Kubernetes, Railway, etc.).
-**Database impact:** None.
-**API impact:** None.
-**Container impact:** Deployment configuration depends on target platform.
-**Security impact:** Positive — deployment process becomes auditable and documented.
-**Acceptance criteria:** The repository clearly communicates how the application is deployed, either through a committed CI step or explicit documentation.
-**Required tests:** None beyond existing CI validation.
-**Migration considerations:** Deployment must include `npx prisma migrate deploy` before starting the API process.
-**Rollback or mitigation:** Revert CI file. No runtime impact.
-**Risk:** Low.
+**Rollback or mitigation:** Revert lockfile/package changes if regressions occur; patch selectively.
+**Risk:** Medium.
