@@ -1,6 +1,7 @@
 import * as Joi from 'joi';
 
 const productionOrStaging = Joi.valid('production', 'staging');
+const AUTH_DURATION_PATTERN = /^\d+[smhd]$/;
 
 const haciendaAuthUrl = (defaultValue: string): Joi.Schema =>
   Joi.when('NODE_ENV', {
@@ -40,8 +41,8 @@ export const validationSchema = Joi.object({
     then: Joi.string().min(32).required(),
     otherwise: Joi.string().default('dev-insecure-jwt-secret-change-in-production'),
   }),
-  JWT_EXPIRES_IN: Joi.string().default('15m'),
-  JWT_REFRESH_EXPIRES_IN: Joi.string().default('7d'),
+  JWT_EXPIRES_IN: Joi.string().pattern(AUTH_DURATION_PATTERN).default('15m'),
+  JWT_REFRESH_EXPIRES_IN: Joi.string().pattern(AUTH_DURATION_PATTERN).default('7d'),
 
   // Storage
   STORAGE_TYPE: Joi.string().valid('local', 's3').default('local'),

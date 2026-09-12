@@ -125,6 +125,38 @@ describe('configuration validation schema', () => {
     expect(result.error?.message).toContain('JWT_SECRET');
   });
 
+  it('accepts auth duration values supported by auth-token-duration parser', () => {
+    const result = validationSchema.validate(
+      {
+        NODE_ENV: 'test',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_EXPIRES_IN: '30m',
+        JWT_REFRESH_EXPIRES_IN: '7d',
+      },
+      { abortEarly: false },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.value.JWT_EXPIRES_IN).toBe('30m');
+    expect(result.value.JWT_REFRESH_EXPIRES_IN).toBe('7d');
+  });
+
+  it('rejects auth duration values outside the supported parser grammar', () => {
+    const result = validationSchema.validate(
+      {
+        NODE_ENV: 'test',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_EXPIRES_IN: '2 days',
+        JWT_REFRESH_EXPIRES_IN: '1.5h',
+      },
+      { abortEarly: false },
+    );
+
+    expect(result.error).toBeDefined();
+    expect(result.error?.message).toContain('JWT_EXPIRES_IN');
+    expect(result.error?.message).toContain('JWT_REFRESH_EXPIRES_IN');
+  });
+
   it('applies Hacienda auth defaults in development and test', () => {
     const result = validationSchema.validate(
       {

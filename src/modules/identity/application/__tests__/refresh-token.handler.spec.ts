@@ -57,7 +57,7 @@ describe('RefreshTokenHandler', () => {
     jest.useRealTimers();
   });
 
-  it('rotates a valid refresh token using configured access and refresh expiry', async () => {
+  it('rotates a valid refresh token and returns expiresIn matching the configured duration', async () => {
     const user = createUser('ACTIVE');
     mockRefreshTokenRepository.findByHash.mockResolvedValue({
       tokenHash,
@@ -75,7 +75,7 @@ describe('RefreshTokenHandler', () => {
     expect(result.accessToken).toBe('rotated-access-token');
     expect(result.refreshToken).toBeDefined();
     expect(result.refreshToken).not.toBe(rawRefreshToken);
-    expect(result.expiresIn).toBe(900);
+    expect(result.expiresIn).toBe(1800);
     expect(mockJwtService.sign).toHaveBeenCalledWith(expect.any(Object), { expiresIn: '30m' });
     expect(mockRefreshTokenRepository.markAsUsed).toHaveBeenCalledWith(tokenHash);
     expect(mockRefreshTokenRepository.save).toHaveBeenCalledWith(

@@ -10,7 +10,7 @@ import {
 } from '../../../domain/ports/refresh-token.repository';
 import { InvalidRefreshTokenException } from '../../../domain/exceptions/invalid-refresh-token.exception';
 import type { JwtPayload } from '../login/login.handler';
-import { addAuthDurationToDate } from '../shared/auth-token-duration';
+import { addAuthDurationToDate, parseAuthDurationToSeconds } from '../shared/auth-token-duration';
 
 export interface RefreshTokenCommand {
   readonly refreshToken: string;
@@ -95,7 +95,7 @@ export class RefreshTokenHandler {
     return {
       accessToken,
       refreshToken: newRefreshTokenRaw,
-      expiresIn: 15 * 60,
+      expiresIn: parseAuthDurationToSeconds(this.jwtExpiresIn),
     };
   }
 }

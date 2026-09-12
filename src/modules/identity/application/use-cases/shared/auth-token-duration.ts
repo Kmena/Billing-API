@@ -15,6 +15,20 @@ export function addAuthDurationToDate(
   return new Date(baseDate.getTime() + durationMs);
 }
 
+export function parseAuthDurationToSeconds(duration: string, fallbackDuration = '15m'): number {
+  const parsedDuration = parseDuration(duration);
+  if (parsedDuration !== null) {
+    return Math.floor(parsedDuration / 1000);
+  }
+
+  const parsedFallback = parseDuration(fallbackDuration);
+  if (parsedFallback !== null) {
+    return Math.floor(parsedFallback / 1000);
+  }
+
+  return 900;
+}
+
 function parseAuthDurationToMilliseconds(duration: string, fallbackDuration: string): number {
   const parsedDuration = parseDuration(duration);
   if (parsedDuration !== null) {

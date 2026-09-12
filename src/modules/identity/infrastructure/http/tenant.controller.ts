@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   Post,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -22,6 +23,7 @@ import { CreateTenantHandler } from '../../application/use-cases/create-tenant/c
 import { GetTenantHandler } from '../../application/use-cases/get-tenant/get-tenant.handler';
 import { CreateTenantRequestDto } from './dtos/create-tenant.request.dto';
 import { TenantResponseDto } from './dtos/tenant.response.dto';
+import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 
 @ApiTags('Tenants')
 @ApiBearerAuth()
@@ -59,8 +61,14 @@ export class TenantController {
   @ApiOperation({ summary: 'Get a tenant by ID' })
   @ApiOkResponse({ type: TenantResponseDto })
   @ApiNotFoundResponse({ description: 'Tenant not found' })
-  async getTenant(@Param('id') id: string): Promise<TenantResponseDto> {
-    const result = await this.getTenantHandler.execute({ id });
+  async getTenant(
+    @Param('id') id: string,
+    @Request() req: { user: JwtRequest },
+  ): Promise<TenantResponseDto> {
+    const result = await this.getTenantHandler.execute({
+      id,
+      authenticatedTenantId: req.user.tenantId,
+    });
 
     return {
       id: result.id,

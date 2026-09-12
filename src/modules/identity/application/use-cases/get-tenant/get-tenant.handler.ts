@@ -18,6 +18,10 @@ export class GetTenantHandler {
       throw new TenantNotFoundException(query.id);
     }
 
+    if (tenant.id !== query.authenticatedTenantId) {
+      throw new TenantNotFoundException(query.id);
+    }
+
     return {
       id: tenant.id,
       name: tenant.name,

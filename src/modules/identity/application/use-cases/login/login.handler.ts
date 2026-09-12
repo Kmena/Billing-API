@@ -10,7 +10,7 @@ import {
   REFRESH_TOKEN_REPOSITORY,
 } from '../../../domain/ports/refresh-token.repository';
 import { InvalidCredentialsException } from '../../../domain/exceptions/invalid-credentials.exception';
-import { addAuthDurationToDate } from '../shared/auth-token-duration';
+import { addAuthDurationToDate, parseAuthDurationToSeconds } from '../shared/auth-token-duration';
 
 export interface LoginCommand {
   readonly tenantId: string;
@@ -96,7 +96,7 @@ export class LoginHandler {
     return {
       accessToken,
       refreshToken: refreshTokenRaw,
-      expiresIn: 15 * 60,
+      expiresIn: parseAuthDurationToSeconds(this.jwtExpiresIn),
     };
   }
 }
