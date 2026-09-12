@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from '../app.module';
 import { GlobalExceptionFilter } from '../api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../api/interceptors/correlation-id.interceptor';
@@ -38,6 +39,12 @@ async function bootstrap(): Promise<void> {
     credentials: corsOrigins !== '*',
     maxAge: 86400, // preflight cache: 24 hours
   });
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: nodeEnv !== 'production' ? false : undefined,
+    }),
+  );
 
   // Global API prefix — all endpoints under /api/v1
   app.setGlobalPrefix('api/v1', {
