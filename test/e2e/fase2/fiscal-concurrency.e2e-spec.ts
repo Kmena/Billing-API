@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import {
   authorizeApiKeyForCompany,
   configureDefaultFiscalSetup,
+  configureValidCompanyFiscalProfile,
   createEnabledHaciendaConnection,
   createFiscalApiKey,
   createFiscalE2eApp,
@@ -40,6 +41,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
   it('CONC-001 allocates concurrent same-scope requests without duplicate sequence, consecutive or Clave', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
     await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
@@ -69,6 +71,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
   it('CONC-002 creates exactly one document and consumes one sequence for identical concurrent idempotent requests', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
     await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
@@ -105,6 +108,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
   it('CONC-003 conflicts same canonical key with different payload without duplicate issuance', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
     await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
@@ -146,6 +150,8 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
     const companyB = await createTestCompany(context.prisma, fixture.tenantId);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, companyB.id);
+    await configureValidCompanyFiscalProfile(context, fixture);
+    await configureValidCompanyFiscalProfile(context, { ...fixture, companyId: companyB.id });
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     await request(context.app.getHttpServer())
       .put(`/api/v1/companies/${companyB.id}/fiscal/SANDBOX/issuance-points/default`)
@@ -195,6 +201,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
       fixture.companyId,
       'PRODUCTION',
     );
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE', 'SANDBOX');
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE', 'PRODUCTION');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
@@ -222,6 +229,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
   it('CONC-006 isolates INVOICE and TICKET sequences', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     await configureDefaultFiscalSetup(context, fixture, 'TICKET');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
@@ -252,6 +260,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
   it('CONC-007 prevents sequence initialization races from resetting or corrupting allocation', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await request(context.app.getHttpServer())
       .put(`/api/v1/companies/${fixture.companyId}/fiscal/SANDBOX/issuance-points/default`)
       .set('Authorization', `Bearer ${fixture.jwtToken}`)

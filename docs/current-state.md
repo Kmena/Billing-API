@@ -1,43 +1,38 @@
 # Current State
 
-> **Synchronized:** Documentation-only ownership reconciliation for canonical `specs/post-f2-2-remediation` by `sdd-implementation-agent-c13b28` on 2026-09-12. No production code, tests or Prisma migrations modified.
-> **Current validation evidence provided for this session:** `npm ci` pass with existing npm audit findings, Prisma generate/validate pass, clean `billing_e2e` reset plus `prisma migrate deploy` pass, lint/lint:check pass, typecheck pass, unit suite pass (181 tests / 28 suites), build pass and full E2E pass (57 tests / 11 suites).
-> **Latest Post-F2.2 remediation audit:** baseline-audit-agent score **9.0/10** for canonical `specs/post-f2-2-remediation`. Verdict: no meaningful regression introduced and no blocking F2.2-specific gaps. Non-blocking notes: `FiscalDocumentService` remains large future maintainability debt and npm audit vulnerabilities are pre-existing/out of scope.
+> **Synchronized:** Final F2.2/F2.3 cross-phase remediation refresh for confirmed `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/` by `sdd-implementation-agent-458e19` on 2026-09-13 with `hdd-architecture-agent` guidance. TASK-001 through TASK-022 are complete. Final audit PASS with non-blocking concerns, score **8.8/10**. Implemented boundary is `READY_TO_SUBMIT`; F3/Hacienda submission remains **NOT STARTED**.
+>
+> **Current cross-phase truth:** `CompanyFiscalProfile` owns issuer fiscal readiness data including structured address and `proveedorSistemas`; F2.2 snapshots issuer/receiver/line/tax/unit/sale/payment data into immutable `FiscalDocument` snapshots; `READY_FOR_XML` requires complete data for the supported FE/TE Hacienda XML path; F2.3 serializes/signs/validates from the immutable snapshot and does not reread mutable Company/Profile/Customer state. Supported units are `Sp` and `Unid`; non-zero tax requires `taxCode`, `taxRateCode`, `taxRate` and `taxAmount`; non-zero discounts, unsupported units, saleCondition `02/09/11/99` and paymentMethod `99` are rejected for the current scope.
 
----
+> **Synchronized:** Final architecture documentation refresh for confirmed `specs/fase-2-3-fiscal-xml-signing/` by `hdd-architecture-agent-d7922b` on 2026-09-13 after TASK-011 and post-remediation audit. Documentation-only refresh; no production code, tests, Prisma schema or migrations modified by this agent.
+> **Important status:** F2.3 is accepted for the confirmed local XML preparation scope. Final baseline audit scored **8.9/10**, verdict **Acceptable**. Prior AUD-001 is **closed for the confirmed F2.3 acceptance scope** after TASK-011: `NodeXadesEpesSignerAdapter` canonicalizes the document digest, `SignedProperties` digest and `SignedInfo` signature input using `xml-crypto` canonicalization; tests include an `xml-crypto` `SignedXml` independent verifier with the Hacienda XPath transform; valid FE/TE pass signer verification, xml-crypto verification and pinned XSD validation; tampering fails. This does not imply Hacienda submission or production receiver acceptance.
 
 ## 1. System overview
 
-Billing is a multi-tenant SaaS API for Costa Rica electronic invoicing. It is implemented as a NestJS / TypeScript modular monolith with Prisma/PostgreSQL persistence and incremental ports-and-adapters practices.
+Billing is a multi-tenant Costa Rica electronic invoicing API implemented as a NestJS/TypeScript modular monolith with Prisma/PostgreSQL persistence.
 
-Implemented phases and capabilities visible in the repository:
+Implemented/current capabilities:
 
 | Area | Current implemented capability |
 |---|---|
 | Foundation | Tenants, users, JWT authentication, refresh tokens, API keys, company management, audit log, health checks, validated configuration, Prisma/PostgreSQL. |
-| Hacienda public queries | Taxpayer, CABYS and exchange-rate query modules using Hacienda integration ports/adapters and mock mode support. |
-| Hacienda connection | Per-company/per-environment Hacienda credential lifecycle and connection validation; OIDC auth adapter and token cache exist. |
-| Security hardening | Helmet in API bootstrap, production CORS validation through config schema, configurable throttling and circuit-breaker values. |
-| Fiscal document core F2.2 | Fiscal issuance points, fiscal sequences, immutable fiscal documents, DB-backed idempotency, invoice/ticket API-key creation and retrieval, JWT-only fiscal configuration, Hacienda v4.4 consecutive and clave helpers, fixed-scale decimal helper. COMPLETE at `READY_FOR_XML`. |
-| Post-F2.2 remediation | Scoped fiscal consecutive uniqueness, canonical idempotency constraint cleanup, fiscal E2E, PostgreSQL concurrency, sanitization and clean-E2E evidence. COMPLETE under `specs/post-f2-2-remediation`. |
-| F2.3 XML/XSD/XAdES | NOT STARTED. No XML generation, XSD validation, XAdES signing, Hacienda submission, polling, callbacks, workers, PDF, email or webhooks. |
+| Hacienda public queries | Taxpayer, CABYS and exchange-rate lookup modules with Hacienda integration ports/adapters and mock mode support. |
+| Hacienda connection | Per-company/per-environment credential lifecycle and connection validation; OIDC auth adapter and token cache exist. |
+| F2.2 Fiscal Document Core | Fiscal issuance points, fiscal sequences, immutable fiscal documents, DB-backed idempotency, invoice/ticket API-key creation and retrieval, Hacienda v4.4 consecutive/clave helpers, fixed-scale decimal helper. Stable creation status starts XML phase at `READY_FOR_XML`. |
+| Post-F2.2 remediation | Scoped fiscal consecutive uniqueness, canonical idempotency constraint cleanup, fiscal E2E, PostgreSQL concurrency, sanitization and clean-E2E evidence. |
+| F2.3 Fiscal XML/XSD/XAdES | Implemented and accepted for the confirmed local prepare/sign/verify/XSD scope. Code and automated tests exist for XML serialization from immutable F2.2 snapshots, pinned XSD 1.1 validation, certificate metadata loading, PKCS#12/PFX signing path, DER `ds:X509Certificate` embedding, xml-crypto canonicalization/verifier evidence, `/prepare-xml` orchestration, artifacts and Docker packaging. No Hacienda submission/F3 behavior exists. |
 
-Current fiscal document scope ends at `READY_FOR_XML`. XML generation, XSD validation, XAdES signing, Hacienda submission, polling, PDFs, email and webhooks are not implemented.
-
-## Phase status
+Phase status:
 
 | Phase | Status |
 |---|---|
 | Foundation | COMPLETE |
-| Fase 1 Hacienda consultas | COMPLETE |
+| Fase 1 Hacienda consultas | COMPLETE with deferred non-blocking evidence/security tasks |
 | F2.1 Hacienda Connection | COMPLETE |
 | F2.2 Fiscal Document Core | COMPLETE |
 | Post-F2.2 remediation | COMPLETE |
-| F2.3 XML/XSD/XAdES | NOT STARTED |
-
-Fase 1 unresolved findings are retained only as deferred historical/repository-level items and are not blockers for F2.2 or Post-F2.2 remediation completion.
-
----
+| F2.3 XML/XSD/XAdES | COMPLETE for confirmed local prepare/sign/verify/XSD scope; no F3 submission |
+| F3 Hacienda submission | NOT STARTED |
 
 ## 2. Repository structure
 
@@ -47,6 +42,7 @@ Relevant current structure:
 Billing/
 ├── Dockerfile
 ├── docker-compose.yml
+├── nest-cli.json
 ├── package.json
 ├── prisma/
 │   ├── schema.prisma
@@ -57,46 +53,45 @@ Billing/
 │       ├── 20260911140000_fiscal_document_core/
 │       ├── 20260911143000_fiscal_idempotency_scope/
 │       ├── 20260912123000_post_f2_2_fiscal_constraints/
-├── specs/
-│   ├── fase-1-hacienda-consultas/          # Fase 1 history only
-│   ├── post-f2-2-remediation/              # canonical Post-F2.2 remediation owner
-│   └── fase-2-2-fiscal-document-core/
-├── src/
-│   ├── app.module.ts
-│   ├── api/
-│   ├── bootstrap/
-│   ├── infrastructure/
-│   └── modules/
-│       ├── api-keys/
-│       ├── audit/
-│       ├── cabys/
-│       ├── companies/
-│       ├── exchange-rates/
-│       ├── fiscal-documents/
-│       ├── hacienda-connection/
-│       ├── identity/
-│       └── taxpayers/
-└── test/
+│       └── 20260912180000_fiscal_xml_signing_metadata/
+├── resources/hacienda/
+│   ├── xmldsig-core-schema.xsd
+│   └── v4.4/
+│       ├── FacturaElectronica.xsd
+│       ├── TiqueteElectronico.xsd
+│       ├── signature-policy-v4.4.pdf
+│       └── manifest.json
+├── specs/fase-2-3-fiscal-xml-signing/  # canonical F2.3 owner
+├── src/infrastructure/
+│   ├── secrets/ports/secret-provider.port.ts
+│   ├── signing/
+│   └── storage/ports/storage.port.ts
+├── src/modules/fiscal-documents/
+│   ├── application/fiscal-document.service.ts
+│   ├── application/fiscal-xml/
+│   ├── domain/fiscal-xml/
+│   └── infrastructure/{http,xml}/
+└── test/e2e/fase2/
 ```
-
-`src/app.module.ts` imports `FiscalDocumentsModule` in addition to existing modules.
-
----
 
 ## 3. Current architecture
 
-The system is an API-first modular monolith. Most modules follow a layered domain/application/infrastructure structure. Cross-cutting infrastructure lives under `src/infrastructure`, while HTTP guards, filters and interceptors live under `src/api`.
+The system is an API-first modular monolith. Modules generally use domain/application/infrastructure folders with incremental hexagonal practices. Some fiscal F2.2 code remains a compact Prisma-backed application service.
 
-The fiscal documents module follows the same top-level folder naming but currently uses a compact service implementation:
+Current F2.3 boundaries are more port-oriented:
 
-- HTTP controllers call `FiscalDocumentService` directly.
-- `FiscalDocumentService` injects `PrismaService` and `AuditService` directly.
-- Fiscal domain helpers (`fiscal-key.generator.ts`, `scaled-decimal.ts`, `fiscal.constants.ts`) do not import NestJS or Prisma.
-- There are no fiscal repository port/adapters yet.
+```text
+HTTP adapter FiscalXmlController
+  -> PrepareFiscalXmlService
+    -> Fiscal XML serializer port/adapter
+    -> FiscalSigningCertificateService + SecretProviderPort
+    -> XmlSignerPort -> NodeXadesEpesSignerAdapter
+    -> XsdValidatorPort -> Xsd11ValidatorAdapter -> packaged python-xmlschema helper
+    -> StoragePort
+    -> Prisma persistence + AuditService
+```
 
-This is observable current architecture, not a target architecture.
-
----
+This describes implemented state only. After TASK-011, the signing adapter supports PKCS#12/PFX base64 secrets through `SecretProviderPort`, raw PFX input to `XmlSignerPort`, node-forge PFX parsing and DER X.509 certificate embedding. TASK-011 closed prior AUD-001 for the confirmed scope by using `xml-crypto` canonicalization for the document digest, `SignedProperties` digest and `SignedInfo` signature input, plus independent `xml-crypto` `SignedXml` verifier tests with Hacienda XPath transform. This is accepted for F2.3 but remains local-only evidence, not Hacienda submission acceptance.
 
 ## 4. Existing domains and modules
 
@@ -104,301 +99,169 @@ This is observable current architecture, not a target architecture.
 |---|---|---|
 | Identity | Tenants, users, JWT auth, refresh token lifecycle. | `src/modules/identity` |
 | Companies | Company aggregate and Hacienda verification metadata. | `src/modules/companies` |
-| API Keys | API-key lifecycle, argon2id hash verification, scopes, company authorization relation. | `src/modules/api-keys` |
-| Hacienda Public Queries | Taxpayer, CABYS and exchange-rate public lookup capabilities. | `src/modules/taxpayers`, `src/modules/cabys`, `src/modules/exchange-rates` |
-| Hacienda Connection | Company/environment Hacienda credential configuration and validation. | `src/modules/hacienda-connection` |
-| Fiscal Documents | Fiscal issuance-point configuration, sequence configuration/allocation, invoice/ticket creation, fiscal document retrieval, fiscal key and decimal helpers. | `src/modules/fiscal-documents` |
-| Audit | Audit event recording with event classes. | `src/modules/audit` |
-| Infrastructure | Config, database, Hacienda integration, queue, secrets, storage, signing port, tenant context. | `src/infrastructure` |
-
----
+| API Keys | API-key lifecycle, argon2id verification, scopes, company authorization. | `src/modules/api-keys` |
+| Hacienda Public Queries | Taxpayer, CABYS and exchange-rate public lookups. | `src/modules/taxpayers`, `src/modules/cabys`, `src/modules/exchange-rates` |
+| Hacienda Connection | Per-company/per-environment Hacienda credential configuration/validation. | `src/modules/hacienda-connection` |
+| Fiscal Documents | Issuance points, sequences, document snapshots, XML/signing preparation metadata and `/prepare-xml`. | `src/modules/fiscal-documents` |
+| Fiscal XML and Signing | Serialization, official XSD 1.1 validation and current XAdES adapter behind ports. | `src/modules/fiscal-documents/**/fiscal-xml`, `src/infrastructure/signing` |
+| Audit | Audit event recording. | `src/modules/audit` |
+| Infrastructure | Config, database, integrations, queues, secrets, storage, signing, tenant context. | `src/infrastructure` |
 
 ## 5. Main use cases
 
-Implemented fiscal use cases:
+Implemented fiscal use cases include:
 
-1. **Upsert default fiscal issuance point**
-   - Endpoint: `PUT /api/v1/companies/:companyId/fiscal/:environment/issuance-points/default`
-   - Auth: JWT guard.
-   - Authorization: `FiscalDocumentService.assertTenantAdmin()` accepts role `TENANT_ADMIN` only.
-   - Behavior: upserts active default branch `001` / terminal `00001` for company/environment.
+1. Configure default fiscal issuance point with JWT TENANT_ADMIN.
+2. Configure fiscal sequence with JWT TENANT_ADMIN.
+3. Create invoice with API key `invoices:write`; persists `READY_FOR_XML`.
+4. Create ticket with API key `tickets:write`; persists `READY_FOR_XML`.
+5. Retrieve fiscal document with dynamic `invoices:read` or `tickets:read` and company authorization.
+6. Prepare fiscal XML via `POST /api/v1/fiscal-documents/:id/prepare-xml`; API-key authenticated. It serializes existing `READY_FOR_XML` fiscal documents, signs, verifies, validates exact signed XML against pinned XSDs, stores artifacts and returns `READY_TO_SUBMIT` metadata. This implemented use case is accepted for the confirmed F2.3 scope; it does not submit to Hacienda.
 
-2. **Configure fiscal sequence**
-   - Endpoint: `PUT /api/v1/companies/:companyId/fiscal/:environment/sequences/:documentType`
-   - Auth: JWT guard.
-   - Authorization: TENANT_ADMIN only.
-   - Behavior: configures `nextValue` for the default issuance point. If `lastAssigned` exists, rejects with `FISCAL_SEQUENCE_ALREADY_STARTED`.
-
-3. **Create invoice**
-   - Endpoints: `POST /api/v1/invoices` and `POST /api/v1/companies/:companyId/fiscal-documents/:environment/invoices`
-   - Auth: API key guard and scope guard.
-   - Scope: `invoices:write`.
-   - Behavior: creates a fiscal document of type `INVOICE`, requires receiver, idempotency key, active company, authorized API key/company relation, HaciendaConnection not disabled, active default issuance point, sequence allocation and clave generation. Persisted status is `READY_FOR_XML`.
-
-4. **Create ticket**
-   - Endpoints: `POST /api/v1/tickets` and `POST /api/v1/companies/:companyId/fiscal-documents/:environment/tickets`
-   - Auth: API key guard and scope guard.
-   - Scope: `tickets:write`.
-   - Behavior: creates a fiscal document of type `TICKET`; receiver is optional. Persisted status is `READY_FOR_XML`.
-
-5. **Retrieve fiscal document**
-   - Endpoint: `GET /api/v1/fiscal-documents/:id`
-   - Auth: API key guard.
-   - Dynamic authorization in service: requires `invoices:read` for stored type `INVOICE`, `tickets:read` for stored type `TICKET`, plus API-key/company authorization.
-
-Existing non-fiscal use cases include tenant/user auth, company CRUD, API-key lifecycle, Hacienda public lookups and Hacienda connection management.
-
-Implemented Fase 1 Hacienda public query use cases:
-
-1. **Lookup taxpayer**
-   - Endpoint: `GET /api/v1/taxpayers/:identification`.
-   - Auth: API key via `ApiKeyAuthGuard`.
-   - Scope: `taxpayers:read` via `ScopeGuard`.
-   - Rate-limit intent: per-API-key inbound throttling through `ApiKeyThrottlerGuard`.
-
-2. **Lookup/search CABYS**
-   - Endpoints: `GET /api/v1/cabys/:code` and `GET /api/v1/cabys?search=...`.
-   - Auth: API key; scope `cabys:read`.
-   - Validation: direct code must be exactly 13 digits; search query has a minimum-length rule.
-
-3. **Lookup exchange rate**
-   - Endpoint: `GET /api/v1/exchange-rates`.
-   - Auth: API key; scope `exchange-rates:read`.
-
-4. **JWT auth login/refresh**
-   - Endpoints: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`.
-   - Current code applies `@Throttle({ auth: { ttl: 60000, limit: 10 } })` on both methods.
-   - Current code inspection did not find a visible global `ThrottlerGuard`/`APP_GUARD`; therefore enforcement of these decorators is unproven.
-
-5. **Company creation with Hacienda verification metadata**
-   - `Company` includes nullable `haciendaName`, `haciendaVerifiedAt` and `haciendaVerificationStatus` fields.
-   - Status values implemented in domain/schema are `VERIFIED`, `NOT_FOUND`, `UNAVAILABLE`, `ERROR`, `SKIPPED`.
-   - Positive/negative E2E evidence for all status outcomes remains incomplete.
-
----
+F2.3 explicitly does not create fiscal documents and does not submit to Hacienda.
 
 ## 6. Current data flows
 
-### Fiscal creation flow
+### F2.2 creation flow
 
-1. Client calls invoice/ticket endpoint with `X-API-Key` and `Idempotency-Key`.
-2. `ApiKeyAuthGuard` authenticates key; `ScopeGuard` enforces static write scope where declared.
-3. Controller maps request to `FiscalDocumentService.createDocument()`.
-4. Service validates DTO-derived command values and hashes normalized request payload.
-5. Prisma transaction checks active company and API-key company authorization, then reserves the canonical idempotency key before fiscal numbering.
-6. Idempotency reservation uses PostgreSQL `INSERT ... ON CONFLICT DO NOTHING RETURNING` against `fiscal_idempotency_keys`; if an identical completed request already exists, the stored response is returned, and if the same key has a different request hash, a conflict is raised.
-7. After idempotency reservation, the transaction checks HaciendaConnection existence/not disabled and active default issuance point.
-8. Sequence allocation uses raw SQL `INSERT ... ON CONFLICT ... DO UPDATE ... RETURNING` against `fiscal_sequences`.
-9. Consecutive and 50-digit clave are generated; 8-digit security code uses cryptographic `randomInt`.
-10. Totals are calculated with `ScaledDecimal` fixed 5-decimal arithmetic from provided line quantities/prices/discount/tax.
-11. Fiscal document and idempotency state are persisted.
-12. Audit event `fiscal-document.created` is recorded with categorical metadata.
+API-key client calls invoice/ticket creation with `Idempotency-Key`; guards validate key/scopes; service reserves idempotency before sequence allocation in a Prisma transaction; sequence allocation uses PostgreSQL upsert/update; clave/consecutive/totals/snapshots are persisted; sanitized document response is returned.
 
-### Fiscal retrieval flow
+### F2.3 prepare XML flow
 
-1. Client calls `GET /api/v1/fiscal-documents/:id` with `X-API-Key`.
-2. Service loads fiscal document by id and tenant.
-3. Service determines required read scope from persisted type.
-4. Service checks API-key/company authorization.
-5. Audit event `fiscal-document.read` is recorded.
-7. A sanitized fiscal document object is returned; current mapper removes `securityCode` and `requestHash`.
-
----
+1. Load fiscal document by tenant/document id.
+2. Check type-specific API-key scope and company authorization.
+3. If already `READY_TO_SUBMIT`, return existing signed artifact metadata without mutation.
+4. Generate deterministic unsigned FE/TE v4.4 XML from immutable snapshot.
+5. Store unsigned XML through `StoragePort` and hash it.
+6. Run pre-sign structural/business checks.
+7. Load scoped active certificate metadata and secrets through `FiscalSigningCertificateService`/`SecretProviderPort`.
+8. Sign exact unsigned XML through `XmlSignerPort` / `NodeXadesEpesSignerAdapter`.
+9. Verify signed XML locally.
+10. Validate exact signed XML bytes against pinned official FE/TE v4.4 XSDs using `Xsd11ValidatorAdapter`.
+11. Store signed XML through `StoragePort`, persist artifact metadata and transition to `READY_TO_SUBMIT`.
+12. Record audit events without XML bodies or secrets.
 
 ## 7. Database and persistence
 
-Prisma schema now includes F2.2 fiscal models and enums:
+Current fiscal persistence includes:
 
-- `FiscalDocumentType`: `INVOICE`, `TICKET`.
-- `FiscalDocumentStatus`: `READY_FOR_XML`.
-- `FiscalIdempotencyStatus`: `IN_PROGRESS`, `COMPLETED`.
-- `FiscalIssuancePoint` table mapped to `fiscal_issuance_points`.
-- `FiscalSequence` table mapped to `fiscal_sequences`.
-- `FiscalDocument` table mapped to `fiscal_documents`.
-- `FiscalIdempotencyKey` table mapped to `fiscal_idempotency_keys`.
+- `FiscalDocumentStatus`: `READY_FOR_XML`, `XML_GENERATED`, `XML_VALIDATED`, `SIGNED`, `READY_TO_SUBMIT`.
+- `FiscalXmlValidationStatus`: `NOT_VALIDATED`, `VALID`, `INVALID`.
+- `FiscalSigningCertificateStatus`: `ACTIVE`, `DISABLED`, `EXPIRED`, `REPLACED`, `INVALID`.
+- `FiscalSigningCertificateType`: `HACIENDA_CRYPTOGRAPHIC_KEY`, `LEGAL_DIGITAL_SIGNATURE`.
+- `FiscalSigningCertificate` stores certificate/password secret references and non-secret metadata only.
+- `FiscalXmlArtifact` stores private storage keys, SHA-256 hashes, schema/profile/signature metadata, validation status/errors and last error metadata.
 
-Migrations:
+Important constraints:
 
-- `prisma/migrations/20260911140000_fiscal_document_core/migration.sql`
-- `prisma/migrations/20260911143000_fiscal_idempotency_scope/migration.sql`
-- `prisma/migrations/20260912123000_post_f2_2_fiscal_constraints/migration.sql`
+- Scoped fiscal consecutive uniqueness: `(tenant_id, company_id, environment, consecutive)`.
+- Globally unique `clave`.
+- Fiscal XML artifact uniqueness: `(tenant_id, company_id, fiscal_document_id, schema_version, xml_profile_version)`.
+- Idempotency uniqueness: `(tenant_id, company_id, api_key_id, operation, key)`.
 
-Important constraints/indexes currently present after Post-F2.2 remediation:
-
-- Unique issuance point by `companyId`, `environment`, `branchCode`, `terminalCode`.
-- Sequence unique scope by `tenantId`, `companyId`, `environment`, `branchCode`, `terminalCode`, `documentType`.
-- Scoped fiscal document consecutive uniqueness by `tenantId`, `companyId`, `environment`, `consecutive`.
-- Globally unique `fiscal_documents.clave`.
-- Fiscal document indexes by tenant/company/createdAt and tenant/company/status.
-- Non-unique fiscal document lookup index by `tenantId`, `companyId`, `idempotencyKey`.
-- Legacy unique fiscal document idempotency by `tenantId`, `companyId`, `idempotencyKey` has been removed.
-- Unique canonical fiscal idempotency key by `tenantId`, `companyId`, `apiKeyId`, `operation`, `key`.
-- `fiscal_idempotency_keys.api_key_id` references `api_keys.id` with `ON DELETE SET NULL`.
-
-Current persistence implementation uses Prisma directly from the fiscal application service. Fiscal documents persist snapshots as JSON fields (`issuerSnapshot`, optional `receiverSnapshot`, `lines`, `totals`). There is no separate `fiscal_document_lines` table in the implemented schema, despite the original requirement mentioning fiscal document lines.
-
----
+Known persistence gaps include no separate fiscal line table, no partial unique index for one default active issuance point, and audit-noted tenant/company consistency hardening opportunity for F2.3 certificate/artifact relations.
 
 ## 8. APIs and integrations
 
-Fiscal APIs implemented under the global `/api/v1` prefix:
+Current fiscal APIs under `/api/v1`:
 
-| Method/path | Auth | Scope/authorization | Current response |
-|---|---|---|---|
-| `PUT /companies/:companyId/fiscal/:environment/issuance-points/default` | JWT | TENANT_ADMIN role in service | Prisma issuance point record |
-| `PUT /companies/:companyId/fiscal/:environment/sequences/:documentType` | JWT | TENANT_ADMIN role in service | Prisma sequence record |
-| `POST /invoices` | API key | `invoices:write` + company authorization | Sanitized fiscal document object without `securityCode`/`requestHash`; top-level bigint values serialized as strings |
-| `POST /tickets` | API key | `tickets:write` + company authorization | Sanitized fiscal document object without `securityCode`/`requestHash`; top-level bigint values serialized as strings |
-| `POST /companies/:companyId/fiscal-documents/:environment/invoices` | API key | `invoices:write` + company authorization | Sanitized fiscal document object without `securityCode`/`requestHash`; top-level bigint values serialized as strings |
-| `POST /companies/:companyId/fiscal-documents/:environment/tickets` | API key | `tickets:write` + company authorization | Sanitized fiscal document object without `securityCode`/`requestHash`; top-level bigint values serialized as strings |
-| `GET /fiscal-documents/:id` | API key | Dynamic read scope + company authorization | Sanitized fiscal document object without `securityCode`/`requestHash`; top-level bigint values serialized as strings |
+| Method/path | Auth | Current behavior |
+|---|---|---|
+| `POST /invoices` | API key + `invoices:write` | Creates invoice snapshot ending at `READY_FOR_XML`. |
+| `POST /tickets` | API key + `tickets:write` | Creates ticket snapshot ending at `READY_FOR_XML`. |
+| `GET /fiscal-documents/:id` | API key + dynamic read scope | Retrieves sanitized fiscal document. |
+| `POST /fiscal-documents/:id/prepare-xml` | API key + service scope/company checks | Generates, signs, verifies, XSD-validates and stores FE/TE XML; returns `READY_TO_SUBMIT` metadata when successful. No Hacienda submission is performed. |
+| Fiscal management `PUT` endpoints | JWT TENANT_ADMIN | Configure default issuance point and sequence. |
 
-F2.2 does not call Hacienda OIDC, Hacienda submission APIs, XML signing, storage or queue adapters during fiscal document creation.
-
----
+External integrations currently used by F2.3 are local/offline XSD assets, `SecretProviderPort`, `StoragePort`, and local signing/XSD adapters. No Hacienda submission, OAuth token acquisition for submission, polling, callbacks or queues are implemented for F2.3/F3.
 
 ## 9. Authentication and authorization
 
-Current authorization/rate-limiting behavior:
-
-- Fase 1 Hacienda query endpoints use `ApiKeyAuthGuard`, `ApiKeyThrottlerGuard` and `ScopeGuard` at controller level.
-- Fase 1 required scopes are `taxpayers:read`, `cabys:read` and `exchange-rates:read`.
-- `ApiKeyThrottlerGuard` extends `ThrottlerGuard` and uses API-key id as tracker key with IP fallback; this indicates per-key throttling intent, but the exact named-throttler bucket used by the inherited guard is not proven by an endpoint threshold test.
-- Auth login/refresh methods use `@Throttle({ auth: { ttl: 60000, limit: 10 } })`, but code inspection found no visible global `ThrottlerGuard`/`APP_GUARD` registration. Decorator presence alone may not enforce throttling.
-- Creation/read fiscal endpoints use API-key auth.
-- Type-specific fiscal scopes are active: `invoices:write`, `tickets:write`, `invoices:read`, `tickets:read`.
-- `tickets:read` and `tickets:write` are now included in `ALLOWED_API_KEY_SCOPES`.
-- Generic `documents:*` scopes remain allowed/reserved but are not used by fiscal invoice/ticket endpoint annotations or service read checks.
-- API-key/company authorization is checked through `apiKeyCompany` on create and read.
-- Configuration endpoints use JWT auth and an endpoint-local role check requiring `TENANT_ADMIN`.
-
-Known limitation: fiscal management authorization is implemented as a compact role string check in the service, not through a reusable policy/guard.
-
----
+- Fiscal creation/read uses API-key auth with type-specific scopes and company authorization.
+- `/prepare-xml` uses API-key auth and service-level type/company checks.
+- `FiscalXmlController` is decorated with `@SkipThrottle()`, which final audit flags as non-blocking AUD-003 because the endpoint is expensive.
+- Fiscal management uses JWT and TENANT_ADMIN role checks.
+- Existing Fase 1/auth throttling uncertainties remain repository-level risks.
 
 ## 10. Events and background processing
 
 - Fiscal audit events are recorded through `AuditService.record()` using `EventClass.FISCAL_AUDIT`.
-- Current fiscal actions include `fiscal-issuance-point.upserted`, `fiscal-sequence.configured`, `fiscal-document.created`, and `fiscal-document.read`.
+- F2.3 audit actions include XML generation/validation/signing/readiness events per implementation tests.
 - No domain-event bus is implemented for fiscal documents.
-- No fiscal background jobs are implemented.
-- Worker process exists but has no fiscal submission/polling handlers.
-
----
+- No F3 submission workers, queues, polling jobs or callbacks exist.
 
 ## 11. Containers and deployment
 
-Current container/deployment assets:
-
-- `Dockerfile` multi-stage Node/Nest build and runtime image.
-- `docker-compose.yml` with PostgreSQL, LocalStack, API and worker services.
-- GitHub Actions CI workflow exists in `.github/workflows/ci.yml` according to prior documentation/audit.
-
-Known current concerns retained from audit:
-
-- Docker Compose has production-mode/default-secret concerns if reused as production deployment.
-- Existing npm audit vulnerabilities remain a repository-level risk.
-
----
+- `Dockerfile` builds the NestJS app and runner image.
+- Docker evidence supplied after final TASK-011 validation: `docker build -t billing:f23-task011-xmlcrypto-validation --target runner .` passed. Earlier packaging established that the Python XSD helper/assets are included for runtime; this refresh did not re-run container checks.
+- `nest-cli.json` copies helper/assets to `dist/src` for the runtime helper path.
+- `docker-compose.yml` remains local/development oriented; production/default-secret concerns remain.
+- Existing npm audit vulnerabilities remain: 26 reported by `npm ci`/audit evidence.
 
 ## 12. Current testing strategy
 
-Current automated tests include unit tests under `src/**/__tests__` and E2E tests under `test/`.
+Current automated evidence supplied for final post-TASK-011 F2.3 validation gates:
 
-F2.2 fiscal tests currently include:
+- Full gates passed: `npx prisma generate`, `npx prisma validate`, `npx prisma migrate deploy` with `DATABASE_URL`, `npm run lint:check`, `npm run typecheck`, `npm test -- --silent` (217/217), `npm run build`, and `npm run test:e2e -- --silent --runInBand` (60/60).
+- Docker runner build passed: `docker build -t billing:f23-task011-xmlcrypto-validation --target runner .`.
+- TASK-011 tests include `xml-crypto` `SignedXml` independent verifier coverage with Hacienda XPath transform; FE/TE valid signatures pass signer verify, xml-crypto verify and XSD; tamper fails.
+- Existing dependency vulnerabilities remain known/out of scope for this F2.3 refresh.
 
-- `src/modules/fiscal-documents/domain/__tests__/fiscal-key.generator.spec.ts`
-- `src/modules/fiscal-documents/domain/__tests__/scaled-decimal.spec.ts`
-- `test/e2e/fase2/fiscal-documents.e2e-spec.ts`
-- `test/e2e/fase2/fiscal-management.e2e-spec.ts`
-- `test/e2e/fase2/fiscal-concurrency.e2e-spec.ts`
-
-Reported validation after the Post-F2.2 fiscal-document continuation cycle:
-
-- `npm ci`: pass; npm audit reports existing 26 vulnerabilities (4 low, 14 moderate, 8 high).
-- `npx prisma generate && npx prisma validate`: pass.
-- Clean `billing_e2e` reset plus `npx prisma migrate deploy`: pass; 6 migrations applied.
-- `npm run lint`: pass.
-- `npm run lint:check`: pass.
-- `npm run typecheck`: pass.
-- `npm test -- --silent`: pass, 181 tests / 28 suites.
-- `npm run build`: pass.
-- `npm run test:e2e -- --silent`: pass, 57 tests / 11 suites.
-- Fiscal E2E: pass, 15 tests / 3 suites.
-- PostgreSQL concurrency coverage: pass (`test/e2e/fase2/fiscal-concurrency.e2e-spec.ts`).
-
-Current Fase 1 E2E files exist under `test/e2e/fase1`, but repository inspection from the previous refresh showed incomplete positive-response evidence for taxpayer/CABYS/exchange-rate endpoints, rate-limit threshold enforcement, CORS preflight behavior and all company verification statuses. Those Fase 1 evidence gaps are unchanged by the Post-F2.2 fiscal continuation scope.
-
-Current fiscal E2E coverage exists under `test/e2e/fase2` for fiscal document workflows, management endpoints and PostgreSQL-backed concurrency/idempotency scenarios. The fiscal suites cover invoices/tickets, negative authorization paths, tenant/company/environment/document-type isolation, response sanitization and sequence/idempotency race behavior.
-
----
+This architecture refresh did not execute commands; results are recorded from user-provided implementation/audit evidence.
 
 ## 13. Behavior to preserve
 
-- API remains a modular NestJS monolith with `/api/v1` global prefix.
-- Tenant isolation and API-key company authorization checks must remain fail-closed.
-- Existing public Hacienda lookup APIs and HaciendaConnection APIs must remain compatible.
-- Fase 1 Hacienda query endpoints must continue to require API keys and fail closed without required scopes.
-- Auth endpoints should preserve successful login/refresh contracts while enforcing configured brute-force rate limits after approved correction.
-- API-key endpoint throttling should remain per API key, not one global bucket for all clients.
-- Fiscal document creation must stop at `READY_FOR_XML`.
-- No XML/signing/submission side effects occur in F2.2 fiscal creation.
-- Fiscal consecutive format is 20 digits: branch + terminal + document type + 10-digit sequence.
-- Fiscal clave format is 50 digits and uses cryptographic random security code.
-- Sequence allocation must not use `SELECT MAX + 1`.
-- Idempotency key is required for fiscal creation and same-key/different-request conflicts must be rejected.
-
----
+- Modular monolith and `/api/v1` public prefix.
+- Tenant/company/environment isolation and fail-closed API-key authorization.
+- Stable F2.2 creation ending at `READY_FOR_XML`.
+- Immutable fiscal snapshots as source of truth for F2.3 serialization.
+- No Hacienda submission/F3 side effects in F2.3.
+- Deterministic unsigned XML generation from snapshots.
+- Signed XML validated against pinned official XSD after local signature verification.
+- `READY_TO_SUBMIT` retry returns existing artifact metadata and does not silently mutate signed XML.
+- Secrets, certificate material, private keys, passwords and XML bodies are not logged or returned by default.
 
 ## 14. Known defects
 
 | ID | Severity | Current defect |
 |---|---|---|
-| DEF-F1-RATE-001 | High | Auth login/refresh have `@Throttle` decorators, but no visible global `ThrottlerGuard`/`APP_GUARD` registration was found; auth rate limiting may not be enforced. |
-| DEF-F1-RATE-002 | Medium | `ApiKeyThrottlerGuard` indicates per-key throttling intent, but named-throttler bucket/threshold behavior is ambiguous without focused tests. |
-| DEF-F1-E2E-001 | Medium | Fase 1 E2E lacks positive endpoint response coverage for taxpayer, CABYS and exchange-rate happy paths. |
-| DEF-F1-E2E-002 | Medium | Fase 1 evidence gaps remain for CORS preflight and company verification status outcomes (`VERIFIED`, `NOT_FOUND`, `UNAVAILABLE`, `ERROR`, `SKIPPED`). |
-| DEF-F2.2-E2E-001 | Closed | Dedicated fiscal E2E coverage now exists for F2.2 workflow, authorization, management, response sanitization and PostgreSQL concurrency/idempotency scenarios. |
-| DEF-E2E-DB-001 | Closed | Full E2E was validated after explicit clean `billing_e2e` reset and migration deploy; latest evidence reports 57 tests / 11 suites passing. |
-| DEF-F2.2-RESP-001 | Closed | Fiscal responses now remove `securityCode` and `requestHash` before returning fiscal documents. Residual API-contract debt remains because mapping is a compact sanitizer rather than explicit DTO classes. |
-| DEF-F2.2-IDEM-001 | Closed | Fiscal idempotency unique scope now includes `tenantId`, `companyId`, `apiKeyId`, `operation` and `key` via forward migration `20260911143000_fiscal_idempotency_scope`. |
-| DEF-F2.2-LINES-001 | Low | Fiscal lines are stored as JSON in `fiscal_documents.lines`; no separate `FiscalDocumentLine`/`fiscal_document_lines` persistence model exists despite the original requirement. |
-
----
+| AUD-001 | Closed for F2.3 scope | Closed by final baseline audit for confirmed F2.3 acceptance scope. TASK-011 added PKCS#12/PFX handling, DER `ds:X509Certificate`, `xml-crypto` canonicalization for document digest, `SignedProperties` digest and `SignedInfo` signature input, plus independent `xml-crypto` verifier tests with Hacienda XPath transform. Remaining note: production verifier behavior is weaker than the stricter test standards-verifier coverage; Hacienda submission acceptance is out of scope. |
+| AUD-002 | Medium | Concurrent duplicate `prepare-xml` calls may race; idempotency/no-mutation is proven for retry after readiness, not necessarily simultaneous prepare requests. |
+| AUD-003 | Medium | Expensive `prepare-xml` endpoint is decorated with `@SkipThrottle()`, so endpoint throttling/cost protection is absent. |
+| AUD-004 | Medium | Additional DB tenant/company consistency constraints for F2.3 certificate/artifact relations are recommended. |
+| AUD-005 | Closed | Documentation/status ambiguity from earlier audits has been corrected; current docs record final 8.9/10 Acceptable and AUD-001 closed for F2.3 scope. |
+| AUD-006 | Medium | Certificate rotation behavior is partly inferred from no-mutation retry; operational rotation/re-sign policy requires clarification. |
+| AUD-007 | High | Existing 26 npm audit vulnerabilities remain unresolved. |
+| AUD-008 | Medium | Missing UUID validation pipe for path params such as fiscal document id. |
+| DEF-F1-RATE-001 | High | Auth login/refresh throttling enforcement remains unproven from earlier audits. |
+| DEF-F2.2-LINES-001 | Low | Fiscal lines are JSON snapshots rather than a relational line table. |
 
 ## 15. Architectural debt
 
-| ID | Severity | Current debt |
+| ID | Severity | Debt |
 |---|---|---|
-| DEBT-F1-001 | Medium | Layered throttling is split between `@Throttle` decorators and a custom `ApiKeyThrottlerGuard`; active guard registration/named-throttler semantics are not documented by tests. |
-| DEBT-F2.2-001 | Medium | `FiscalDocumentService` combines use-case orchestration, validation, authorization checks, calculations, idempotency, sequence allocation, persistence and audit. |
-| DEBT-F2.2-002 | Medium | Fiscal application service imports and uses `PrismaService` directly instead of fiscal repository output ports/adapters. |
-| DEBT-F2.2-003 | Medium | Dynamic read scope and TENANT_ADMIN management authorization are implemented inside the service rather than in explicit application policies/guards. |
-| DEBT-F2.2-004 | Low | Fiscal document responses use a sanitizer that removes `securityCode`/`requestHash`, but there are not yet explicit response DTO classes/mappers for a stable public contract. |
-| DEBT-F2.2-005 | Low | Fiscal document type names are implemented as `INVOICE`/`TICKET` instead of the requirement terminology `ELECTRONIC_INVOICE`/`ELECTRONIC_TICKET`; Hacienda document codes are correct. |
-| DEBT-F2.2-006 | Low | Fiscal validation is MVP-level; no live/complete catalog validation for all Hacienda v4.4 fields is implemented. |
-
----
+| DEBT-F2.2-001 | Medium | `FiscalDocumentService` remains large and directly uses Prisma for F2.2 creation/read/configuration orchestration. |
+| DEBT-F2.3-001 | Medium | XMLDSig/XAdES is still manually assembled even though TASK-011 now uses `xml-crypto` canonicalization and independent verifier tests. Consider a fuller standards-based signing library/tool before broader production hardening. |
+| DEBT-F2.3-002 | Medium | Prepare orchestration should add explicit concurrency control/locking around transformation attempts. |
+| DEBT-F2.3-003 | Medium | Expensive XML signing/XSD processing needs rate limiting or quota policy. |
+| DEBT-F2.3-004 | Medium | Certificate rotation lifecycle and management use cases need explicit domain policy. |
+| DEBT-API-001 | Low/Medium | Some public responses still rely on compact sanitizers rather than explicit DTO mappers. |
 
 ## 16. Security risks
 
 | ID | Severity | Risk |
 |---|---|---|
-| SEC-F1-001 | High | Auth endpoint rate limiting may not be enforced because `@Throttle` is present but no visible global `ThrottlerGuard`/`APP_GUARD` registration was found. |
-| SEC-F1-002 | Medium | API-key endpoint throttling behavior is not proven at configured threshold; risk is lower than auth because `ApiKeyThrottlerGuard` is explicitly applied to Fase 1 controllers. |
-| SEC-F2.2-001 | Closed | Fiscal document responses remove `securityCode` and `requestHash`, and fiscal E2E tests assert sanitized responses. |
-| SEC-F2.2-002 | Closed | Fiscal E2E tests now cover company authorization, scope denial, idempotency/concurrency behavior and API-key denial on management endpoints for the F2.2 continuation scope. |
-| SEC-REPO-001 | High | Docker Compose production-mode/default-secret concern remains if Compose is reused as production. |
-| SEC-REPO-002 | High | Existing npm audit vulnerabilities remain unresolved. |
-
----
+| SEC-F2.3-001 | Medium | F2.3 local signing verification is accepted for scope, but production verifier behavior is weaker than the stricter test `xml-crypto` standards-verifier coverage and Hacienda receiver acceptance is not proven because F3/submission is out of scope. |
+| SEC-F2.3-002 | Medium | `prepare-xml` is computationally expensive and currently skips throttling. |
+| SEC-F2.3-003 | Medium | Path params without UUID validation can increase error-noise and input-handling exposure. |
+| SEC-REPO-001 | High | Existing npm audit vulnerabilities remain. |
+| SEC-REPO-002 | High | Docker Compose/default-secret concerns remain if reused outside local development. |
+| SEC-F1-001 | High | Auth endpoint rate limiting may not be enforced; earlier audit concern remains. |
 
 ## 17. Unknowns and assumptions
 
-- `securityCode` is currently stored for clave generation traceability but removed from fiscal document responses; whether it should ever be exposed remains **Requires clarification** for future contract decisions.
-- Whether F2.2 intentionally accepted JSON line snapshots instead of a separate `fiscal_document_lines` table: implementation did so, but product/data-reporting implications require clarification.
-- Exact official catalog validation depth expected before XML generation: **Requires clarification**.
-- Full E2E health after resetting the local DB: verified by implementation-agent evidence for this cycle (`npm run test:e2e -- --silent` pass, 57 tests / 11 suites).
-- Exact runtime behavior of `@nestjs/throttler` v6 named throttlers in this configuration requires a focused test or code change approval.
-- CORS preflight behavior is configured in `api.main.ts` but not verified by a current E2E test in this refresh.
-- This refresh did not execute commands; validation status is based on user-provided results, implementation report and audit summary.
+- Real Hacienda/provider PKCS#12/PFX samples cannot be committed; a safe test strategy with synthetic but real X.509 PFX and independent verifier is required.
+- Whether Hacienda accepts the produced XAdES structure against its production receiver remains **Requires clarification** and is out of F2.3/F3 unless a sandbox submission contract test is separately approved.
+- Exact production certificate rotation/re-signing operational policy requires clarification.
+- Whether JSON line snapshots are sufficient long-term for reporting/auditing requires clarification.
+- This refresh did not execute validation commands; it records user-provided automated evidence and audit verdict.

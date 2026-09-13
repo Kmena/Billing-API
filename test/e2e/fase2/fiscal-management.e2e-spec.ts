@@ -1,6 +1,7 @@
 import * as request from 'supertest';
 import {
   authorizeApiKeyForCompany,
+  configureValidCompanyFiscalProfile,
   createEnabledHaciendaConnection,
   createFiscalApiKey,
   createFiscalE2eApp,
@@ -80,6 +81,7 @@ describe('Fiscal Management (E2E)', () => {
   it('rejects sequence reset after the first allocation starts', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await request(context.app.getHttpServer())
       .put(`/api/v1/companies/${fixture.companyId}/fiscal/SANDBOX/issuance-points/default`)
       .set('Authorization', `Bearer ${fixture.jwtToken}`)

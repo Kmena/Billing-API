@@ -2,6 +2,7 @@ import * as request from 'supertest';
 import {
   authorizeApiKeyForCompany,
   configureDefaultFiscalSetup,
+  configureValidCompanyFiscalProfile,
   createEnabledHaciendaConnection,
   createFiscalApiKey,
   createFiscalE2eApp,
@@ -9,6 +10,7 @@ import {
   expectSanitizedFiscalResponse,
   fiscalInvoicePayload,
   fiscalTicketPayload,
+  validCompanyFiscalProfilePayload,
   type FiscalE2eContext,
 } from '../../helpers/fiscal-e2e-helpers';
 describe('Fiscal Documents (E2E)', () => {
@@ -27,6 +29,7 @@ describe('Fiscal Documents (E2E)', () => {
   it('creates invoices and tickets at READY_FOR_XML with sanitized responses', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     await configureDefaultFiscalSetup(context, fixture, 'TICKET');
     const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
@@ -46,6 +49,22 @@ describe('Fiscal Documents (E2E)', () => {
 
     expect(invoiceResponse.body.status).toBe('READY_FOR_XML');
     expect(invoiceResponse.body.type).toBe('INVOICE');
+    expect(invoiceResponse.body.issuerSnapshot).toMatchObject({
+      legalName: expect.any(String),
+      identificationType: 'JURIDICA',
+      codigoActividad: '620210',
+      provincia: '1',
+      canton: '01',
+      distrito: '01',
+      barrio: 'Carmen',
+      otrasSenas: 'Avenida central, edificio fiscal, segundo piso',
+      email: 'facturacion@example.co.cr',
+    });
+    expect(invoiceResponse.body.receiverSnapshot).toMatchObject({
+      name: 'Receiver SA',
+      identificationType: 'JURIDICA',
+      identificationNumber: '3101000001',
+    });
     expectSanitizedFiscalResponse(invoiceResponse.body);
 
     const ticketResponse = await request(context.app.getHttpServer())
@@ -57,12 +76,22 @@ describe('Fiscal Documents (E2E)', () => {
 
     expect(ticketResponse.body.status).toBe('READY_FOR_XML');
     expect(ticketResponse.body.type).toBe('TICKET');
+    expect(ticketResponse.body.issuerSnapshot).toMatchObject({
+      codigoActividad: '620210',
+      provincia: '1',
+      canton: '01',
+      distrito: '01',
+      otrasSenas: 'Avenida central, edificio fiscal, segundo piso',
+      email: 'facturacion@example.co.cr',
+    });
+    expect(ticketResponse.body.receiverSnapshot).toBeNull();
     expectSanitizedFiscalResponse(ticketResponse.body);
   });
 
   it('enforces fiscal create negative paths for scopes, company authorization, API key status and prerequisites', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
 
     const missingScopeKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
@@ -104,6 +133,7 @@ describe('Fiscal Documents (E2E)', () => {
       .expect(({ body }) => expect(body.error.code).toBe('API_KEY_REVOKED'));
 
     const noHaciendaFixture = await createFiscalTenantFixture(context);
+    await configureValidCompanyFiscalProfile(context, noHaciendaFixture);
     await configureDefaultFiscalSetup(context, noHaciendaFixture, 'INVOICE');
     const noHaciendaKey = await createFiscalApiKey(context.prisma, noHaciendaFixture.tenantId, [
       'invoices:write',
@@ -125,6 +155,7 @@ describe('Fiscal Documents (E2E)', () => {
       'SANDBOX',
       'DISABLED',
     );
+    await configureValidCompanyFiscalProfile(context, disabledFixture);
     await configureDefaultFiscalSetup(context, disabledFixture, 'INVOICE');
     const disabledKey = await createFiscalApiKey(context.prisma, disabledFixture.tenantId, [
       'invoices:write',
@@ -144,6 +175,7 @@ describe('Fiscal Documents (E2E)', () => {
       noPointFixture.tenantId,
       noPointFixture.companyId,
     );
+    await configureValidCompanyFiscalProfile(context, noPointFixture);
     const noPointKey = await createFiscalApiKey(context.prisma, noPointFixture.tenantId, [
       'invoices:write',
     ]);
@@ -157,9 +189,130 @@ describe('Fiscal Documents (E2E)', () => {
       .expect(({ body }) => expect(body.error.code).toBe('FISCAL_ISSUANCE_POINT_REQUIRED'));
   });
 
+  it('validates FE/TE receiver rules without fabricating receiver data', async () => {
+    const fixture = await createFiscalTenantFixture(context);
+    await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
+    await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
+    await configureDefaultFiscalSetup(context, fixture, 'TICKET');
+    const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
+      'invoices:write',
+      'tickets:write',
+    ]);
+    await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
+
+    const invoiceWithoutReceiverType = fiscalInvoicePayload(fixture.companyId);
+    delete (invoiceWithoutReceiverType.receiver as Record<string, unknown>).identificationType;
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'invoice-missing-receiver-type')
+      .send(invoiceWithoutReceiverType)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('RECEIVER_IDENTIFICATION_REQUIRED'));
+
+    const ticketWithoutReceiver = await request(context.app.getHttpServer())
+      .post('/api/v1/tickets')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'ticket-without-receiver')
+      .send(fiscalTicketPayload(fixture.companyId))
+      .expect(201);
+    expect(ticketWithoutReceiver.body.receiverSnapshot).toBeNull();
+
+    const ticketWithIncompleteReceiver = fiscalTicketPayload(fixture.companyId) as ReturnType<
+      typeof fiscalTicketPayload
+    > & { receiver?: Record<string, unknown> };
+    ticketWithIncompleteReceiver.receiver = {
+      name: 'Receiver SA',
+      identificationNumber: '3101000000',
+    };
+    await request(context.app.getHttpServer())
+      .post('/api/v1/tickets')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'ticket-incomplete-receiver')
+      .send(ticketWithIncompleteReceiver)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('RECEIVER_IDENTIFICATION_REQUIRED'));
+  });
+
+  it('rejects unsupported fiscal conditionals before READY_FOR_XML', async () => {
+    const fixture = await createFiscalTenantFixture(context);
+    await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
+    await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
+    const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
+    await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
+
+    const taxablePayload = fiscalInvoicePayload(fixture.companyId) as ReturnType<
+      typeof fiscalInvoicePayload
+    > & { lines: Array<{ taxAmount?: string }> };
+    taxablePayload.lines[0].taxAmount = '130.00000';
+    delete (taxablePayload.lines[0] as { taxCode?: string }).taxCode;
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'unsupported-tax-metadata')
+      .send(taxablePayload)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_TAX_METADATA_REQUIRED'));
+
+    const discountPayload = fiscalInvoicePayload(fixture.companyId) as ReturnType<
+      typeof fiscalInvoicePayload
+    > & { lines: Array<{ discountAmount?: string }> };
+    discountPayload.lines[0].discountAmount = '100.00000';
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'unsupported-discount-metadata')
+      .send(discountPayload)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_DISCOUNT_METADATA'));
+
+    const unsupportedUnitPayload = fiscalInvoicePayload(fixture.companyId);
+    unsupportedUnitPayload.lines[0].unitMeasure = 'Kg';
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'unsupported-unit-measure')
+      .send(unsupportedUnitPayload)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_UNIT_MEASURE'));
+
+    const unsupportedSaleConditionPayload = fiscalInvoicePayload(fixture.companyId);
+    unsupportedSaleConditionPayload.saleCondition = '02';
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'unsupported-sale-condition')
+      .send(unsupportedSaleConditionPayload)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_SALE_CONDITION'));
+
+    await expectDocumentAndSequenceCounts(fixture.tenantId, fixture.companyId, 'INVOICE', 0, '1');
+  });
+
+  it('rejects fiscal document creation before issuer fiscal profile readiness', async () => {
+    const fixture = await createFiscalTenantFixture(context);
+    await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
+    const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
+    await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
+
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'missing-fiscal-profile')
+      .send(fiscalInvoicePayload(fixture.companyId))
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('COMPANY_FISCAL_PROFILE_REQUIRED'));
+
+    await expectDocumentAndSequenceCounts(fixture.tenantId, fixture.companyId, 'INVOICE', 0, '1');
+  });
+
   it('enforces type-specific read scopes and rejects generic documents:read bypass', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     await configureDefaultFiscalSetup(context, fixture, 'TICKET');
     const writerKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
@@ -225,6 +378,7 @@ describe('Fiscal Documents (E2E)', () => {
   it('preserves idempotent replay, conflict, operation scope and API-key scope behavior', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
     await configureDefaultFiscalSetup(context, fixture, 'TICKET');
     const apiKeyA = await createFiscalApiKey(context.prisma, fixture.tenantId, [
@@ -242,6 +396,16 @@ describe('Fiscal Documents (E2E)', () => {
       .set('Idempotency-Key', 'idem-replay')
       .send(payload)
       .expect(201);
+    await request(context.app.getHttpServer())
+      .put(`/api/v1/companies/${fixture.companyId}/fiscal-profile`)
+      .set('Authorization', `Bearer ${fixture.jwtToken}`)
+      .send({
+        ...validCompanyFiscalProfilePayload(),
+        economicActivityCode: '722001',
+        email: 'replay-profile-b@example.co.cr',
+      })
+      .expect(200);
+
     const replayResponse = await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKeyA.secret)
@@ -252,6 +416,8 @@ describe('Fiscal Documents (E2E)', () => {
     expect(replayResponse.body.id).toBe(firstResponse.body.id);
     expect(replayResponse.body.consecutive).toBe(firstResponse.body.consecutive);
     expect(replayResponse.body.clave).toBe(firstResponse.body.clave);
+    expect(replayResponse.body.issuerSnapshot.codigoActividad).toBe('620210');
+    expect(replayResponse.body.issuerSnapshot.email).toBe('facturacion@example.co.cr');
     expectSanitizedFiscalResponse(replayResponse.body);
     await expectDocumentAndSequenceCounts(fixture.tenantId, fixture.companyId, 'INVOICE', 1, '2');
 
@@ -315,6 +481,7 @@ describe('Fiscal Documents (E2E)', () => {
     const tenantA = await createFiscalTenantFixture(context);
     const tenantB = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, tenantB.tenantId, tenantB.companyId);
+    await configureValidCompanyFiscalProfile(context, tenantB);
     await configureDefaultFiscalSetup(context, tenantB, 'INVOICE');
     const keyA = await createFiscalApiKey(context.prisma, tenantA.tenantId, [
       'invoices:write',

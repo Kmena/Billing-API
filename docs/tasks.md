@@ -1,7 +1,7 @@
 # Tasks
 
-> **Synchronized:** Documentation-only ownership reconciliation for canonical `specs/post-f2-2-remediation` by `sdd-implementation-agent-c13b28` on 2026-09-12. No production code, tests or Prisma migrations modified.
-> Current validation evidence reported by user: `npm ci`, Prisma generate/validate, clean `billing_e2e` reset plus migration deploy, lint/lint:check, typecheck, unit suite (181/28), build and full E2E (57/11) all pass; npm audit vulnerabilities remain pre-existing/out of scope. Latest Post-F2.2 continuation audit score: **9.0/10**. New future tasks below remain **Proposed** until explicitly approved.
+> **Synchronized:** Final architecture documentation refresh for confirmed `specs/fase-2-3-fiscal-xml-signing/` by `hdd-architecture-agent-d7922b` on 2026-09-13 after TASK-011 and post-remediation audit. Documentation-only; no production code, tests, Prisma schema or migrations modified by this agent.
+> F2.3 final implementation evidence passed after TASK-011: Prisma generate/validate/migrate deploy with `DATABASE_URL`, lint:check, typecheck, unit 217/217, build, full E2E 60/60 and Docker runner build `billing:f23-task011-xmlcrypto-validation`. Final baseline audit scored **8.9/10**, verdict **Acceptable**. Prior AUD-001 is closed for the confirmed F2.3 acceptance scope and no longer blocking. Remaining hardening tasks below remain **Proposed** until explicitly approved.
 
 ---
 
@@ -156,6 +156,138 @@
 **Migration considerations:** None.
 **Rollback or mitigation:** Revert guard changes if threshold behavior regresses; retain characterization tests to guide a narrower fix.
 **Risk:** Medium.
+
+---
+
+## TASK-044: Record closure of F2.3 AUD-001 after TASK-011 xml-crypto validation
+**Status:** Completed
+**Priority:** High
+**Domain:** Fiscal XML and Signing / Architecture Documentation
+**Requirement:** F2.3 FR-016, FR-017, FR-018, NFR-005, NFR-006, AC-007, AC-008, AC-017; final audit closure of prior AUD-001.
+**Reason:** Final audit now accepts the confirmed F2.3 scope and prior AUD-001 is no longer blocking.
+**Current problem:** Resolved for confirmed F2.3 scope. Remaining non-blocking notes are production verifier weaker than the stricter test standards verifier and XMLDSig/XAdES still manually assembled.
+**Proposed change:** Completed documentation refresh recording that TASK-011 canonicalizes document digest, `SignedProperties` digest and `SignedInfo` signature input using `xml-crypto`; tests include `xml-crypto` `SignedXml` independent verifier with Hacienda XPath transform; valid FE/TE pass signer verify, xml-crypto verify and XSD; tamper fails.
+**Affected files:** `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md`, `specs/fase-2-3-fiscal-xml-signing/*` documentation.
+**Dependencies:** User-provided final audit result 8.9/10 Acceptable and validation evidence from `sdd-implementation-agent-4a564c`.
+**Database impact:** None; documentation records existing migration `20260912180000_fiscal_xml_signing_metadata`.
+**API impact:** None; `/api/v1/fiscal-documents/:id/prepare-xml` remains local prepare/sign/verify/XSD only.
+**Container impact:** Documentation records Docker build `billing:f23-task011-xmlcrypto-validation` passed.
+**Security impact:** Positive; prevents stale blocked status and records remaining non-blocking verifier/manual-assembly risks without overstating Hacienda acceptance.
+**Acceptance criteria:** Docs state F2.3 accepted for confirmed local scope, AUD-001 closed for scope, no F3 submission, and remaining hardening tasks remain Proposed.
+**Required tests:** Documentation review only by this agent. Validation commands were not executed by this documentation refresh.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert documentation if final audit/evidence is contradicted.
+**Risk:** Low.
+
+---
+
+## TASK-045: Add concurrency guard for simultaneous F2.3 prepare requests
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Fiscal XML
+**Requirement:** F2.3 FR-022, FR-023, BR-003; final audit AUD-002.
+**Reason:** Retry after `READY_TO_SUBMIT` is covered, but simultaneous duplicate `prepare-xml` requests may race.
+**Current problem:** Current prepare orchestration does not have explicit documented row/advisory locking or concurrent duplicate E2E evidence.
+**Proposed change:** Add a per-document concurrency guard using transaction row locking, advisory lock, status transition compare-and-set, or repository-level lock. Add E2E proving simultaneous duplicate requests do not create conflicting artifacts or mutate signed XML.
+**Affected files:** `src/modules/fiscal-documents/application/fiscal-xml/prepare-fiscal-xml.service.ts`, fiscal XML persistence code/tests, E2E tests.
+**Dependencies:** Prefer after TASK-044 or in parallel only if signer behavior is not touched.
+**Database impact:** Possibly none if row locks are enough; possible forward-only migration if lock metadata is needed.
+**API impact:** May introduce deterministic 409/423/202-style behavior for in-progress duplicate prepare attempts; compatibility impact must be documented before implementation.
+**Container impact:** None expected.
+**Security impact:** Medium positive impact through integrity and DoS/race reduction.
+**Acceptance criteria:** Concurrent prepare calls for the same document are safe; at most one signed artifact is persisted; retries after readiness return existing metadata; failure remains recoverable.
+**Required tests:** PostgreSQL concurrency E2E, unit/application tests for lock behavior, full relevant gates.
+**Migration considerations:** Use forward-only migration only if required; never edit existing migrations.
+**Rollback or mitigation:** Remove new lock path if deadlocks/regressions occur; keep artifact uniqueness as backstop.
+**Risk:** Medium.
+
+---
+
+## TASK-046: Add prepare-xml rate limiting or quota policy
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** API Keys / Fiscal XML / Security
+**Requirement:** F2.3 NFR-008 and final audit AUD-003.
+**Reason:** XML signing and XSD validation are CPU/IO expensive.
+**Current problem:** `FiscalXmlController` currently has `@SkipThrottle()`, so the expensive `prepare-xml` endpoint bypasses throttling.
+**Proposed change:** Define and enforce a prepare-specific API-key/tenant/company throttle or quota policy, preserving normal successful response contracts and documenting 429 behavior.
+**Affected files:** `src/modules/fiscal-documents/infrastructure/http/fiscal-xml.controller.ts`, throttling guards/config, E2E tests, docs.
+**Dependencies:** Decision on quota/threshold values and interaction with existing API-key throttler.
+**Database impact:** None expected unless quota persistence is introduced.
+**API impact:** Adds 429 behavior after threshold; no success contract change.
+**Container impact:** None.
+**Security impact:** Medium positive impact by reducing endpoint abuse risk.
+**Acceptance criteria:** Same API key is throttled after configured prepare threshold; independent keys do not share a bucket unless tenant quota says so; normal requests below threshold work.
+**Required tests:** Prepare endpoint throttling E2E, relevant unit tests, lint/typecheck/build/E2E.
+**Migration considerations:** None expected.
+**Rollback or mitigation:** Revert guard binding/threshold if legitimate traffic is blocked; document temporary operational controls.
+**Risk:** Medium.
+
+---
+
+## TASK-047: Harden F2.3 DB tenant/company consistency constraints
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal Documents / Database Integrity
+**Requirement:** F2.3 FR-014, FR-015, FR-019; final audit AUD-004.
+**Reason:** Application-level checks exist, but DB-level constraints can better prevent cross-tenant/company drift in certificate/artifact metadata.
+**Current problem:** F2.3 artifact/certificate relations can be further constrained for tenant/company consistency.
+**Proposed change:** Evaluate and add forward-only PostgreSQL constraints/indexes/compound FKs where feasible, or document why application-level invariants are the active choice.
+**Affected files:** `prisma/schema.prisma`, new Prisma migration, persistence tests, docs.
+**Dependencies:** Database design decision; no edits to applied migrations.
+**Database impact:** Yes if implemented; may add compound unique constraints or FKs.
+**API impact:** None intended; constraint violations should map to deterministic internal errors if reachable.
+**Container impact:** None.
+**Security impact:** Medium positive impact through stronger tenant isolation integrity.
+**Acceptance criteria:** Constraint strategy documented; migration deploys from zero; tests prove cross-tenant/company invalid references cannot be persisted.
+**Required tests:** Prisma validate/generate/migrate deploy, persistence integration/E2E tests.
+**Migration considerations:** Check existing data before adding constraints; use forward-only migration.
+**Rollback or mitigation:** Use compensating migration if constraints cause unexpected deployment issue.
+**Risk:** Medium.
+
+---
+
+## TASK-048: Clarify and test F2.3 certificate rotation policy
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** Fiscal XML and Signing / Certificate Lifecycle
+**Requirement:** F2.3 FR-024, BR-003, BR-004; final audit AUD-006.
+**Reason:** Rotation behavior affects future signing attempts and immutable already signed artifacts.
+**Current problem:** Existing retry no-mutation evidence is not a complete operational rotation policy.
+**Proposed change:** Document and implement tests for active/replaced/disabled certificate behavior, future signing with replacement certificate, and no silent mutation of existing `READY_TO_SUBMIT` artifacts. Explicit re-signing remains out of scope unless separately approved.
+**Affected files:** `src/modules/fiscal-documents/application/fiscal-xml/fiscal-signing-certificate.service.ts`, `prepare-fiscal-xml.service.ts`, tests, canonical F2.3 docs.
+**Dependencies:** Product decision on replacement selection and whether explicit re-signing is allowed later.
+**Database impact:** Likely none; existing `replacedById` may be sufficient.
+**API impact:** None unless management endpoints are introduced; management endpoints are not required for this task.
+**Container impact:** None.
+**Security impact:** Medium positive impact by preventing wrong/stale certificate use.
+**Acceptance criteria:** Future READY_FOR_XML documents use the active replacement certificate; existing READY_TO_SUBMIT docs retain original certificate metadata on retry; disabled/expired/replaced cert selection is deterministic.
+**Required tests:** Unit/application tests and E2E if practical.
+**Migration considerations:** None expected.
+**Rollback or mitigation:** Keep existing active-certificate behavior until policy tests pass.
+**Risk:** Medium.
+
+---
+
+## TASK-049: Add UUID validation for fiscal path parameters
+**Status:** Proposed
+**Priority:** Medium
+**Domain:** API / Security / Fiscal Documents
+**Requirement:** Secure input validation; final audit AUD-008.
+**Reason:** Path params such as fiscal document id should be validated before service use.
+**Current problem:** Missing UUID validation pipe can cause noisy errors and weaker input boundary hygiene.
+**Proposed change:** Add `ParseUUIDPipe` or a repository-wide equivalent for fiscal path params, including `/fiscal-documents/:id` and `/fiscal-documents/:id/prepare-xml`.
+**Affected files:** Fiscal controllers, possibly shared validation utilities, API tests.
+**Dependencies:** Decide global vs per-controller validation style.
+**Database impact:** None.
+**API impact:** Invalid IDs should return deterministic validation errors; valid UUID behavior unchanged.
+**Container impact:** None.
+**Security impact:** Medium positive impact through stricter input validation.
+**Acceptance criteria:** Invalid UUID path params fail before service/database access; valid IDs continue to work; error format is documented/consistent.
+**Required tests:** Controller/E2E tests for invalid and valid UUIDs; lint/typecheck/unit/E2E.
+**Migration considerations:** None.
+**Rollback or mitigation:** Revert per-route pipes if error contract incompatibility is unacceptable and replace with compatible validation filter.
+**Risk:** Low/Medium.
 
 ---
 
@@ -442,3 +574,21 @@
 **Migration considerations:** None.
 **Rollback or mitigation:** Revert lockfile/package changes if regressions occur; patch selectively.
 **Risk:** Medium.
+
+
+---
+
+## TASK-036: F2.2/F2.3 end-to-end fiscal data remediation finalization
+**Status:** Completed
+**Completed at:** 2026-09-13
+**Agent:** sdd-implementation-agent-458e19
+**Canonical spec:** `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/`
+**Priority:** High
+**Domain:** Fiscal Documents / Fiscal XML / Company Fiscal Profile
+**Requirement:** Record completed cross-phase remediation from normal FE/TE API creation through `READY_TO_SUBMIT` without implementing F3.
+**Completion evidence:** TASK-001 through TASK-022 completed in the canonical spec. Final re-audit PASS with non-blocking concerns, score 8.8/10.
+**Implemented behavior:** `CompanyFiscalProfile` owns issuer fiscal readiness data including structured address and `proveedorSistemas`; F2.2 validates and snapshots all current supported fiscal data before `READY_FOR_XML`; F2.3 consumes immutable snapshots only; normal FE/TE API paths reach `READY_TO_SUBMIT`.
+**Current supported values:** unit measures `Sp` and `Unid`; non-zero tax requires `taxCode`, `taxRateCode`, `taxRate` and `taxAmount`.
+**Explicitly unsupported/rejected values:** non-zero `discountAmount`, unsupported unit measures, saleCondition `02`/`09`/`11`/`99`, paymentMethod `99`, missing/invalid tax metadata.
+**Validation evidence:** `npm run test -- hacienda-v44-xml-serializer.adapter fiscal-identification.mapper --silent` PASS; `npm run typecheck` PASS; `npm run lint:check` PASS; `npm run build` PASS; targeted E2E fiscal-documents + fiscal-xml-signing PASS, 2 suites / 11 tests.
+**Out of scope:** F3 Hacienda submission, Hacienda response processing, polling, retry/reconciliation workflows.

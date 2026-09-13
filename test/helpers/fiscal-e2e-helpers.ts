@@ -61,6 +61,9 @@ export function assertSafeTestDatabaseUrl(databaseUrl = process.env.DATABASE_URL
 
 export async function resetFiscalE2eData(prisma: PrismaClient): Promise<void> {
   assertSafeTestDatabaseUrl();
+  await prisma.fiscalXmlArtifact.deleteMany();
+  await prisma.fiscalSigningCertificate.deleteMany();
+  await prisma.companyFiscalProfile.deleteMany();
   await prisma.fiscalIdempotencyKey.deleteMany();
   await prisma.fiscalDocument.deleteMany();
   await prisma.fiscalSequence.deleteMany();
@@ -153,6 +156,32 @@ export async function createEnabledHaciendaConnection(
   });
 }
 
+export async function configureValidCompanyFiscalProfile(
+  context: FiscalE2eContext,
+  fixture: FiscalTenantFixture,
+): Promise<void> {
+  await request(context.app.getHttpServer())
+    .put(`/api/v1/companies/${fixture.companyId}/fiscal-profile`)
+    .set('Authorization', `Bearer ${fixture.jwtToken}`)
+    .send(validCompanyFiscalProfilePayload())
+    .expect(200);
+}
+
+export function validCompanyFiscalProfilePayload() {
+  return {
+    economicActivityCode: '620210',
+    proveedorSistemas: '3101234567',
+    province: '1',
+    canton: '01',
+    district: '01',
+    barrio: 'Carmen',
+    otrasSenas: 'Avenida central, edificio fiscal, segundo piso',
+    email: 'facturacion@example.co.cr',
+    phoneCountryCode: '506',
+    phoneNumber: '22223333',
+  };
+}
+
 export async function configureDefaultFiscalSetup(
   context: FiscalE2eContext,
   fixture: FiscalTenantFixture,
@@ -180,7 +209,12 @@ export function fiscalInvoicePayload(
   return {
     companyId,
     environment,
-    receiver: { name: 'Receiver SA', identificationNumber: '3101000000' },
+    receiver: {
+      name: 'Receiver SA',
+      identificationType: 'JURIDICA',
+      identificationNumber: '3101000001',
+      email: 'receptor@example.co.cr',
+    },
     currency: 'CRC',
     saleCondition: '01',
     paymentMethod: '01',
@@ -193,6 +227,9 @@ export function fiscalInvoicePayload(
         quantity: '1.00000',
         unitPrice: '1000.00000',
         taxAmount: '130.00000',
+        taxCode: '01',
+        taxRateCode: '08',
+        taxRate: '13.00000',
       },
     ],
   };
@@ -216,6 +253,10 @@ export function fiscalTicketPayload(
         unitMeasure: 'Unid',
         quantity: '2.00000',
         unitPrice: '500.00000',
+        taxAmount: '130.00000',
+        taxCode: '01',
+        taxRateCode: '08',
+        taxRate: '13.00000',
       },
     ],
   };

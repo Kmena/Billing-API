@@ -1,5 +1,81 @@
 # Changelog — Billing API
 
+## [f2-2-to-f2-3-end-to-end-fiscal-data-remediation-final] — 2026-09-13
+
+**Agent:** sdd-implementation-agent-458e19
+**Canonical spec:** `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/`
+**Scope:** Final TASK-021 audit remediation and TASK-022 documentation reconciliation for normal F2.2 FE/TE API creation through F2.3 XML/sign/XSD validation to `READY_TO_SUBMIT`. No F3/Hacienda submission implemented.
+
+### Changed
+- Added explicit line tax metadata support for non-zero tax: `taxCode`, `taxRateCode`, `taxRate`, `taxAmount`.
+- F2.2 rejects missing/invalid tax metadata, non-zero discounts, unsupported unit measures and unsupported sale/payment conditionals before `READY_FOR_XML`.
+- F2.3 serializer consumes tax metadata and `proveedorSistemas` from immutable snapshots and rejects unsupported legacy seeded values.
+- `CompanyFiscalProfile.proveedorSistemas` is required for fiscal readiness and snapshotted for XML generation.
+- Documentation reconciled to record the `CompanyFiscalProfile` ownership model, immutable F2.2 -> F2.3 boundary, `READY_FOR_XML` completeness invariant and `READY_TO_SUBMIT` final pre-F3 boundary.
+
+### Validation
+- Final re-audit: PASS with non-blocking concerns, score **8.8/10**.
+- `npm run test -- hacienda-v44-xml-serializer.adapter fiscal-identification.mapper --silent` — PASS, 2 suites / 10 tests.
+- `npm run typecheck` — PASS.
+- `npm run lint:check` — PASS.
+- `npm run build` — PASS.
+- Targeted E2E fiscal-documents + fiscal-xml-signing — PASS, 2 suites / 11 tests.
+
+---
+
+## [f2-3-post-task-011-architecture-refresh] — 2026-09-13
+
+**Agent:** hdd-architecture-agent-d7922b
+**Canonical spec:** `specs/fase-2-3-fiscal-xml-signing/`
+**Scope:** Final architecture-facing documentation refresh for confirmed F2.3 only after TASK-011 and post-remediation baseline audit. No production code, tests, Prisma schema or migrations changed by this agent.
+
+### Documentation
+- Refreshed root architecture-facing docs to reflect actual final post-TASK-011 state: automated gates pass and F2.3 is accepted for the confirmed local prepare/sign/verify/XSD scope.
+- Recorded final baseline audit evidence: score **8.9/10**, verdict **Acceptable**, prior AUD-001 closed for confirmed F2.3 acceptance scope and no longer blocking.
+- Updated AUD-001 language from stale “partially remediated/blocked” wording to closure-for-scope, while preserving non-blocking notes: production verifier weaker than the stricter test standards verifier and XMLDSig/XAdES still manually assembled.
+- Preserved traceability to TASK-011 improvements: PKCS#12/PFX base64 via `SecretProviderPort`, raw PFX to `XmlSignerPort`, node-forge PFX parsing, structurally real X.509 fixtures, DER `ds:X509Certificate`, `xml-crypto` canonicalization and independent `xml-crypto` `SignedXml` verifier tests with Hacienda XPath transform.
+- Kept Hacienda submission/F3 explicitly out of scope.
+
+### Validation
+- No commands were executed by this documentation-only architecture refresh. It records supplied evidence: Prisma generate/validate/migrate deploy with `DATABASE_URL`, lint:check, typecheck, unit 217/217, build, full E2E 60/60 and Docker build `billing:f23-task011-xmlcrypto-validation` passed.
+
+---
+
+## [f2-3-final-audit-architecture-refresh] — 2026-09-13
+
+**Agent:** hdd-architecture-agent-e61dc0
+**Canonical spec:** `specs/fase-2-3-fiscal-xml-signing/`
+**Scope:** Historical architecture-facing documentation refresh after an earlier F2.3 baseline audit. Superseded for current F2.3 status by `[f2-3-post-task-011-architecture-refresh]` above. No production code, tests, Prisma schema or migrations changed by this agent.
+
+### Documentation
+- Refreshed root `docs/current-state.md`, `docs/architecture.md`, `docs/action-plan.md`, `docs/tasks.md` and `docs/future-architecture.md` to reflect the then-audited historical state. This was later superseded by final TASK-011 acceptance.
+- Explicitly separated implemented current state from target/future remediation.
+- Recorded then-current baseline audit evidence: score **7.4/10**, verdict **Needs Refactoring**, no Critical findings, High blocker **AUD-001**. Superseded by final post-TASK-011 audit score **8.9/10 Acceptable** with AUD-001 closed for confirmed F2.3 scope.
+- Added proposed remediation path for production-grade PKCS#12/PFX + real X.509/XAdES interoperability evidence behind `XmlSignerPort`.
+- Added proposed follow-up tasks for AUD-001 through AUD-004, AUD-006 and AUD-008. Existing npm audit vulnerability remediation remains tracked as TASK-035.
+
+### Validation
+- No commands were executed by this documentation-only architecture refresh. It records then-supplied pre-TASK-011 evidence. Current post-TASK-011 evidence is recorded in the newer changelog entry above.
+
+---
+
+## [f2-3-documentation-ownership-reconciliation] — 2026-09-12
+
+**Agent:** sdd-implementation-agent-4a564c
+**Canonical spec:** `specs/fase-2-3-fiscal-xml-signing`
+**Scope:** Documentation/spec ownership reconciliation only. No production code, tests, Prisma schema, migrations, packages, Docker or CI files changed.
+
+### Documentation
+- Updated global current-state/architecture/future-architecture status from F2.3 not started to F2.3 in progress/blocked.
+- Recorded that partial F2.3 XML/persistence/signing/orchestration code exists but is not production-complete.
+- Recorded that official Hacienda v4.4 XSD validation is blocked until an XSD 1.1-capable validator replaces the rejected libxml2/libxmljs2 strategy.
+- Cleaned misfiled F2.3 entries under `specs/fase-1-hacienda-consultas/` into historical cross-references.
+
+### Validation
+- No validation commands were executed; this was documentation-only reconciliation.
+
+---
+
 ## [post-f2-2-remediation-final-architecture-refresh] — 2026-09-12
 
 **Agent:** hdd-architecture-agent-7fd8b9
@@ -7,7 +83,7 @@
 **Scope:** Final architecture-facing documentation refresh after confirmed Post-F2.2 remediation completion and canonical ownership reconciliation. No production code, tests or Prisma migrations changed.
 
 ### Documentation
-- Confirmed root architecture/current-state/action-plan/tasks/audit docs already reflect completed Foundation, Fase 1, F2.1, F2.2 at `READY_FOR_XML`, completed canonical Post-F2.2 remediation and F2.3 not started.
+- Historical note: at the time of this Post-F2.2 refresh, root architecture/current-state/action-plan/tasks/audit docs were reviewed for completed Foundation, Fase 1, F2.1, F2.2 at `READY_FOR_XML`, completed canonical Post-F2.2 remediation and then-current F2.3 status.
 - Updated `docs/future-architecture.md` header to reference the canonical Post-F2.2 spec and final refresh instead of the older F2.2 hardening refresh label.
 - Corrected one historical Fase 1 implementation-report deviation note so it cannot be read as assigning canonical Post-F2.2 ownership to `specs/fase-1-hacienda-consultas/`.
 

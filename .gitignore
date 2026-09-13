@@ -30,6 +30,7 @@ build/
 
 # Signed fiscal documents — contain real fiscal data; must never be committed
 SIGNED_*.xml
+storage/
 
 # Editor directories and files
 .idea/

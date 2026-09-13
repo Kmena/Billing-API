@@ -1,47 +1,39 @@
 # Future Architecture
 
-> **Synchronized:** Final architecture documentation refresh for canonical `specs/post-f2-2-remediation` by `hdd-architecture-agent-7fd8b9` on 2026-09-12. Documentation-only change; no production code, tests or Prisma migrations modified.
-> This document describes proposed future-state architecture only. For implemented architecture, see `docs/architecture.md`; for staged work, see `docs/action-plan.md` and `docs/tasks.md`.
-> Post-F2.2 remediation is complete; F2.3 XML/XSD/XAdES remains not started.
+> **Synchronized:** Final F2.2/F2.3 cross-phase remediation refresh for confirmed `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/` by `sdd-implementation-agent-458e19` on 2026-09-13. Current remediation is complete through `READY_TO_SUBMIT`; future architecture must treat F3/Hacienda submission as separate NOT STARTED scope. Any expansion beyond supported units `Sp`/`Unid`, explicit tax metadata, and current unsupported discount/sale/payment conditionals requires a new approved specification.
 
----
+> **Synchronized:** Final F2.3 architecture refresh by `hdd-architecture-agent-d7922b` on 2026-09-13 after TASK-011 and post-remediation audit. Documentation-only; no production code modified.
+> This document contains target/future architecture only. Current implemented state is in `docs/current-state.md` and `docs/architecture.md`.
 
 ## 1. Vision summary
 
-Billing should continue evolving as an API-first modular monolith for Costa Rica electronic invoicing, with explicit domain boundaries, stable public contracts, strong tenant isolation, audited fiscal workflows and asynchronous processing only where document generation/submission requires it.
+Billing should continue as an API-first modular monolith with explicit domain boundaries, stable public contracts, strong tenant/company isolation, audited fiscal workflows and replaceable infrastructure adapters.
 
-F2.2 fiscal document core is now implemented as a local persistence/core workflow ending at `READY_FOR_XML`. Future architecture should build on that baseline rather than replacing it wholesale.
-
----
+For F2.3, the confirmed local XML preparation scope is complete and prior AUD-001 is closed. Future architecture should preserve the implemented XML/XSD/signing pipeline and only consider non-blocking hardening: stricter production verification, reducing manual XMLDSig/XAdES assembly, prepare concurrency characterization, throttling, DB consistency and dependency remediation.
 
 ## 2. Business and technical drivers
 
-- Costa Rica Ministerio de Hacienda v4.4 compliance.
-- Stable integration APIs for external clients.
-- Immutable fiscal snapshots suitable for later XML generation.
-- Strict tenant/company/API-key authorization boundaries.
-- Fiscal auditability and long-term traceability.
-- Reliable sequence allocation and idempotent creation.
-- Incremental modernization toward stricter hexagonal boundaries.
-- Avoid microservices until operational evidence justifies decomposition.
-
----
+- Costa Rica Hacienda v4.4 FE/TE XML compliance.
+- Legally meaningful signed XML artifacts before future submission.
+- Immutable fiscal snapshots and artifact traceability.
+- Secret-safe certificate handling.
+- Independent verification rather than library self-trust.
+- Incremental hexagonal modernization without microservices.
+- Reproducible offline validation and container packaging.
 
 ## 3. Target architectural style
 
-Target style remains a modular monolith with stricter ports-and-adapters boundaries over time:
+Target style remains a modular monolith with ports and adapters:
 
 ```text
-HTTP/Worker adapters
-  -> Application input ports / use cases
-    -> Domain entities, value objects, policies and events
+HTTP / future worker adapters
+  -> Application use cases
+    -> Domain contracts, policies and value objects
     -> Output ports
-      <- Prisma/Hacienda/Storage/Queue/Signing adapters
+      <- Prisma / Storage / SecretProvider / XSD / Signing / future Hacienda adapters
 ```
 
-Future fiscal code should avoid direct Prisma usage in application use cases once persistence ports/adapters are extracted. Controllers should return explicit DTOs instead of ORM records.
-
----
+The signing implementation must remain replaceable behind `XmlSignerPort` so future verifier/manual-assembly hardening can be performed without rewriting `PrepareFiscalXmlService`.
 
 ## 4. Target domain map and bounded contexts
 
@@ -49,131 +41,112 @@ Future fiscal code should avoid direct Prisma usage in application use cases onc
 |---|---|---|
 | Identity and Access | Implemented | Tenants, users, JWT, API keys, scopes and company authorization. |
 | Company Administration | Implemented | Company fiscal identity and ownership. |
-| Hacienda Integration Gateway | Implemented | Public Hacienda lookups, resilience, mock/live adapters. |
+| Hacienda Integration Gateway | Implemented for public lookups | Public Hacienda lookups and future submission client boundaries. |
 | Hacienda Connection | Implemented | Per-company/per-environment credentials and validation. |
-| Fiscal Documents | Implemented core; needs hardening | Fiscal issuance points, sequences, idempotent invoice/ticket creation, immutable snapshots, response contracts. |
-| Fiscal XML and Signing | Future | XML generation, XSD validation and XAdES signing from immutable fiscal document data. |
-| Fiscal Submission Processing | Future | Queue jobs, Hacienda submission, polling, status transitions, retries and recovery. |
-| Document Artifacts | Future | XML/signed XML/Hacienda response storage; optional PDF later. |
-| Webhooks/Notifications | Future | Status notifications, retries, signatures and auditability. |
-
----
+| Fiscal Documents | Implemented core | Issuance points, sequences, idempotent invoice/ticket snapshots and lifecycle. |
+| Fiscal XML and Signing | Implemented and accepted for F2.3 scope | Deterministic FE/TE XML, pinned XSD validation, certificate selection, TASK-011 PFX/X.509 handling, xml-crypto canonicalization/verifier evidence and artifact metadata. Future hardening may align production verification and reduce manual XMLDSig/XAdES assembly. |
+| Document Artifacts | Partially implemented | Private XML/signed XML storage and metadata. |
+| Fiscal Submission Processing | Future/F3 | Hacienda submission, polling, retries, callbacks/status transitions. |
+| Notifications/Webhooks | Future | Customer-facing fiscal status notifications, if approved later. |
 
 ## 5. Proposed use cases and responsibilities
 
-Near-term future use cases:
+Near-term remediation use cases/services:
 
-- `CreateFiscalDocumentUseCase`: behavior-preserving extraction from current service.
-- `GetFiscalDocumentUseCase`: retrieval with dynamic type-specific read authorization.
-- `ConfigureDefaultIssuancePointUseCase`: JWT-only management of default issuance point.
-- `ConfigureFiscalSequenceUseCase`: JWT-only sequence start configuration and already-started rejection.
-- `MapFiscalDocumentResponse`: formal explicit response DTO mapping that preserves current omission of `securityCode` and `requestHash`.
-- `ValidateFiscalDocumentForXmlReadiness`: expanded v4.4 validations before XML phase.
+- `HardenFiscalXmlProductionVerification`: align runtime verification with stricter standards-verifier reference checks where practical.
+- `ReplaceManualXadesAssembly`: optional signer adapter replacement/amendment behind `XmlSignerPort` if future maintenance risk justifies it.
+- `PrepareFiscalXmlConcurrencyGuard`: prevent simultaneous duplicate transformations.
+- `ApplyPrepareXmlRateLimitPolicy`: rate/quota policy for expensive XML signing/XSD validation endpoint.
+- `ManageFiscalSigningCertificateRotation`: explicit future policy for active/replaced certificates and optional re-signing rules.
 
-Later fiscal processing use cases:
+Existing use case to preserve:
 
-- `GenerateFiscalXmlFromDocument`.
-- `SignFiscalXml`.
+- `PrepareFiscalXmlService`: orchestrates serialize -> store unsigned -> sign -> verify -> signed XSD -> store signed -> `READY_TO_SUBMIT`.
+
+Future/F3 use cases remain separate:
+
 - `SubmitFiscalDocumentToHacienda`.
 - `PollFiscalDocumentStatus`.
-- `StoreFiscalArtifact`.
-- `PublishFiscalStatusNotification`.
-
----
+- `HandleHaciendaResponse`.
 
 ## 6. Proposed ports and adapters
 
-Recommended future fiscal ports:
+Existing ports to preserve/strengthen:
 
-- `FiscalDocumentRepositoryPort` -> Prisma adapter.
-- `FiscalIssuancePointRepositoryPort` -> Prisma adapter.
-- `FiscalSequenceRepositoryPort` -> Prisma adapter with atomic SQL allocation encapsulated.
-- `FiscalIdempotencyRepositoryPort` -> Prisma adapter.
-- `FiscalAuthorizationPort/Service` -> API-key/company and management policy checks.
-- `FiscalXmlGeneratorPort` -> future XML adapter.
-- `XmlSignerPort` -> future signing adapter; currently only a stub exists under infrastructure.
-- `FiscalSubmissionPort` -> future Hacienda reception adapter.
-- `FiscalArtifactStoragePort` -> existing `StoragePort` integration for XML/artifacts.
-- `FiscalJobQueuePort` -> existing `JobQueuePort` integration for submission/polling jobs.
+- `FiscalXmlSerializerPort` -> Hacienda v4.4 serializer adapter.
+- `XsdValidatorPort` -> XSD 1.1 validation adapter.
+- `XmlSignerPort` -> current or replacement XAdES signer adapter.
+- `SecretProviderPort` -> certificate/password secret retrieval.
+- `StoragePort` -> private XML artifact storage.
 
----
+Proposed additions/clarifications:
+
+- Optional `IndependentXmlSignatureVerifierPort` only if stricter verification becomes runtime-supported; otherwise keep standards verification as test harness evidence.
+- `PrepareFiscalXmlLockPort` or repository method encapsulating row/advisory locks.
+- `PrepareXmlRateLimitPolicy` using existing throttler infrastructure or a quota service.
+- Fiscal persistence repository ports for F2.2/F2.3 long-term hexagonal alignment.
 
 ## 7. Proposed data ownership
 
-Fiscal Documents should own fiscal issuance points, sequences, idempotency records, fiscal documents and any future fiscal line/artifact metadata.
+Fiscal Documents/Fiscal XML should own fiscal document status, XML artifact metadata and signing certificate metadata.
 
-Future database decisions requiring approval:
+Target DB hardening:
 
-- Whether to keep fiscal lines as JSON snapshots or add relational `fiscal_document_lines`.
-- Preserve the implemented idempotency actor/API-key/operation scope added by migration `20260911143000_fiscal_idempotency_scope`.
-- Whether to add a partial unique index for active default issuance points.
-- Preserve the implemented Post-F2.2 fiscal consecutive scope `(tenant_id, company_id, environment, consecutive)`; do not reintroduce globally unique `consecutive`.
-
-All database changes must be forward-only migrations.
-
----
+- Preserve certificate secret references only; no PFX/private key/password plaintext columns.
+- Add tenant/company consistency constraints for artifacts/certificates/documents where feasible.
+- Preserve signed artifact immutability after `READY_TO_SUBMIT`.
+- Add lock/status mechanism only if existing constraints are insufficient for concurrent prepare safety.
+- Keep JSON line snapshots unless a separate approved reporting/data decision adds relational lines.
 
 ## 8. Proposed API and integration model
 
-Future public fiscal APIs should expose explicit DTO contracts, not raw Prisma records.
-
-Recommended contract principles:
-
-- Expose `clave` and `consecutive`.
-- Continue not exposing standalone `securityCode` or `requestHash` in fiscal document responses.
-- Return immutable snapshots and calculated totals in normalized DTO format.
-- Keep XML/signing/submission APIs separate from local `READY_FOR_XML` creation.
-- Maintain type-specific scopes for invoice/ticket operations.
-- Version public contract if breaking response changes become unavoidable.
-
----
+- Preserve `POST /api/v1/fiscal-documents/:id/prepare-xml` as a preparation API only.
+- Add deterministic UUID validation errors for path params.
+- Add prepare-specific throttling/quota and document expected 429 responses.
+- Keep all Hacienda submission APIs out of F2.3.
+- If an independent verifier becomes runtime infrastructure, define timeout, retry/fallback, error mapping and observability.
+- If independent verification remains test-only, document it as release evidence and keep production runtime unchanged.
 
 ## 9. Proposed security boundaries
 
-- API-key fiscal creation/read remains type-scope and company-authorized.
-- JWT-only TENANT_ADMIN fiscal configuration remains separate from API-key endpoints.
-- Fiscal response DTOs should hide sensitive/internal fields.
-- Audit events remain categorical and exclude credentials, tokens, full payloads and security codes.
-- Future signing credentials must use `SecretProviderPort`; never persist or log plaintext credentials.
-- Future Hacienda submission jobs must preserve tenant/company boundaries.
-
----
+- Certificate material remains in `SecretProviderPort` and never in DB plaintext.
+- Test fixtures must use generated non-taxpayer certificates only.
+- Private XML artifacts remain non-public by default.
+- Audit/log metadata excludes XML, private keys, passwords and PFX bytes.
+- Expensive signing/XSD endpoint has rate/quota protection.
+- Path params are validated before service use.
+- Dependency vulnerabilities are triaged and remediated or explicitly accepted.
 
 ## 10. Proposed deployment architecture
 
 - Continue API and worker as separate processes from one monolith codebase.
-- Use worker for future XML/submission/polling jobs when asynchronous behavior is introduced.
-- Keep PostgreSQL as source of truth and queue backend unless scaling evidence requires change.
-- Harden Docker Compose/default secrets or document Compose as local-only before production use.
-- Continue CI gates for Prisma validate/generate/migrate, lint, typecheck, tests and build.
-
----
+- Do not add F2.3 workers unless/asynchronous preparation is separately approved.
+- Package XSD helper/assets reproducibly as currently done.
+- If runtime signer/verifier tooling changes, update Dockerfile and in-container validation.
+- Treat Docker Compose as local-only or harden secrets before production.
 
 ## 11. Migration assumptions
 
-- F2.2 migration may already be applied; never edit it.
-- Future fiscal database changes use new forward-only migrations.
-- Before refactoring fiscal service, add fiscal E2E/API characterization tests.
-- Before XML generation, confirm fiscal line persistence and response DTO decisions.
-- Before Hacienda submission, implement signing adapter selection and job/retry strategy.
-
----
+- Never edit applied migrations.
+- Add forward-only migrations for any DB consistency or lock changes.
+- Validate migrations from zero and against representative existing data.
+- Keep artifact immutability and idempotent retry tests green during migration.
 
 ## 12. Risks and trade-offs
 
 | Risk | Trade-off / mitigation |
 |---|---|
-| Current compact fiscal service diverges from strict hexagonal target | Add tests first, then extract use cases and ports incrementally. |
-| Response sanitizer lacks formal DTO contract | Introduce DTO mappers and security-focused response tests to preserve omission of `securityCode`/`requestHash`. |
-| JSON fiscal lines may limit reporting/XML querying | Decide before XML/reporting phase; add relational table only if justified. |
-| Future signing/submission complexity | Keep separate bounded responsibilities and asynchronous worker path. |
-| Docker/npm audit concerns | Treat as separate high-priority platform hardening tasks. |
-
----
+| Manual XMLDSig/XAdES assembly remains brittle | Amend or replace adapter behind `XmlSignerPort` instead of redesigning application flow. |
+| Independent XAdES verification tools are heavy | Prefer test-only verifier unless runtime verification is required; document trade-off. |
+| Local self-signed PFX differs from Hacienda-issued certificate | Use structurally real X.509/PFX for code evidence; consider Hacienda sandbox only in future approved scope. |
+| Adding locks can reduce throughput | Lock per document only; keep retries safe. |
+| Rate limiting can affect clients | Define documented quota and 429 behavior before enabling. |
+| Dependency updates can regress behavior | Isolate npm audit remediation with full gates. |
 
 ## 13. Open questions
 
-1. Should standalone `securityCode` remain persistence-only permanently, including for future admin/internal APIs?
-2. Is JSON line persistence accepted for near-term XML generation, or should relational lines be introduced first?
-3. Which XAdES signing library/adapter will be approved for future phases?
-4. What is the desired production deployment model beyond local Docker Compose?
+1. Should independent standards verification remain test-only or become runtime behavior?
+2. What prepare endpoint rate/quota should apply per API key, company and tenant?
+3. What exact certificate rotation and explicit re-signing policy should govern future operations?
+4. Should F2.3 DB consistency be hardened with compound foreign keys or application/repository invariants only?
+5. Should future F3 include Hacienda sandbox/receiver acceptance evidence?

@@ -6,6 +6,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { SecretsModule } from './infrastructure/secrets/secrets.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { StorageModule } from './infrastructure/storage/storage.module';
+import { SigningModule } from './infrastructure/signing/signing.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
 import { HaciendaModule } from './infrastructure/integrations/hacienda/hacienda.module';
 import { IdentityModule } from './modules/identity/identity.module';
@@ -53,6 +54,7 @@ import { ConfigService } from '@nestjs/config';
 
     // Shared infrastructure
     StorageModule,
+    SigningModule,
     QueueModule,
     HaciendaModule,
 

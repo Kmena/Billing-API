@@ -22,6 +22,9 @@ export class CreateFiscalLineDto {
   @ApiProperty() @Matches(/^\d+(\.\d{1,5})?$/) unitPrice!: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) discountAmount?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) taxAmount?: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) taxCode?: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) taxRateCode?: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) taxRate?: string;
 }
 
 export class CreateFiscalDocumentDto {

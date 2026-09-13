@@ -23,6 +23,7 @@ import {
   buildFiscalKey,
   generateSecurityCode,
 } from '../domain/fiscal-key.generator';
+import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
 
 export interface AuthenticatedUser {
@@ -40,6 +41,9 @@ export interface FiscalDocumentLineInput {
   readonly unitPrice: string;
   readonly discountAmount?: string;
   readonly taxAmount?: string;
+  readonly taxCode?: string;
+  readonly taxRateCode?: string;
+  readonly taxRate?: string;
 }
 
 export interface CreateFiscalDocumentCommand {
@@ -235,6 +239,12 @@ export class FiscalDocumentService {
           throw new ForbiddenException({ code: 'API_KEY_COMPANY_NOT_AUTHORIZED' });
       }
 
+      const fiscalProfile = await this.getReadyCompanyFiscalProfile(
+        tx,
+        command.tenantId,
+        command.companyId,
+      );
+
       const idempotencyKey = command.idempotencyKey as string;
       const operation = `fiscal-document.create.${command.type.toLowerCase()}`;
       const idempotency = await this.reserveIdempotencyKey(tx, {
@@ -325,6 +335,16 @@ export class FiscalDocumentService {
             tradeName: company.tradeName,
             identificationType: company.identificationType,
             identificationNumber: company.identificationNumber,
+            codigoActividad: fiscalProfile.economicActivityCode,
+            proveedorSistemas: fiscalProfile.proveedorSistemas,
+            provincia: fiscalProfile.province,
+            canton: fiscalProfile.canton,
+            distrito: fiscalProfile.district,
+            barrio: fiscalProfile.barrio,
+            otrasSenas: fiscalProfile.otrasSenas,
+            email: fiscalProfile.email,
+            phoneCountryCode: fiscalProfile.phoneCountryCode,
+            phoneNumber: fiscalProfile.phoneNumber,
           },
           receiverSnapshot: command.receiver as never,
           currency: command.currency,
@@ -430,6 +450,32 @@ export class FiscalDocumentService {
     throw new ConflictException({ code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS' });
   }
 
+  private async getReadyCompanyFiscalProfile(
+    tx: Pick<PrismaService, 'companyFiscalProfile'>,
+    tenantId: string,
+    companyId: string,
+  ) {
+    const profile = await tx.companyFiscalProfile.findFirst({
+      where: { tenantId, companyId },
+    });
+    if (!profile) throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_REQUIRED' });
+
+    const requiredProfileFields = [
+      profile.economicActivityCode,
+      profile.proveedorSistemas,
+      profile.province,
+      profile.canton,
+      profile.district,
+      profile.otrasSenas,
+      profile.email,
+    ];
+    const hasMissingField = requiredProfileFields.some((value) => !value?.trim());
+    if (hasMissingField) {
+      throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_INCOMPLETE' });
+    }
+    return profile;
+  }
+
   private async findTenantCompany(tenantId: string, companyId: string) {
     const company = await this.prisma.company.findFirst({ where: { id: companyId, tenantId } });
     if (!company) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND' });
@@ -464,25 +510,79 @@ export class FiscalDocumentService {
     }
     if (!ALLOWED_SALE_CONDITIONS.includes(command.saleCondition as never))
       throw new BadRequestException({ code: 'INVALID_SALE_CONDITION' });
+    if (['02', '09', '11', '99'].includes(command.saleCondition))
+      throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_SALE_CONDITION' });
     if (!ALLOWED_PAYMENT_METHODS.includes(command.paymentMethod as never))
       throw new BadRequestException({ code: 'INVALID_PAYMENT_METHOD' });
+    if (command.paymentMethod === '99')
+      throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_PAYMENT_METHOD' });
     if (command.currency !== 'CRC' && !command.exchangeRate)
       throw new BadRequestException({ code: 'EXCHANGE_RATE_REQUIRED' });
-    if (command.type === 'INVOICE' && !command.receiver)
-      throw new BadRequestException({ code: 'INVOICE_RECEIVER_REQUIRED' });
+    this.validateReceiver(command);
     if (command.lines.length === 0)
       throw new BadRequestException({ code: 'FISCAL_DOCUMENT_LINES_REQUIRED' });
     for (const line of command.lines) {
       if (!/^\d{13}$/.test(line.cabysCode))
         throw new BadRequestException({ code: 'INVALID_CABYS_CODE' });
       if (line.lineNumber < 1) throw new BadRequestException({ code: 'INVALID_LINE_NUMBER' });
+      if (!['Sp', 'Unid'].includes(line.unitMeasure)) {
+        throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_UNIT_MEASURE' });
+      }
       if (
         ScaledDecimal.from(line.quantity).isNegative() ||
         ScaledDecimal.from(line.unitPrice).isNegative()
       ) {
         throw new BadRequestException({ code: 'INVALID_LINE_AMOUNT' });
       }
+      if (ScaledDecimal.from(line.taxAmount ?? '0').toString() !== '0.00000') {
+        if (!line.taxCode || !line.taxRateCode || !line.taxRate) {
+          throw new BadRequestException({ code: 'FISCAL_TAX_METADATA_REQUIRED' });
+        }
+        if (!/^\d{2}$/.test(line.taxCode) || !/^\d{2}$/.test(line.taxRateCode)) {
+          throw new BadRequestException({ code: 'INVALID_FISCAL_TAX_METADATA' });
+        }
+      }
+      if (ScaledDecimal.from(line.discountAmount ?? '0').toString() !== '0.00000') {
+        throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_DISCOUNT_METADATA' });
+      }
     }
+  }
+
+  private validateReceiver(command: CreateFiscalDocumentCommand): void {
+    if (command.type === 'INVOICE' && !command.receiver) {
+      throw new BadRequestException({ code: 'INVOICE_RECEIVER_REQUIRED' });
+    }
+    if (!command.receiver) return;
+
+    const receiverName = this.requiredReceiverText(command.receiver, 'name');
+    const receiverIdentificationType = this.requiredReceiverText(
+      command.receiver,
+      'identificationType',
+    );
+    const receiverIdentificationNumber = this.requiredReceiverText(
+      command.receiver,
+      'identificationNumber',
+    );
+    if (!receiverName || !receiverIdentificationType || !receiverIdentificationNumber) {
+      throw new BadRequestException({ code: 'RECEIVER_IDENTIFICATION_REQUIRED' });
+    }
+
+    try {
+      mapIdentificationTypeToXmlCode(receiverIdentificationType);
+    } catch {
+      throw new BadRequestException({ code: 'INVALID_RECEIVER_IDENTIFICATION_TYPE' });
+    }
+    if (!/^\d{1,12}$/.test(receiverIdentificationNumber)) {
+      throw new BadRequestException({ code: 'INVALID_RECEIVER_IDENTIFICATION_NUMBER' });
+    }
+    if (command.type === 'INVOICE' && !this.requiredReceiverText(command.receiver, 'email')) {
+      throw new BadRequestException({ code: 'INVOICE_RECEIVER_EMAIL_REQUIRED' });
+    }
+  }
+
+  private requiredReceiverText(receiver: Record<string, unknown>, field: string): string {
+    const value = receiver[field];
+    return typeof value === 'string' ? value.trim() : '';
   }
 
   private calculateTotals(lines: FiscalDocumentLineInput[]): Record<string, string> {

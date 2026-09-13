@@ -5,6 +5,7 @@ import {
   FISCAL_NORMAL_SITUATION,
   FiscalDocumentType,
 } from './fiscal.constants';
+import { normalizeIssuerIdentificationForClave } from './fiscal-identification.mapper';
 
 export function buildConsecutive(input: {
   branchCode: string;
@@ -31,10 +32,9 @@ export function buildFiscalKey(input: {
   securityCode: string;
   situation?: string;
 }): string {
-  const normalizedIssuerId = input.issuerIdentificationNumber
-    .replace(/\D/g, '')
-    .padStart(12, '0')
-    .slice(-12);
+  const normalizedIssuerId = normalizeIssuerIdentificationForClave(
+    input.issuerIdentificationNumber,
+  );
   const day = input.issuedAt.getDate().toString().padStart(2, '0');
   const month = (input.issuedAt.getMonth() + 1).toString().padStart(2, '0');
   const year = (input.issuedAt.getFullYear() % 100).toString().padStart(2, '0');
