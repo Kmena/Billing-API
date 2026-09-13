@@ -150,20 +150,41 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
   }
 
   private parsePayload(output: string): EngineValidationPayload {
-    try {
-      const parsed = JSON.parse(output.trim()) as EngineValidationPayload;
-      return { valid: parsed.valid === true, errors: parsed.errors ?? [] };
-    } catch {
-      return {
-        valid: false,
-        errors: [
-          {
-            code: 'FISCAL_XML_VALIDATOR_FAILED',
-            message: 'XSD validator returned invalid output.',
-          },
-        ],
-      };
+    const trimmed = output.trim();
+    const candidates = [trimmed, this.extractLastJsonObject(trimmed)].filter(Boolean) as string[];
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate) as EngineValidationPayload;
+        return { valid: parsed.valid === true, errors: parsed.errors ?? [] };
+      } catch {
+        // Try the next candidate; subprocess output can include runtime warnings in CI.
+      }
     }
+
+    return {
+      valid: false,
+      errors: [
+        {
+          code: 'FISCAL_XML_VALIDATOR_FAILED',
+          message: 'XSD validator returned invalid output.',
+        },
+      ],
+    };
+  }
+
+  private extractLastJsonObject(output: string): string | null {
+    const lines = output
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (line.startsWith('{') && line.endsWith('}')) return line;
+    }
+
+    return null;
   }
 
   private blockedUnsafeXml(xml: string): FiscalXmlValidationIssue[] | null {

@@ -12,7 +12,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import xmlschema
+try:
+    import xmlschema
+except ImportError as import_error:
+    xmlschema = None
+    XMLSCHEMA_IMPORT_ERROR = import_error
+else:
+    XMLSCHEMA_IMPORT_ERROR = None
 
 MAX_MESSAGE_LENGTH = 300
 MAX_ERRORS = 20
@@ -52,12 +58,31 @@ def assert_local_file(raw_path: str, label: str) -> Path:
 def engine_metadata() -> dict[str, str]:
     return {
         "name": "python-xmlschema",
-        "version": xmlschema.__version__,
+        "version": getattr(xmlschema, "__version__", "unavailable"),
         "schemaVersion": "XML Schema 1.1",
     }
 
 
-def compile_schema(schema_path: Path) -> xmlschema.XMLSchema11:
+def assert_engine_available() -> None:
+    if XMLSCHEMA_IMPORT_ERROR is None:
+        return
+    emit(
+        {
+            "valid": False,
+            "engine": engine_metadata(),
+            "errors": [
+                {
+                    "code": "FISCAL_XML_VALIDATOR_CONFIGURATION_INVALID",
+                    "message": "Python dependency xmlschema is not installed.",
+                }
+            ],
+        },
+        2,
+    )
+
+
+def compile_schema(schema_path: Path):
+    assert_engine_available()
     return xmlschema.XMLSchema11(str(schema_path), allow="local", defuse="always")
 
 
@@ -110,21 +135,21 @@ def main() -> None:
         else:
             xml_path = assert_local_file(sys.argv[3], "xml")
             validate_command(schema_path, xml_path)
-    except xmlschema.XMLSchemaException as error:
-        emit(
-            {
-                "valid": False,
-                "engine": engine_metadata(),
-                "errors": [
-                    {
-                        "code": "FISCAL_XML_VALIDATION_FAILED",
-                        "message": sanitize(str(error)),
-                    }
-                ],
-            },
-            1,
-        )
-    except Exception:
+    except Exception as error:
+        if xmlschema is not None and isinstance(error, xmlschema.XMLSchemaException):
+            emit(
+                {
+                    "valid": False,
+                    "engine": engine_metadata(),
+                    "errors": [
+                        {
+                            "code": "FISCAL_XML_VALIDATION_FAILED",
+                            "message": sanitize(str(error)),
+                        }
+                    ],
+                },
+                1,
+            )
         emit(
             {
                 "valid": False,

@@ -61,6 +61,7 @@ prisma/dev.db
 # Temporary files
 *.tmp
 *.temp
+__pycache__/
 
 # TypeScript incremental build
 *.tsbuildinfo
