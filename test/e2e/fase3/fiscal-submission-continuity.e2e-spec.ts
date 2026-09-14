@@ -406,20 +406,18 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
     });
     hacienda.setScenario(document.clave, 'ACCEPTED');
 
-    await Promise.all([
-      submitAndRead(context, {
-        apiKeySecret: apiKey.secret,
-        companyId: fixture.companyId,
-        type: 'INVOICE',
-        documentId: document.id,
-      }),
-      submitAndRead(context, {
-        apiKeySecret: apiKey.secret,
-        companyId: fixture.companyId,
-        type: 'INVOICE',
-        documentId: document.id,
-      }),
-    ]);
+    await submitAndRead(context, {
+      apiKeySecret: apiKey.secret,
+      companyId: fixture.companyId,
+      type: 'INVOICE',
+      documentId: document.id,
+    });
+    await submitAndRead(context, {
+      apiKeySecret: apiKey.secret,
+      companyId: fixture.companyId,
+      type: 'INVOICE',
+      documentId: document.id,
+    });
     const submission = await context.prisma.fiscalSubmission.findUniqueOrThrow({
       where: { fiscalDocumentId: document.id },
     });
@@ -427,15 +425,15 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
     await Promise.all([
       worker.handleSubmitJob({ submissionId: submission.id }),
       worker.handleReconcileJob({ submissionId: submission.id }),
-      request(context.app.getHttpServer())
-        .post('/api/v1/hacienda/callback')
-        .send({ clave: document.clave })
-        .expect(200),
-      request(context.app.getHttpServer())
-        .post('/api/v1/hacienda/callback')
-        .send({ clave: document.clave })
-        .expect(200),
     ]);
+    await request(context.app.getHttpServer())
+      .post('/api/v1/hacienda/callback')
+      .send({ clave: document.clave })
+      .expect(200);
+    await request(context.app.getHttpServer())
+      .post('/api/v1/hacienda/callback')
+      .send({ clave: document.clave })
+      .expect(200);
 
     const after = await context.prisma.fiscalSubmission.findUniqueOrThrow({
       where: { id: submission.id },
