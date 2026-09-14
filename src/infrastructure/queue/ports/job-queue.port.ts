@@ -20,6 +20,14 @@ export interface JobQueuePort {
    * Schedules a recurring job using a cron expression.
    */
   schedule<T extends object>(jobName: string, cronExpression: string, payload: T): Promise<void>;
+
+  /**
+   * Registers a job handler when the runtime supports workers.
+   */
+  registerHandler?<T extends object>(
+    jobName: string,
+    handler: (job: { data: T }) => Promise<void>,
+  ): Promise<void>;
 }
 
 export const JOB_QUEUE = Symbol('JobQueuePort');

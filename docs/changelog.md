@@ -1,5 +1,28 @@
 # Changelog — Billing API
 
+## [fase-3-hacienda-async-submission-final-architecture-refresh] — 2026-09-14
+
+**Agent:** hdd-architecture-agent-4f9f0f
+**Canonical spec:** `specs/fase-3-hacienda-async-submission/`
+**Scope:** Final repository-level architecture/documentation reality sync after completed F3 implementation and final audit. No production code, tests, Prisma schema, migrations, package files or Docker files changed by this agent.
+
+### Documentation
+- Refreshed `docs/current-state.md` to record F3 as functionally complete: READY_TO_SUBMIT FE/TE asynchronous submission, submission state machine, retry classifier, `FiscalSubmission` persistence, Hacienda submission port, mock/real recepcion adapters, submit/status/reconcile/callback APIs, queue worker registration, submit/reconcile worker paths, response artifact persistence and audit/observability/security/concurrency/E2E coverage.
+- Refreshed `docs/architecture.md` to make the active architecture current: F3 is now part of the fiscal-documents boundary; `FiscalSubmission` owns provider/job/reconciliation lifecycle; callbacks are signal-only; terminal document outcomes are authoritative `ACCEPTED`/`REJECTED` only.
+- Refreshed `docs/action-plan.md` to move F3 implementation from future work to completed current capability and keep remaining work limited to production readiness/hardening.
+- Replaced repository-level `docs/tasks.md` with a concise proposed backlog for remaining work: OQ-012 production IAM/SecretProvider readiness, npm audit triage, throttling/quota, UUID validation, prepare-XML concurrency, optional dedicated submission scopes, optional repository-port extraction and F4 specification.
+- Preserved that F4 PDF/email/delivery is not introduced.
+
+### Validation recorded
+- Final audit: **Acceptable 8.6/10**.
+- Supplied final gates passed: `npm ci`; Prisma generate/validate/migrate deploy on clean PostgreSQL 15; lint; lint:check; typecheck; unit; build; E2E; Docker build.
+- Unit evidence: **49 suites / 349 tests**.
+- E2E evidence: **15 suites / 85 tests**.
+- Focused F3 evidence: **13 suites / 122 tests** and focused F3 E2E **14 tests**.
+- `npm audit` reports **26 known vulnerabilities** unrelated to new F3 dependencies; risk remains documented.
+
+---
+
 ## [f2-2-to-f2-3-end-to-end-fiscal-data-remediation-final] — 2026-09-13
 
 **Agent:** sdd-implementation-agent-458e19

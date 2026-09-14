@@ -16,6 +16,13 @@ export class InMemoryJobQueue implements JobQueuePort {
     this.handlers.set(jobName, handler as JobHandler<unknown>);
   }
 
+  async registerHandler<T extends object>(
+    jobName: string,
+    handler: (job: { data: T }) => Promise<void>,
+  ): Promise<void> {
+    this.register(jobName, async (payload: T) => handler({ data: payload }));
+  }
+
   async publish<T extends object>(
     jobName: string,
     payload: T,
