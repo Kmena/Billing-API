@@ -31,7 +31,7 @@ describe('Tenant Isolation (E2E)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'health/live'] });
-    app.useGlobalFilters(new GlobalExceptionFilter());
+    app.useGlobalFilters(new GlobalExceptionFilter('test'));
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
@@ -124,6 +124,34 @@ describe('Tenant Isolation (E2E)', () => {
 
       const keyIds = (listResponse.body as Array<{ id: string }>).map((k) => k.id);
       expect(keyIds).not.toContain(keyAId);
+    });
+  });
+
+  describe('GET /api/v1/tenants/:id — same-tenant ownership', () => {
+    it('returns 200 when authenticated user reads their own tenant', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/tenants/${tenantAId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(200);
+
+      expect(response.body.id).toBe(tenantAId);
+      expect(response.body.name).toBeDefined();
+      expect(response.body.slug).toBeDefined();
+      expect(response.body.status).toBeDefined();
+      expect(response.body.plan).toBeDefined();
+    });
+
+    it('returns 404 TENANT_NOT_FOUND when authenticated user reads another tenant', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/api/v1/tenants/${tenantBId}`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(404);
+
+      expect(response.body.error.code).toBe('TENANT_NOT_FOUND');
+    });
+
+    it('returns 401 for unauthenticated request', async () => {
+      await request(app.getHttpServer()).get(`/api/v1/tenants/${tenantAId}`).expect(401);
     });
   });
 });

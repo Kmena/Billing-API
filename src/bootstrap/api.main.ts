@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from '../app.module';
 import { GlobalExceptionFilter } from '../api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../api/interceptors/correlation-id.interceptor';
@@ -39,13 +40,19 @@ async function bootstrap(): Promise<void> {
     maxAge: 86400, // preflight cache: 24 hours
   });
 
+  app.use(
+    helmet({
+      contentSecurityPolicy: nodeEnv !== 'production' ? false : undefined,
+    }),
+  );
+
   // Global API prefix — all endpoints under /api/v1
   app.setGlobalPrefix('api/v1', {
     exclude: ['health', 'health/ready', 'health/live'],
   });
 
   // Global exception filter — FR-014
-  app.useGlobalFilters(new GlobalExceptionFilter());
+  app.useGlobalFilters(new GlobalExceptionFilter(nodeEnv));
 
   // Global validation pipe — FR from architecture § 8
   app.useGlobalPipes(
@@ -101,6 +108,10 @@ async function bootstrap(): Promise<void> {
       .addTag('Tenants', 'Tenant management (requires Bearer token)')
       .addTag('Companies', 'Company management (requires Bearer token)')
       .addTag('API Keys', 'API key management (requires Bearer token)')
+      .addTag(
+        'Hacienda Connection',
+        'Private Hacienda credential management (requires Bearer token)',
+      )
       .addTag('Taxpayers', 'Hacienda taxpayer lookup (requires X-API-Key with taxpayers:read)')
       .addTag('CABYS', 'CABYS catalogue lookup (requires X-API-Key with cabys:read)')
       .addTag(

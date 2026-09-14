@@ -20,6 +20,13 @@ export interface TestUser {
   role: string;
 }
 
+export interface TestCompany {
+  id: string;
+  tenantId: string;
+  legalName: string;
+  identificationNumber: string;
+}
+
 export async function createTestTenant(
   prisma: PrismaClient,
   override: Partial<{ name: string; slug: string }> = {},
@@ -63,6 +70,31 @@ export async function createTestUser(
   });
 
   return { id, tenantId, email, password, role };
+}
+
+export async function createTestCompany(
+  prisma: PrismaClient,
+  tenantId: string,
+  override: Partial<{ legalName: string; identificationNumber: string }> = {},
+): Promise<TestCompany> {
+  const id = randomUUID();
+  const legalName = override.legalName ?? `Test Company ${id.substring(0, 8)}`;
+  const generatedLegalIdDigits = Array.from(randomBytes(9), (byte) => String(byte % 10)).join('');
+  const identificationNumber = override.identificationNumber ?? `3${generatedLegalIdDigits}`;
+
+  await prisma.company.create({
+    data: {
+      id,
+      tenantId,
+      legalName,
+      identificationType: 'JURIDICA',
+      identificationNumber,
+      status: 'ACTIVE',
+      haciendaVerificationStatus: 'VERIFIED',
+    },
+  });
+
+  return { id, tenantId, legalName, identificationNumber };
 }
 
 export async function createTestApiKey(prisma: PrismaClient, scopes: string[]): Promise<string> {

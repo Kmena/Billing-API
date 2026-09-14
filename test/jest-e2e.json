@@ -14,5 +14,6 @@
     "^@/infrastructure/(.*)$": "<rootDir>/../src/infrastructure/$1",
     "^@/api/(.*)$": "<rootDir>/../src/api/$1"
   },
+  "maxWorkers": 1,
   "testTimeout": 60000
 }

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "v4.4",
+  "retrievalDate": "2026-09-12",
+  "assets": [
+    {
+      "documentType": "INVOICE",
+      "officialDocument": "FacturaElectronica",
+      "fileName": "FacturaElectronica.xsd",
+      "sourceUrl": "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/FacturaElectronica.xsd",
+      "targetNamespace": "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/facturaElectronica",
+      "fileSizeBytes": 118624,
+      "sha256": "d384afef665573606f6499b2182d6070850ada8c93bc40fa7f0f3901a25b9cc8"
+    },
+    {
+      "documentType": "TICKET",
+      "officialDocument": "TiqueteElectronico",
+      "fileName": "TiqueteElectronico.xsd",
+      "sourceUrl": "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/TiqueteElectronico.xsd",
+      "targetNamespace": "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/tiqueteElectronico",
+      "fileSizeBytes": 114029,
+      "sha256": "aaa273b368997d47214c92455c22b851cb5ab6ef105dc571233268c1ef5fd6c7"
+    },
+    {
+      "documentType": "XMLDSIG_SCHEMA",
+      "officialDocument": "W3C XML Signature core schema imported by Hacienda FE/TE schemas",
+      "fileName": "../xmldsig-core-schema.xsd",
+      "sourceUrl": "https://www.w3.org/TR/xmldsig-core/xmldsig-core-schema.xsd",
+      "targetNamespace": "http://www.w3.org/2000/09/xmldsig#",
+      "fileSizeBytes": 10292,
+      "sha256": "d102ad3df7664c307e0c2c776ba4a90513b1969974d8a940bae1a77f9f21e15d"
+    },
+    {
+      "documentType": "SIGNATURE_POLICY",
+      "officialDocument": "Resolucion General sobre disposiciones tecnicas comprobantes electronicos para efectos tributarios",
+      "fileName": "signature-policy-v4.4.pdf",
+      "sourceUrl": "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/Resoluci%C3%B3n_General_sobre_disposiciones_t%C3%A9cnicas_comprobantes_electr%C3%B3nicos_para_efectos_tributarios.pdf",
+      "fileSizeBytes": 163479,
+      "sha256": "0d6c629f5c5639e23c3ae5905dace1e158cb5806822c003de787a6ec3321d21f"
+    }
+  ],
+  "runtimeNetworkDependency": false,
+  "notes": [
+    "The lowercase namespace URLs returned HTTP 403 in this environment; official downloadable XSD file paths with .xsd returned HTTP 200 and were pinned locally.",
+    "Do not use placeholder URLXXXXV4.4 as the signature policy identifier. Use the official policy document URL recorded here."
+  ]
+}

@@ -4,7 +4,14 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "deleteOutDir": true,
-    "tsConfigPath": "tsconfig.build.json"
+    "tsConfigPath": "tsconfig.build.json",
+    "assets": [
+      {
+        "include": "modules/fiscal-documents/infrastructure/xml/xsd11/**/*",
+        "outDir": "dist/src",
+        "watchAssets": false
+      }
+    ]
   },
   "entryFile": "bootstrap/api.main"
 }

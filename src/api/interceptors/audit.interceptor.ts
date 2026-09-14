@@ -34,6 +34,7 @@ export class AuditInterceptor implements NestInterceptor {
 
     const httpMethod = request.method;
     const url = request.url;
+    const action = this.buildCategoricalAction(context, httpMethod);
     const correlationId = request.correlationId;
     const tenantId = TenantContext.getTenantIdOrNull();
     const actor = request.user?.userId ?? request.apiKey?.keyPrefix ?? 'anonymous';
@@ -47,7 +48,7 @@ export class AuditInterceptor implements NestInterceptor {
             tenantId: tenantId ?? undefined,
             apiKeyId,
             actor,
-            action: `${httpMethod.toLowerCase()}.${url.replace(/[^a-z0-9]/gi, '-')}`,
+            action,
             endpoint: url,
             httpMethod,
             statusCode: response.statusCode,
@@ -62,7 +63,7 @@ export class AuditInterceptor implements NestInterceptor {
             tenantId: tenantId ?? undefined,
             apiKeyId,
             actor,
-            action: `${httpMethod.toLowerCase()}.${url.replace(/[^a-z0-9]/gi, '-')}`,
+            action,
             endpoint: url,
             httpMethod,
             statusCode: err?.status ?? 500,
@@ -75,5 +76,20 @@ export class AuditInterceptor implements NestInterceptor {
         },
       }),
     );
+  }
+
+  private buildCategoricalAction(context: ExecutionContext, httpMethod: string): string {
+    const controllerName = (context.getClass().name || 'unknown-controller').replace(
+      /Controller$/i,
+      '',
+    );
+    const handlerName = context.getHandler().name || 'unknown-handler';
+    const rawAction = `${httpMethod}.${controllerName}.${handlerName}`;
+
+    return rawAction
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase();
   }
 }

@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
@@ -9,6 +10,7 @@ import {
 } from '../../../domain/ports/refresh-token.repository';
 import { InvalidRefreshTokenException } from '../../../domain/exceptions/invalid-refresh-token.exception';
 import type { JwtPayload } from '../login/login.handler';
+import { addAuthDurationToDate, parseAuthDurationToSeconds } from '../shared/auth-token-duration';
 
 export interface RefreshTokenCommand {
   readonly refreshToken: string;
@@ -22,13 +24,20 @@ export interface RefreshTokenResult {
 
 @Injectable()
 export class RefreshTokenHandler {
+  private readonly jwtExpiresIn: string;
+  private readonly jwtRefreshExpiresIn: string;
+
   constructor(
     @Inject(USER_REPOSITORY)
     private readonly userRepository: IUserRepository,
     @Inject(REFRESH_TOKEN_REPOSITORY)
     private readonly refreshTokenRepository: IRefreshTokenRepository,
     private readonly jwtService: JwtService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.jwtExpiresIn = this.configService.get<string>('auth.jwtExpiresIn') ?? '15m';
+    this.jwtRefreshExpiresIn = this.configService.get<string>('auth.jwtRefreshExpiresIn') ?? '7d';
+  }
 
   async execute(command: RefreshTokenCommand): Promise<RefreshTokenResult> {
     const tokenHash = crypto.createHash('sha256').update(command.refreshToken).digest('hex');
@@ -64,7 +73,7 @@ export class RefreshTokenHandler {
       jti,
     };
 
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const accessToken = this.jwtService.sign(payload, { expiresIn: this.jwtExpiresIn });
 
     // Issue new refresh token (rotation)
     const newRefreshTokenRaw = crypto.randomBytes(48).toString('hex');
@@ -73,8 +82,7 @@ export class RefreshTokenHandler {
       .update(newRefreshTokenRaw)
       .digest('hex');
 
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    const expiresAt = addAuthDurationToDate(new Date(), this.jwtRefreshExpiresIn);
 
     await this.refreshTokenRepository.save({
       tokenHash: newRefreshTokenHash,
@@ -87,7 +95,7 @@ export class RefreshTokenHandler {
     return {
       accessToken,
       refreshToken: newRefreshTokenRaw,
-      expiresIn: 15 * 60,
+      expiresIn: parseAuthDurationToSeconds(this.jwtExpiresIn),
     };
   }
 }

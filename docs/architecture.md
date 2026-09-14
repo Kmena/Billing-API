@@ -1,382 +1,225 @@
 # Architecture
 
-> **Scope:** Active architecture governing the Billing system as of the `pre-fase-2-hardening` implementation cycle (Fase 0 + Fase 1 + hardening).
-> This document describes only implemented, currently operative architecture and active decisions.
-> Future-state proposals belong in `docs/action-plan.md` and `docs/future-architecture.md`.
+> **Synchronized:** Final F2.2/F2.3 cross-phase remediation refresh for confirmed `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/` by `sdd-implementation-agent-458e19` on 2026-09-13 with `hdd-architecture-agent` guidance. TASK-001 through TASK-022 are complete. Final audit PASS with non-blocking concerns, score **8.8/10**. Implemented boundary is `READY_TO_SUBMIT`; F3/Hacienda submission remains **NOT STARTED**.
+>
+> **Active boundary update:** `CompanyFiscalProfile` owns issuer fiscal readiness data including structured address and `proveedorSistemas`. `FiscalDocumentService` owns FE/TE creation, fiscal readiness validation and immutable snapshotting before `READY_FOR_XML`. The immutable snapshot is the F2.2 -> F2.3 boundary. F2.3 transforms/signs/validates from that snapshot only and must not infer or fabricate missing fiscal business data.
 
----
+> **Synchronized:** Final architecture documentation refresh for confirmed `specs/fase-2-3-fiscal-xml-signing/` by `hdd-architecture-agent-d7922b` on 2026-09-13 after TASK-011 and post-remediation audit. Documentation-only refresh; no production code, tests, Prisma schema or migrations modified.
+> This document describes only the architecture currently implemented or actively governing the system. Future remediation belongs in `docs/action-plan.md`, `docs/tasks.md` and `docs/future-architecture.md`.
 
 ## 1. Purpose and scope
 
-This document is the authoritative reference for:
-- The current active architectural style and module boundaries
-- Enforced dependency rules
-- Current domain map and responsibilities
-- Active architectural decisions that govern the system today
-- Known architectural limitations
+This document records the active architecture of Billing after final F2.3 TASK-011 remediation and baseline audit. F2.3 Fiscal XML/XSD/XAdES is implemented and accepted for the confirmed local prepare/sign/verify/XSD scope. Final baseline audit score is **8.9/10**, verdict **Acceptable**; prior AUD-001 is closed for this scope. F3/Hacienda submission is not implemented.
 
-**In-scope:** Everything implemented through Fase 1 + pre-fase-2-hardening.
-**Out-of-scope:** Fase 2 HaciendaConnection, Fase 3+ document submission, UI layers.
-
----
+Out of scope for this active-architecture document: target redesigns, Hacienda submission/F3, polling, callbacks, PDF, email, webhooks and microservice decomposition.
 
 ## 2. Current active architecture summary
 
-Billing is a **NestJS 10 modular monolith** structured according to **hexagonal architecture** (ports and adapters).
+Billing is an API-first modular monolith using NestJS, TypeScript, Prisma and PostgreSQL.
 
-Key properties of the current architecture:
-- All business domains are compiled into a single deployable artifact
-- The HTTP API server and background worker are separate OS processes launched from the same compiled code
-- Configuration is centrally validated at process startup by a standalone Joi schema; invalid or insecure configuration causes immediate startup failure
-- Domain logic is framework-free; the domain layer has no NestJS, Prisma, or Axios dependencies
-- All external integration field names are confined to adapter implementations; no external field names leak into the domain or application layers
-- Tenant isolation is enforced at the persistence layer in every repository
+Current runtime entrypoints:
 
----
+- API process: `src/bootstrap/api.main.ts`.
+- Worker process: `src/bootstrap/worker.main.ts`.
+
+F2.3 adds an in-process fiscal XML preparation path to the existing fiscal module:
+
+```text
+FiscalXmlController
+  -> PrepareFiscalXmlService
+    -> HaciendaV44XmlSerializerAdapter via fiscal XML serializer port
+    -> FiscalSigningCertificateService -> SecretProviderPort
+    -> XmlSignerPort -> NodeXadesEpesSignerAdapter
+    -> XsdValidatorPort -> Xsd11ValidatorAdapter -> packaged Python xmlschema helper
+    -> StoragePort
+    -> Prisma persistence + AuditService
+```
+
+Active status: implemented and accepted for confirmed F2.3 scope. TASK-011 added PKCS#12/PFX and DER X.509 handling, canonicalizes document digest, `SignedProperties` digest and `SignedInfo` signature input using `xml-crypto`, and includes independent `xml-crypto` `SignedXml` verifier tests with Hacienda XPath transform.
 
 ## 3. Active architectural style and module boundaries
 
-### Overall style
+Active style remains a modular monolith with incremental hexagonal/ports-and-adapters conventions.
 
-```
-NestJS Modular Monolith
-  └── Hexagonal Architecture (Ports and Adapters)
-        ├── Domain layer (framework-free)
-        ├── Application layer (use-case handlers; NestJS-injectable but not NestJS-dependent)
-        └── Infrastructure layer (adapters, controllers, Prisma repos)
-```
+Current fiscal XML module structure:
 
-No microservices. No event bus. No CQRS framework (manual command/query pattern only).
+```text
+src/modules/fiscal-documents/
+  application/fiscal-xml/
+    fiscal-signing-certificate.service.ts
+    fiscal-xml-serializer.port.ts
+    prepare-fiscal-xml.service.ts
+    xsd-validator.port.ts
+  domain/fiscal-xml/
+    fiscal-xml.errors.ts
+    fiscal-xml.types.ts
+    hacienda-v44-contract.ts
+  infrastructure/http/
+    fiscal-xml.controller.ts
+    dtos/prepare-fiscal-xml.response.dto.ts
+  infrastructure/xml/
+    hacienda-v44-xml-serializer.adapter.ts
+    xsd11-validator.adapter.ts
+    xsd11/xmlschema-validator.py
 
-### Layer rules (enforced)
-
-| Rule | Enforcement mechanism |
-|---|---|
-| Domain must not import NestJS, Prisma, Axios, or any infrastructure | Code structure; verified by ESLint import rules |
-| Application layer must not import controllers, Prisma client, or HTTP libraries | Code structure |
-| Controllers must not contain business logic | Code review convention |
-| Repository ports (output ports) are defined in the domain layer | File location: `domain/ports/` |
-| Prisma repository adapters are in the infrastructure layer | File location: `infrastructure/persistence/` |
-| External API field names are confined to the adapter implementation | BR-012 (Hacienda) |
-| ConfigService is the sole configuration source in bootstrap and application code | Established by pre-fase-2-hardening; one known violation: DEFECT-001 |
-
-### Module boundary map
-
-```
-src/
-├── api/                    ← Cross-cutting HTTP (no business logic)
-│     guards/               ← ApiKeyAuthGuard, JwtAuthGuard, ScopeGuard, ApiKeyThrottlerGuard
-│     filters/              ← GlobalExceptionFilter
-│     interceptors/         ← CorrelationIdInterceptor, TenantContextInterceptor, AuditInterceptor
-│     strategies/           ← JwtStrategy
-│     health/               ← HealthController
-│
-├── bootstrap/              ← Process entry points only (api.main.ts, worker.main.ts)
-│
-├── infrastructure/         ← Shared cross-cutting adapters (owned by no single domain)
-│     config/               ← Joi schema + NestJS ConfigModule + typed config factories
-│     database/             ← PrismaService + TenantAwarePrismaRepository
-│     integrations/hacienda/ ← HaciendaPort + adapters + HaciendaCircuitBreaker
-│     queue/                ← JobQueuePort + PgBoss + InMemory adapters
-│     secrets/              ← SecretProviderPort + Env + SSM adapters
-│     signing/              ← XmlSignerPort (stub, no adapter)
-│     storage/              ← StoragePort + LocalStorage + S3 adapters
-│     tenant/               ← TenantContext
-│
-└── modules/                ← Business domains (each self-contained hexagon)
-      identity/             → Core: tenants, users, auth
-      companies/            → Core: company management
-      api-keys/             → Core: API key lifecycle
-      audit/                → Supporting: audit trail
-      cabys/                → Supporting: CABYS catalog queries
-      exchange-rates/       → Supporting: exchange rate queries
-      taxpayers/            → Supporting: taxpayer lookup queries
-      shared/               → Generic: base domain classes
+src/infrastructure/signing/
+  ports/xml-signer.port.ts
+  adapters/node-xades-epes-signer.adapter.ts
 ```
 
----
+Boundary note: F2.3 uses explicit ports for serializer, XSD validation, signing, secrets and storage. F2.2 fiscal creation/read/configuration still uses a larger Prisma-backed service and remains architectural debt.
 
 ## 4. Current domain map
 
-| Domain | Classification | Bounded Context | Data Ownership |
+| Domain / Module | Classification | Responsibility | Code location |
 |---|---|---|---|
-| Identity | **Core** | Identity | tenants, users, refresh_tokens |
-| Companies | **Core** | Companies | companies |
-| API Keys | **Core** | API Keys | api_keys, api_key_companies |
-| Audit | **Supporting** | Audit | audit_logs |
-| Hacienda Integration | **Supporting** | Hacienda | No owned tables; caches in-memory |
-| CABYS | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Exchange Rates | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Taxpayers | **Supporting** | Hacienda (shared) | No owned tables; proxies Hacienda |
-| Shared | **Generic** | — | No tables |
-
-**Cross-domain dependency rules:**
-- `Companies` uses `HaciendaPort` (injected) to verify taxpayer at creation time
-- `API Keys` uses `CompanyRepository` (injected) to validate company association
-- `Audit` has no dependency on other business domains; receives audit data via `AuditService`
-
----
+| Identity and Access | Core-supporting | Tenants, users, JWT, refresh tokens, API keys, scopes and company authorization. | `src/modules/identity`, `src/modules/api-keys` |
+| Company Administration | Core | Company identity, ownership and Hacienda verification metadata. | `src/modules/companies` |
+| Hacienda Public Queries | Supporting | Taxpayer, CABYS and exchange-rate lookups. | `src/modules/taxpayers`, `src/modules/cabys`, `src/modules/exchange-rates` |
+| Hacienda Connection | Core-enabling | Per-company/per-environment Hacienda credentials and validation. | `src/modules/hacienda-connection` |
+| Fiscal Documents | Core | Issuance points, sequences, idempotent invoice/ticket snapshots, retrieval and lifecycle state. | `src/modules/fiscal-documents` |
+| Fiscal XML and Signing | Core-supporting within fiscal boundary | Generate Hacienda v4.4 FE/TE XML, manage XML artifacts, validate against pinned XSDs, sign/verify XML. | `src/modules/fiscal-documents/**/fiscal-xml`, `src/infrastructure/signing` |
+| Audit | Generic-supporting | Audit event recording. | `src/modules/audit` |
+| Cross-cutting Infrastructure | Generic | Config, database, Hacienda clients, queues, secrets, storage, signing adapters, tenant context. | `src/infrastructure` |
 
 ## 5. Current runtime components and responsibilities
 
-| Component | Process | Responsibilities |
-|---|---|---|
-| `billing-api` | `node dist/bootstrap/api.main.js` | Serve HTTP requests; all inbound REST API; CORS; rate limiting; auth; audit |
-| `billing-worker` | `node dist/bootstrap/worker.main.js` | Infrastructure shell; no job handlers registered yet |
-| `PostgreSQL 15` | External service | Primary data store; pg-boss job queue schema |
-| `LocalStack` (dev) | External service | S3-compatible mock for development |
-| `AWS S3` (production) | External service | Object storage for signed documents (Fase 3+) |
-| `AWS SSM` (production) | External service | Secrets provider (optional; `env` used in dev/test) |
-
----
+| Component | Responsibility |
+|---|---|
+| `AppModule` | Registers infrastructure and business modules, including fiscal documents and signing infrastructure. |
+| `FiscalDocumentService` | Current compact F2.2 fiscal creation/read/configuration service. |
+| `FiscalXmlController` | Exposes `POST /api/v1/fiscal-documents/:id/prepare-xml`; API-key protected. |
+| `PrepareFiscalXmlService` | Orchestrates existing-document XML generation, signing, verification, signed-XSD validation, artifact persistence, status transition and audit. |
+| `HaciendaV44XmlSerializerAdapter` | Deterministically serializes immutable snapshots into official FE/TE v4.4 unsigned XML. |
+| `Xsd11ValidatorAdapter` | Validates exact signed XML bytes against pinned Hacienda v4.4 XSD 1.1 assets using packaged `python-xmlschema` helper with local-only/defused behavior. |
+| `FiscalSigningCertificateService` | Loads active scoped signing certificate metadata and secrets via `SecretProviderPort`; enforces status/date/scope before signing. |
+| `NodeXadesEpesSignerAdapter` | Current XAdES-EPES signing/verifying adapter behind `XmlSignerPort`; parses PKCS#12/PFX with node-forge, embeds DER X.509 certificate data, and uses `xml-crypto` canonicalization for document digest, `SignedProperties` digest and `SignedInfo` signature input. Tests include independent `xml-crypto` verifier coverage with Hacienda XPath transform. |
+| `StoragePort` adapters | Store unsigned/signed XML privately and return storage keys. |
+| `AuditService` | Records fiscal XML lifecycle events without XML/secrets. |
 
 ## 6. Current dependency rules
 
-### Dependency flow (desired)
+Active intended dependency direction:
 
-```
-HTTP Client
-    │
-    ▼
-Input Adapter (Controller)
-    │
-    ▼
-Input Port (Use Case Handler)
-    │
-    ▼
-Domain (Entities, Value Objects, Domain Services)
-    │
-    ▼
-Output Port (Repository Interface / HaciendaPort / StoragePort)
-    ▲
-    │
-Output Adapter (Prisma Repo / HaciendaApiAdapter / S3StorageAdapter)
+```text
+Input adapter -> Application use case -> Domain helpers/policies -> Output ports <- Output adapters
 ```
 
-### Active enforced rules
+Current deviations/limitations:
 
-1. **Domain layer**: No imports from NestJS, Prisma, Axios, or any infrastructure package.
-2. **Application layer**: No imports from NestJS HTTP decorators, Prisma client, or HTTP libraries. Uses injected port interfaces only.
-3. **Controllers**: No business rules. Delegate entirely to use-case handlers.
-4. **Hacienda field names**: Only in `HaciendaApiAdapter` (adapter file + fixture files). Never in use cases, domain entities, or API DTOs (BR-012).
-5. **Config source in bootstrap/application**: Only `ConfigService`. No `process.env` reads outside `registerAs()` factories.
-6. **Configuration security**: Joi schema validates all env vars at startup. Application will not start with invalid config. CORS wildcard is rejected in production/staging.
+| ID | Severity | Location | Rule affected | Current impact | Recommended target |
+|---|---|---|---|---|---|
+| ARCH-F2.3-001 / AUD-001 | Closed for scope / Medium residual hardening | `src/infrastructure/signing/adapters/node-xades-epes-signer.adapter.ts` and tests | Output adapter should remain independently verifiable and standards-aware. | Closed for confirmed F2.3 scope by final audit after TASK-011 xml-crypto canonicalization and independent verifier evidence. Residual note: production verifier is weaker than test verifier and XMLDSig/XAdES remains manually assembled. | Preserve current port boundary; consider fuller standards library/tool in future hardening without changing `PrepareFiscalXmlService`. |
+| ARCH-F2.3-002 / AUD-002 | Medium | `PrepareFiscalXmlService` | Transformation use case should enforce concurrency/idempotency boundaries. | Simultaneous duplicate prepare requests may race. | Add DB row lock/advisory lock/status transition guard and concurrency E2E. |
+| ARCH-F2.3-003 / AUD-003 | Medium | `FiscalXmlController` | Expensive endpoints should be throttled/limited. | `@SkipThrottle()` bypasses throttling for XML signing/XSD work. | Define and enforce API-key throttle/quota for prepare endpoint. |
+| ARCH-F2.3-004 / AUD-004 | Medium | Prisma schema relations for certificates/artifacts | Tenant/company consistency should be enforced at DB where possible. | Application checks exist, but DB constraints can be strengthened. | Add forward-only compound FK/check strategy where Prisma/PostgreSQL support allows. |
+| ARCH-F2.2-001 | Medium | `FiscalDocumentService` | Application should depend on output ports rather than concrete Prisma infrastructure. | Fiscal F2.2 logic remains harder to unit-test and refactor. | Extract fiscal repository/idempotency/sequence ports incrementally. |
+| ARCH-F1-001 | High | Auth throttling | Security guard enforcement should be proven. | Login/refresh rate limiting remains unproven from earlier audit. | Add threshold tests and guard registration/fix if needed. |
 
-### Known active violation
-
-| ID | Location | Rule violated | Severity |
-|---|---|---|---|
-| DEFECT-001 | `api/filters/global-exception.filter.ts` | Reads `process.env.NODE_ENV` directly instead of using ConfigService | Low |
-
----
+Positive boundary preserved: fiscal domain helper/contract files do not depend on NestJS, Prisma or external SDKs.
 
 ## 7. Current database ownership and transaction boundaries
 
-### Ownership
+Fiscal Documents owns:
 
-Each domain module owns and queries only its designated tables through its Prisma repository adapter. No cross-domain Prisma queries exist in the current implementation.
+- `fiscal_issuance_points`
+- `fiscal_sequences`
+- `fiscal_documents`
+- `fiscal_idempotency_keys`
+- `fiscal_signing_certificates`
+- `fiscal_xml_artifacts`
 
-| Module | Tables |
-|---|---|
-| Identity | `tenants`, `users`, `refresh_tokens` |
-| Companies | `companies` |
-| API Keys | `api_keys`, `api_key_companies` |
-| Audit | `audit_logs` |
+Current transaction boundaries:
 
-### Transaction boundaries
+- F2.2 creation wraps idempotency reservation, sequence allocation and document persistence in one Prisma transaction.
+- F2.3 prepare orchestrates artifact/status updates around signing and validation; audit found concurrent duplicate prepare attempts may race and needs explicit locking/guarding.
+- Sequence allocation uses raw PostgreSQL upsert/update, not `SELECT MAX + 1`.
 
-- All current use cases operate within single-table transactions (Prisma default implicit transaction per operation).
-- No cross-table, cross-domain transaction spans are used.
-- Audit log writes are independent fire-and-forget operations (via `AuditInterceptor`).
-
-### Schema version
-
-PostgreSQL schema version 1.1 (ADR-009: `event_class` in `audit_logs` from migration 001).
-Two applied migrations:
-1. `20250001000000_initial_foundation` — all Fase 0 tables
-2. `20250002000000_company_hacienda_fields` — nullable Hacienda verification columns on `companies`
-
-### Integrity constraints active
-
-- All FKs enforced at PostgreSQL level (ON DELETE RESTRICT or CASCADE where noted)
-- Unique indexes: tenant slug, user email per tenant, company identification per tenant, API key prefix, refresh token hash
-- ENUMs: all status fields use PostgreSQL ENUMs (type-safe)
-- `audit_logs`: no FK enforcement on `company_id` column (column exists; no FK constraint in migration)
-
----
+Current migrations include seven applied-from-zero migrations through `20260912180000_fiscal_xml_signing_metadata`.
 
 ## 8. Current API and integration contracts
 
-### REST API contract
+All paths are under `/api/v1`.
 
-| Property | Value |
-|---|---|
-| Base path | `/api/v1` |
-| Health path | `/health` (excluded from prefix) |
-| Content type | `application/json` |
-| Auth headers | `Authorization: Bearer <jwt>` or `X-API-Key: <key>` |
-| Idempotency | `Idempotency-Key` header accepted (infrastructure present; not enforced in Fase 0/1) |
-| Correlation | `X-Correlation-ID` (generated if absent; echoed in response) |
-| Error shape | `{ error: { code: string, message: string, correlationId?, timestamp: string, details? } }` |
-| Swagger | `GET /api/docs` (non-production only) |
+| API | Auth | Contract summary |
+|---|---|---|
+| `POST /invoices` | API key + `invoices:write` | Creates invoice fiscal snapshot; status `READY_FOR_XML`. |
+| `POST /tickets` | API key + `tickets:write` | Creates ticket fiscal snapshot; status `READY_FOR_XML`. |
+| `GET /fiscal-documents/:id` | API key + dynamic read scope | Returns sanitized fiscal document. |
+| `POST /fiscal-documents/:id/prepare-xml` | API key + service-level type/company checks | Returns prepare metadata and reaches `READY_TO_SUBMIT` when signing/verification/XSD validation succeed. No Hacienda submission is performed. |
+| Fiscal management `PUT` endpoints | JWT TENANT_ADMIN | Configure issuance point and sequences. |
 
-### Rate limiting contracts
+Integration contracts:
 
-| Layer | Guard | Limit | Window |
-|---|---|---|---|
-| Layer A — API Key | `ApiKeyThrottlerGuard` | 100 requests | 60s (configurable) |
-| Layer B — IP (auth) | `@Throttle()` on `AuthController` | 10 requests | 60s (configurable) |
-
-### Hacienda integration contract (outbound)
-
-| Property | Value |
-|---|---|
-| Base URL | `https://api.hacienda.go.cr` (configurable `HACIENDA_API_BASE_URL`) |
-| Timeout | 10s default (configurable `HACIENDA_TIMEOUT_MS`) |
-| TLS | HTTPS enforced by URL scheme |
-| Retry 429 | Linear backoff: `HACIENDA_RETRY_429_BASE_DELAY_MS × (attempt + 1)` |
-| Retry 5xx | Fixed delay: `HACIENDA_RETRY_5XX_DELAY_MS` |
-| Circuit breaker | CLOSED → OPEN after `HACIENDA_CB_FAILURE_THRESHOLD` consecutive failures |
-| Reset | OPEN → HALF_OPEN after `HACIENDA_CB_RESET_TIMEOUT_MS` ms |
-| Rate limit | ≤ `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND` req/s (max 10; Joi-enforced) |
-
----
+- XSD validation is offline/local with pinned FE/TE v4.4 assets.
+- XML signing is behind `XmlSignerPort`.
+- Certificate secrets are loaded through `SecretProviderPort`; DB stores references only.
+- XML bytes are stored through `StoragePort`.
+- No Hacienda submission/F3 integration is invoked.
 
 ## 9. Current security boundaries
 
-### Authentication boundary
-
-```
-Public (no auth): POST /auth/login, POST /auth/refresh, GET /health, POST /tenants
-JWT-protected:    POST/GET /companies, POST/GET/DELETE /api-keys, GET /tenants/:id
-API-Key-protected: GET /taxpayers/:id, GET /cabys/:code, GET /cabys?search=, GET /exchange-rates
-```
-
-### Authorization boundary
-
-- JWT endpoints: tenant-scoped — users can only access their own tenant's resources
-- API Key endpoints: scope-gated + company-authorized via `ScopeGuard`
-- No RBAC within tenants is enforced beyond the UserRole enum (read-only not yet gated)
-
-### Data isolation boundary
-
-`TenantAwarePrismaRepository` base class appends `tenantId` condition to all queries. This is the sole mechanism for multi-tenant isolation (no PostgreSQL row-level security).
-
-### Configuration security boundary
-
-Joi schema (`config.validation-schema.ts`) is the enforcement gate at startup:
-- `DATABASE_URL`: always required
-- `JWT_SECRET`: >= 32 chars in `production`; insecure default only in dev/test
-- `CORS_ALLOWED_ORIGINS`: required and non-wildcard in `production` and `staging`; defaults to `*` in dev/test
-- `HACIENDA_CB_OUTBOUND_RATE_PER_SECOND`: capped at 10 (Hacienda API rate limit compliance)
-
-### Storage security boundary
-
-- All files stored privately (no public ACL)
-- Access via presigned URLs (S3 AWS SDK `getSignedUrl`) or HMAC-signed local URLs
-- `LocalStorageAdapter` prevents path traversal via `path.normalize` + leading `../` strip
-
----
+- Tenant/company/environment scoping is enforced in fiscal services and queries.
+- API-key endpoints require scopes and company authorization.
+- Signing certificate metadata is scoped by tenant/company/environment; disabled/future-active/expired certificates fail closed before secret loading.
+- Secrets/XML bodies are not logged or returned by default according to tests.
+- XSD validation blocks DTD/ENTITY and remote schema-location payloads before invoking helper.
+- Prior AUD-001 is closed for confirmed F2.3 scope. Non-blocking note: production verifier behavior remains weaker than stricter test `xml-crypto` standards-verifier coverage, and XMLDSig/XAdES is still manually assembled.
+- Current risks: `prepare-xml` skips throttling; UUID path validation is incomplete; npm audit vulnerabilities remain.
 
 ## 10. Current container and deployment architecture
 
-### Image build
-
-| Stage | Base | Output |
-|---|---|---|
-| `deps` | `node:20-alpine` | All npm deps + native build tools |
-| `builder` | `node:20-alpine` | Compiled `dist/`, Prisma client, production `node_modules` |
-| `runner` | `node:20-alpine` | Final image; non-root `billing:1001`; port 3000 |
-
-### Runtime security (Dockerfile)
-
-- Non-root user enforced (`USER billing`)
-- Secrets injected via environment variables at container start; no secrets in image
-- HEALTHCHECK via `wget` on `/health`
-
-### Configuration injection model
-
-All runtime configuration is injected via environment variables. The Joi schema validates all variables at startup. No secrets are baked into the image.
-
-### CI/CD gates (`.github/workflows/ci.yml`)
-
-Gate sequence: `lint` + `typecheck` (parallel) → `test` + `build` (parallel) → `e2e`
-
-All gates must pass before the `e2e` job executes. No deployment step is automated in the current workflow.
-
----
+- Multi-stage `Dockerfile` builds NestJS and runner image.
+- `nest-cli.json` copies required XML helper/assets to `dist/src` for runtime.
+- Docker validation evidence after final TASK-011: `docker build -t billing:f23-task011-xmlcrypto-validation --target runner .` passed. Earlier packaging established helper/assets availability; this refresh did not execute container checks.
+- `docker-compose.yml` remains local/development oriented; default-secret/production-mode hardening is still needed before production use.
 
 ## 11. Current testing strategy
 
-### Philosophy
+Current test strategy includes unit tests, application tests, XSD/signing adapter tests, E2E tests and Docker validation.
 
-- Domain logic tested in isolation (no NestJS bootstrap, no database)
-- Configuration schema tested without NestJS bootstrap (import `validationSchema` directly)
-- Integration and E2E tests use real PostgreSQL; Hacienda always mocked
+Final F2.3 evidence supplied:
 
-### Test coverage by type
+- Focused signing/certificate/orchestration tests passed: 18/18.
+- Targeted F2.3 signing E2E passed: 1/1.
+- Prisma generate/validate/migrate deploy passed.
+- Full gates passed: Prisma generate/validate/migrate deploy, lint:check, typecheck, unit tests 217/217, build, full E2E 60/60.
+- Docker runner build passed.
 
-| Type | Location | Framework |
-|---|---|---|
-| Unit (domain entities) | `modules/*/domain/__tests__/` | Jest |
-| Unit (use-case handlers) | `modules/*/application/__tests__/` | Jest |
-| Unit (infrastructure) | `infrastructure/**/__tests__/` | Jest |
-| Unit (API layer) | `api/**/__tests__/` | Jest |
-| Config validation | `infrastructure/config/__tests__/` | Jest + Joi (no NestJS) |
-| E2E | `test/e2e/fase*/` | Jest + Supertest + real PostgreSQL |
-
-### Hacienda in tests
-
-Hacienda is always mocked:
-- Unit tests: `MockHaciendaAdapter` or jest mocks
-- E2E tests: `USE_REAL_HACIENDA=false` → `MockHaciendaAdapter` selected at startup
-
----
+Final audit accepts the confirmed F2.3 local scope: score 8.9/10, verdict Acceptable. This refresh records user-provided evidence and did not execute commands.
 
 ## 12. Active architectural decisions
 
-| ID | Decision | Rationale | Scope |
-|---|---|---|---|
-| ADR-003 | No Redis. Queue via pg-boss on same PostgreSQL. | Reduces operational complexity at current scale. | Queue |
-| ADR-009 | `event_class` column in `audit_logs` from the start. Three retention tiers: FISCAL_AUDIT, TECHNICAL, SECURITY. | Legal compliance for fiscal records. | Audit |
-| DEC-007 | Two-tier rate limiting: per-API-Key (throttler) + per-IP on auth endpoints. | Prevent API Key abuse and auth brute-force independently. | Security |
-| BR-012 | Hacienda field names confined to HaciendaApiAdapter only. | Contract isolation; Billing owns its API contract. | Hacienda |
-| BR-014 | Hacienda not-found detected via `body.code === 404`, not HTTP status. | Hacienda API quirk: HTTP 200 for not-found taxpayers. | Hacienda |
-| BR-015 | CABYS codes (13-digit) ≠ economic activity codes. | Distinct formats; must not be substituted. | Hacienda |
-| NFR-009 | All stored files are private. Access via signed URLs. | Security; no public object exposure. | Storage |
-| HARD-001 | Joi schema extracted to `config.validation-schema.ts` (standalone). | Enables unit testing of Joi rules without NestJS bootstrap. | Config |
-| HARD-002 | CORS wildcard is a startup-time fatal error in production/staging. | Eliminates warn-only fallback; fail-fast security policy. | Security |
-| HARD-003 | `api.main.ts` uses ConfigService exclusively (zero direct process.env reads). | Single configuration source of truth. | Bootstrap |
-| HARD-004 | HaciendaCircuitBreaker all 7 thresholds are configurable via env vars with safe defaults. | Enables per-environment tuning without code changes. | Hacienda |
-| HARD-005 | LocalStorageAdapter accepts config via constructor params (not process.env). | ConfigService → StorageModule → adapter; no Joi bypass. | Storage |
-| HARD-006 | `SIGNED_*.xml` added to `.gitignore`. | Prevent accidental commit of fiscal documents. | Security |
-| HARD-007 | `npx prisma generate` added to lint + typecheck CI jobs. | Eliminates type errors in lint/typecheck due to missing Prisma client. | CI |
-| HARD-008 | `USE_REAL_HACIENDA=false` explicitly set in E2E CI job. | Prevents accidental real Hacienda calls in CI. | CI |
-
----
+| Decision | Current status |
+|---|---|
+| Use modular monolith, not microservices. | Active. |
+| Use NestJS + TypeScript + Prisma + PostgreSQL. | Active. |
+| Keep global HTTP prefix `/api/v1`. | Active. |
+| Hacienda v4.4 is the fiscal XML/XSD contract for FE/TE. | Active for F2.3. |
+| F2.3 scope is prepare/sign/validate existing `READY_FOR_XML` fiscal documents only. | Active. |
+| No Hacienda submission, polling, callbacks, queues, PDFs, email or webhooks in F2.3. | Active. |
+| Use pinned local Hacienda XSD assets; no runtime CDN dependency. | Active. |
+| Official XSD validation targets exact signed XML after signature verification because pinned schemas require `ds:Signature`. | Active. |
+| Use `SecretProviderPort` for certificate/password secrets; DB stores references/metadata only. | Active. |
+| Use `StoragePort` for XML artifact bytes. | Active. |
+| F2.3 is complete only for local prepare/sign/verify/XSD readiness; `READY_TO_SUBMIT` is not Hacienda acceptance and F3 submission remains out of scope. | Active after final audit. |
 
 ## 13. Known architectural limitations
 
-| ID | Limitation | Impact | Required for |
-|---|---|---|---|
-| LIM-001 | No event bus; domain events are defined but not published or consumed. | TenantCreated event is dead code at runtime. | Fase 4 (webhooks) |
-| LIM-002 | Rate limiter is in-memory (not shared across instances). | Cannot scale to multiple API instances with consistent rate limits. | Multi-instance deployment |
-| LIM-003 | Worker process registers no job handlers. | Worker is operational infrastructure with no actual behavior. | Fase 3 (async doc processing) |
-| LIM-004 | XmlSignerPort has no adapter implementation. | Document signing is not possible. | Fase 3 |
-| LIM-005 | No Prometheus metrics, no distributed tracing. | Observability limited to structured logs. | Production monitoring |
-| LIM-006 | No refresh token cleanup job. | Expired tokens accumulate in the database over time. | Operational hygiene |
-| LIM-007 | HaciendaModule CacheModule module-level TTL is hardcoded (1h). Individual ops override correctly. | Hardcoded value not validated by Joi; could diverge from actual cache behavior if adapter logic changes. | Config consistency |
-| LIM-008 | `GlobalExceptionFilter` reads `process.env.NODE_ENV` directly (DEFECT-001). | Architectural inconsistency; minor security edge case. | Config consistency |
-
----
+- XMLDSig/XAdES is still manually assembled; future hardening may replace/amend the adapter behind `XmlSignerPort` with a fuller standards library/tool.
+- Concurrent `prepare-xml` processing lacks explicit locking/idempotency guard for simultaneous requests.
+- `prepare-xml` is expensive and currently skips throttling.
+- F2.3 DB tenant/company consistency can be hardened further.
+- Certificate rotation/re-signing policy requires explicit product/architecture decision.
+- Path parameter UUID validation should be standardized.
+- F2.2 fiscal service remains large and Prisma-coupled.
+- Docker Compose/default-secret and npm audit risks remain.
 
 ## 14. Open decisions requiring clarification
 
-| ID | Question | Why it matters |
-|---|---|---|
-| OD-001 | Is HS256 acceptable for production JWT, or is RS256 required for external token validation in Fase 2? | Affects HaciendaConnection OAuth token handling design. |
-| OD-002 | How are expired refresh tokens purged? Scheduled job, TTL-based cleanup, or manual? | Operational hygiene; uncontrolled growth in high-volume tenants. |
-| OD-003 | For multi-instance API deployment, will Redis be adopted for throttler state, or is single-instance the target? | Contradicts ADR-003 (no Redis); requires explicit decision before scaling. |
-| OD-004 | How will per-company Hacienda OAuth tokens be stored and refreshed in Fase 2? | Token rotation strategy; affects SecretsModule and HaciendaConnection design. |
-| OD-005 | Will pg-boss schema initialization race conditions (API + Worker simultaneous start) be resolved via migration or startup ordering? | Production reliability for worker deployment. |
-| OD-006 | Should Prisma connection pooling be explicitly configured for production? | Performance and stability under concurrent load. |
+1. What is the approved prepare endpoint throttling/quota policy per API key/tenant/company?
+2. What is the approved certificate rotation/re-signing policy beyond no-mutation of existing `READY_TO_SUBMIT` artifacts?
+3. Should DB-level compound constraints be added for tenant/company consistency across fiscal certificates/artifacts/documents?
+4. Should UUID validation be implemented globally via pipes or per-controller?
+5. Should future production hardening replace the manually assembled XMLDSig/XAdES adapter with a fuller standards library/tool behind `XmlSignerPort`?
+6. Should a future F3/sandbox cycle add Hacienda receiver acceptance evidence? This is out of F2.3.

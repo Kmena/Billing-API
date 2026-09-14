@@ -6,6 +6,7 @@ import { DatabaseModule } from './infrastructure/database/database.module';
 import { SecretsModule } from './infrastructure/secrets/secrets.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { StorageModule } from './infrastructure/storage/storage.module';
+import { SigningModule } from './infrastructure/signing/signing.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
 import { HaciendaModule } from './infrastructure/integrations/hacienda/hacienda.module';
 import { IdentityModule } from './modules/identity/identity.module';
@@ -14,6 +15,8 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { TaxpayersModule } from './modules/taxpayers/taxpayers.module';
 import { CabysModule } from './modules/cabys/cabys.module';
 import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
+import { HaciendaConnectionModule } from './modules/hacienda-connection/hacienda-connection.module';
+import { FiscalDocumentsModule } from './modules/fiscal-documents/fiscal-documents.module';
 import { HealthController } from './api/health/health.controller';
 import { PrismaHealthIndicator } from './api/health/indicators/prisma.health-indicator';
 import { CorrelationIdInterceptor } from './api/interceptors/correlation-id.interceptor';
@@ -51,6 +54,7 @@ import { ConfigService } from '@nestjs/config';
 
     // Shared infrastructure
     StorageModule,
+    SigningModule,
     QueueModule,
     HaciendaModule,
 
@@ -61,6 +65,8 @@ import { ConfigService } from '@nestjs/config';
     IdentityModule,
     CompaniesModule,
     ApiKeysModule,
+    HaciendaConnectionModule,
+    FiscalDocumentsModule,
 
     // Fase 1: Hacienda query endpoints
     TaxpayersModule,

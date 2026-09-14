@@ -88,6 +88,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Setup Python for XSD 1.1 validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install XSD validator dependencies
+        run: python -m pip install -r src/modules/fiscal-documents/infrastructure/xml/xsd11/requirements.txt
+
       - name: Generate Prisma client
         run: npx prisma generate
         env:
@@ -161,6 +169,14 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Setup Python for XSD 1.1 validation
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install XSD validator dependencies
+        run: python -m pip install -r src/modules/fiscal-documents/infrastructure/xml/xsd11/requirements.txt
 
       - name: Generate Prisma client
         run: npx prisma generate

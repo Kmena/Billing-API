@@ -1,6 +1,12 @@
-# Spec and docs (project management)
-specs/**
-docs/**
+# SDD specifications — intentionally local-only, never committed
+# All SDD specification packages, planning documents and SDD implementation
+# artifacts are local to the developer's machine and must not be versioned.
+specs/
+
+# Documentation
+# Project-level documentation under docs/ is version-controlled.
+# Ignore only generated, temporary, sensitive or local-only documentation below.
+# docs/audit/drafts/     ← example: uncomment to ignore draft audit files only
 
 # Dependencies
 node_modules/
@@ -24,6 +30,7 @@ build/
 
 # Signed fiscal documents — contain real fiscal data; must never be committed
 SIGNED_*.xml
+storage/
 
 # Editor directories and files
 .idea/
@@ -54,6 +61,7 @@ prisma/dev.db
 # Temporary files
 *.tmp
 *.temp
+__pycache__/
 
 # TypeScript incremental build
 *.tsbuildinfo

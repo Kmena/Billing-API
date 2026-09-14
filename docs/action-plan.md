@@ -1,445 +1,227 @@
 # Architectural Action Plan
 
-> **Last updated:** post `pre-fase-2-hardening` implementation cycle.
-> All pre-fase-2-hardening tasks are marked complete.
-> This document now tracks open defects, the Fase 2 plan, and all future work.
+> **Synchronized:** Final F2.2/F2.3 cross-phase remediation refresh for confirmed `specs/f2-2-to-f2-3-end-to-end-fiscal-data-remediation/` by `sdd-implementation-agent-458e19` on 2026-09-13 with `hdd-architecture-agent` guidance. TASK-001 through TASK-022 are complete. Final audit PASS with non-blocking concerns, score **8.8/10**. F2.2/F2.3 remediation is complete through `READY_TO_SUBMIT`; F3/Hacienda submission remains **NOT STARTED**.
+>
+> **Completed remediation scope:** tax metadata is explicit and snapshotted; invalid/missing tax metadata rejects before `READY_FOR_XML`; non-zero discounts are unsupported/rejected; supported units are `Sp`/`Unid`; unsupported sale/payment conditionals reject; `proveedorSistemas` is required, snapshotted and serialized; normal FE/TE API paths reach `READY_TO_SUBMIT`.
 
----
+> **Synchronized:** Final F2.3 architecture documentation refresh by `hdd-architecture-agent-d7922b` on 2026-09-13 for confirmed `specs/fase-2-3-fiscal-xml-signing/` scope. Documentation-only; no production code, tests, Prisma schema or migrations modified.
+> Final baseline audit result supplied by the user: **Overall Score 8.9/10**, **Verdict Acceptable**. Prior **AUD-001 is closed for the confirmed F2.3 acceptance scope** and is no longer blocking. Remaining notes are non-blocking hardening items.
 
 ## 1. Objective
 
-1. Record completed pre-fase-2-hardening work as the confirmed baseline.
-2. Fix the one remaining defect from the hardening cycle (DEFECT-001).
-3. Define the Fase 2 architectural plan: **HaciendaConnection per Company** — allowing each company to configure and verify its own Hacienda credentials for future document submission.
-4. Identify risks and constraints for the Fase 2 cycle.
-
----
+Record the final accepted F2.3 local XML preparation architecture and keep the forward plan limited to non-blocking hardening. F2.3 ends at `READY_TO_SUBMIT`; Hacienda submission/F3 is not started.
 
 ## 2. Scope
 
-### ✅ Completed — pre-fase-2-hardening
+In scope for this documentation refresh:
 
-| Item | Status |
-|---|---|
-| Standalone Joi schema (`config.validation-schema.ts`) | ✅ Complete |
-| 10 Joi config validation unit tests | ✅ Complete |
-| CORS fail-fast at startup in production/staging | ✅ Complete |
-| `api.main.ts` zero direct `process.env` reads | ✅ Complete |
-| `HaciendaCircuitBreaker` 7 configurable thresholds via env vars | ✅ Complete |
-| `LocalStorageAdapter` decoupled from `process.env` | ✅ Complete |
-| `StorageModule` passes config via `ConfigService` | ✅ Complete |
-| `hacienda.config.ts` typed `circuitBreaker` + `retry` sub-objects | ✅ Complete |
-| `storage.config.ts` typed `localStoragePath` + `localStorageSecret` | ✅ Complete |
-| CI: `npx prisma generate` in lint + typecheck jobs | ✅ Complete |
-| CI: `USE_REAL_HACIENDA=false` in E2E job | ✅ Complete |
-| `docker-compose.yml`: `CORS_ALLOWED_ORIGINS` env var | ✅ Complete |
-| `.gitignore`: `SIGNED_*.xml` pattern | ✅ Complete |
-
-### 🔵 In scope for next cycle
-
-| Item | Status |
-|---|---|
-| DEFECT-001: Fix `GlobalExceptionFilter` `process.env` read | Proposed |
-| Fase 2: HaciendaConnection domain model | Proposed |
-| Fase 2: Database migration (`hacienda_connections` table) | Proposed |
-| Fase 2: CreateHaciendaConnection use case | Proposed |
-| Fase 2: GetHaciendaConnectionStatus use case | Proposed |
-| Fase 2: VerifyHaciendaConnection use case | Proposed |
-| Fase 2: HTTP controller + request/response DTOs | Proposed |
-| Fase 2: Credential storage via SecretsModule | Proposed |
-| Fase 2: Unit + integration + E2E tests | Proposed |
-
----
+- Reflect actual F2.3 implementation state.
+- Record final audit acceptance: 8.9/10 Acceptable, AUD-001 closed for F2.3 scope.
+- Preserve validation evidence provided by the implementation cycle.
+- Document remaining non-blocking notes: production verifier weaker than test standards verifier, XMLDSig/XAdES manually assembled, concurrent duplicate prepare requests not characterized, F2.3 verification docs partially stale, dependency vulnerabilities known/out of scope.
 
 ## 3. Out of scope
 
-- Fiscal document submission (Fase 3+)
-- XML generation (Fase 3+)
-- XML signing adapter implementation (Fase 3+)
-- Background worker job handlers (Fase 3+ — async document processing)
-- Webhook delivery (Fase 4+)
-- PDF generation (Fase 5+)
-- UI/Frontend (Fase 8+)
-- Payment and receipt processing (Fase 7+)
-- Multi-instance rate limiting with Redis
-- Prometheus metrics / distributed tracing
-
----
+- Hacienda submission/F3 (`POST /recepcion`, polling, callbacks, queues, acceptance/rejection handling).
+- Production taxpayer certificates in repository.
+- PDF, email, webhooks or notifications.
+- Microservice extraction.
+- Editing already-applied migrations.
+- Remediating dependency vulnerabilities in this refresh.
 
 ## 4. Requirements addressed
 
-### From `Billing_Plan_Desarrollo.md` Fase 2
+F2.3 requirements are implemented for the confirmed acceptance scope:
 
-| Requirement | ID |
+| Requirement area | Final state |
 |---|---|
-| Each company configures its own Hacienda credentials | REQ-F2-001 |
-| Billing never uses global credentials for all clients | REQ-F2-002 |
-| Credentials encrypted at rest | REQ-F2-003 |
-| Secrets never appear in logs or API responses | REQ-F2-004 |
-| Separation of TEST/PRODUCTION environment per company | REQ-F2-005 |
-| Rotation, audit, minimum privilege | REQ-F2-006 |
-| AWS Secret Manager as appropriate | REQ-F2-007 |
-| `POST /api/v1/companies/{id}/hacienda-connection` | REQ-F2-008 |
-| `GET /api/v1/companies/{id}/hacienda-connection/status` | REQ-F2-009 |
-| `POST /api/v1/companies/{id}/hacienda-connection/test` | REQ-F2-010 |
-
-### Defects
-
-| ID | Requirement |
-|---|---|
-| DEFECT-001 | `GlobalExceptionFilter` reads `process.env.NODE_ENV` directly |
-
----
+| FE/TE v4.4 XML generation | Implemented from immutable F2.2 snapshots. |
+| Official assets | Pinned Hacienda v4.4 FE/TE XSDs, policy PDF and manifest under `resources/hacienda/v4.4`. |
+| XSD validation | `XsdValidatorPort -> Xsd11ValidatorAdapter -> packaged Python xmlschema helper`; local-only, no runtime CDN. |
+| Certificate metadata/secrets | Prisma metadata and migration exist; secrets loaded through `SecretProviderPort`; plaintext secrets not stored in DB. |
+| Signing | `NodeXadesEpesSignerAdapter` signs XAdES-EPES with PKCS#12/PFX support and DER X.509 embedding. TASK-011 canonicalizes document digest, `SignedProperties` digest and `SignedInfo` signature input using `xml-crypto`. |
+| Independent verification | Tests include `xml-crypto` `SignedXml` independent verifier with Hacienda XPath transform; valid FE/TE pass, tamper fails. |
+| Lifecycle | `PrepareFiscalXmlService` reaches `READY_TO_SUBMIT` after sign, verify and official signed-XSD validation. |
+| No F3 | No Hacienda submission/polling/callback behavior added. |
 
 ## 5. Current problems addressed
 
-| Problem | Resolution |
-|---|---|
-| process.env reads in bootstrap | ✅ Resolved — HARD-003 |
-| CORS wildcard in production was warn-only | ✅ Resolved — HARD-002 |
-| HaciendaCircuitBreaker thresholds hardcoded | ✅ Resolved — HARD-004 |
-| LocalStorageAdapter bypassed Joi schema | ✅ Resolved — HARD-005 |
-| config.validation-schema not independently testable | ✅ Resolved — HARD-001 |
-| CI lint/typecheck missing prisma generate | ✅ Resolved — HARD-007 |
-| SIGNED_*.xml not gitignored | ✅ Resolved — HARD-006 |
-| GlobalExceptionFilter reads process.env (DEFECT-001) | 🔴 Open — TASK-F2-001 proposed |
-| Worker registers no job handlers | 🟡 Known — deferred to Fase 3 |
-| Rate limiter state lost on restart (DEBT-004) | 🟡 Known — acceptable for single-instance |
+Closed for this scope:
 
----
+- AUD-001 is no longer blocking. Final audit accepted TASK-011 canonicalization and independent verifier evidence for confirmed F2.3 acceptance scope.
+- Prior documentation ambiguity stating F2.3 was blocked is corrected by this refresh.
+
+Remaining non-blocking problems:
+
+- Production verifier is weaker than stricter test standards verifier coverage.
+- XMLDSig/XAdES remains manually assembled.
+- Simultaneous duplicate `prepare-xml` requests are not characterized.
+- Some F2.3 verification/status documents were stale before this refresh and may need periodic reconciliation after future changes.
+- Known dependency vulnerabilities remain out of scope.
 
 ## 6. Domains affected
 
-### Fase 2
-
-| Domain | Nature of change |
+| Domain | Impact |
 |---|---|
-| **Companies** | New HaciendaConnection sub-entity; new use cases; new migration |
-| **Hacienda Integration** | New per-company credential resolution; new Hacienda auth adapter |
-| **Secrets** | SecretModule used to store/retrieve Hacienda credentials |
-| **Audit** | New audit events for HaciendaConnection CRUD (EventClass: FISCAL_AUDIT) |
-
-### DEFECT-001 fix
-
-| Domain | Nature of change |
-|---|---|
-| **API Layer** | `GlobalExceptionFilter` — inject ConfigService instead of reading process.env |
-
----
+| Fiscal Documents | Lifecycle now includes XML/signing metadata and `READY_TO_SUBMIT`. |
+| Fiscal XML and Signing | Implemented serializer, XSD validator, signer/verifier and artifact preparation flow. |
+| Secrets / Storage | Certificate secrets and XML artifacts remain behind ports. |
+| Persistence | Prisma metadata and migration `20260912180000_fiscal_xml_signing_metadata` are active. |
+| Audit | Fiscal XML lifecycle events are recorded without XML/secrets. |
+| Security | F2.3 secret isolation and local XML parser/network controls are implemented; throttling/dependency hardening remains future work. |
 
 ## 7. Behavior to preserve
 
-All behavior documented in `docs/current-state.md § 13` must be preserved through the Fase 2 cycle:
-
-1. Multi-tenant data isolation (all queries filter by tenantId)
-2. API key security (Argon2 hash; shown once; never recoverable)
-3. Refresh token rotation (single-use; invalidated on use)
-4. Hacienda contract isolation (BR-012: no Hacienda field names in API responses)
-5. BR-014: taxpayer not-found detected via body discriminator
-6. BR-015: CABYS codes ≠ economic activity codes
-7. Audit immutability (no UPDATE/DELETE on audit_logs)
-8. CORS fail-fast in production/staging
-9. JWT minimum entropy (>= 32 chars in production)
-10. All existing Fase 0 + Fase 1 E2E tests must continue to pass
-
----
+- F2.3 processes existing `READY_FOR_XML` fiscal documents only.
+- Immutable F2.2 snapshots are the XML source of truth.
+- Deterministic unsigned FE/TE v4.4 XML generation.
+- Pre-sign checks occur before certificate/signing work.
+- Exact signed XML bytes are locally verified and then validated against pinned official XSDs.
+- Exact signed bytes are stored/hashed and status becomes `READY_TO_SUBMIT`.
+- `READY_TO_SUBMIT` retry returns existing artifact metadata and does not silently mutate signed XML.
+- No Hacienda submission/F3 side effects.
+- XML bodies, private keys, certificate bytes and passwords are not logged/audited/returned by default.
 
 ## 8. Defects to correct
 
-### DEFECT-001 — GlobalExceptionFilter reads process.env directly
+No F2.3 blocking defects remain for the confirmed acceptance scope.
 
-**File:** `src/api/filters/global-exception.filter.ts`
-**Line:** `const isProduction = process.env.NODE_ENV === 'production';`
-**Required change:** Inject `ConfigService` into the filter and use `configService.get<string>('app.nodeEnv')` or `configService.get<string>('NODE_ENV')`.
-**Risk:** Low — the filter works correctly; this is an architectural consistency fix only.
-**Prerequisite:** None.
+Future non-blocking corrections:
 
----
+| Finding | Priority | Correction direction |
+|---|---|---|
+| Production verifier weaker than test verifier | Medium | Align production verification with the stricter `xml-crypto` standards-verifier checks or document why adapter verification remains sufficient at runtime. |
+| XMLDSig/XAdES manually assembled | Medium | Consider replacing/amending signer behind `XmlSignerPort` with fuller standards-based library/tool. |
+| Concurrent duplicate prepare not characterized | Medium | Add locking/compare-and-set characterization and E2E coverage. |
+| Prepare endpoint cost protection | Medium | Define throttle/quota policy. |
+| DB tenant/company consistency hardening | Medium | Evaluate compound constraints/indexes. |
+| UUID path validation | Medium | Add global or per-route UUID validation. |
+| Dependency vulnerabilities | High | Triage and remediate in separate supply-chain task. |
 
 ## 9. Future architectural changes
 
-### Fase 2: HaciendaConnection per Company
+Future work should remain incremental:
 
-**Concept model:**
-```
-Company
-  └── HaciendaConnection (1:1 optional)
-        - haciendaEnvironment: PRODUCTION | SANDBOX
-        - secretRef: SSM parameter path (not the credential itself)
-        - certStorageKey: Object Storage path for certificate
-        - status: UNCONFIGURED | CONFIGURED | VERIFIED | REVOKED
-        - lastVerifiedAt: timestamp | null
-```
-
-**Key design constraints:**
-- Credentials NEVER stored in the database; only a reference path to the secret store (SSM)
-- Certificate private keys NEVER logged or returned via API
-- API responses for status endpoint include only status, environment, lastVerifiedAt (no credentials)
-- All HaciendaConnection CRUD operations emit audit events with `eventClass: FISCAL_AUDIT`
-- Company must exist in the same tenant; cross-tenant access returns 403
-
-**HaciendaConnection state machine:**
-```
-UNCONFIGURED → CONFIGURED (credentials provided)
-              → VERIFIED (test call succeeds)
-CONFIGURED   → VERIFIED (test call succeeds)
-             → UNCONFIGURED (credentials revoked/deleted)
-VERIFIED     → CONFIGURED (re-configured; requires re-verification)
-             → REVOKED (connection decommissioned)
-Any          → REVOKED (explicit revoke)
-```
-
-### Hacienda OAuth (Fase 2 design question)
-
-For authenticated Hacienda operations (Fase 2+), each company's HaciendaConnection will need:
-- OAuth client credentials (username/password from ATVE)
-- Certificate (.p12) for signing
-- Token acquisition and refresh logic
-
-The `HaciendaPort` interface will need new methods or a separate `HaciendaAuthPort`.
-This is a design decision requiring clarification before implementation (see OD-004 in `docs/architecture.md`).
-
----
+1. Add characterization tests for simultaneous duplicate `prepare-xml` requests.
+2. Decide rate limit/quota for expensive XML signing/XSD validation endpoint.
+3. Consider moving production verification to the same strict standards-verifier pattern used in tests.
+4. Evaluate replacing manual XMLDSig/XAdES assembly behind `XmlSignerPort` without changing `PrepareFiscalXmlService`.
+5. Harden DB tenant/company consistency with forward-only migrations if feasible.
+6. Triage npm dependency vulnerabilities separately.
+7. Start F3 only through a new approved SDD specification.
 
 ## 10. Database changes
 
-### Proposed Fase 2 migration
+Implemented:
 
-New ENUMs:
-```sql
-CREATE TYPE "HaciendaEnvironment" AS ENUM ('PRODUCTION', 'SANDBOX');
-CREATE TYPE "HaciendaConnectionStatus" AS ENUM (
-  'UNCONFIGURED', 'CONFIGURED', 'VERIFIED', 'REVOKED'
-);
-```
+- Migration `prisma/migrations/20260912180000_fiscal_xml_signing_metadata`.
+- Lifecycle/artifact/certificate metadata in Prisma.
 
-New table:
-```sql
-CREATE TABLE "hacienda_connections" (
-  "id"               UUID NOT NULL,
-  "company_id"       UUID NOT NULL,
-  "tenant_id"        UUID NOT NULL,
-  "environment"      "HaciendaEnvironment" NOT NULL DEFAULT 'SANDBOX',
-  "secret_ref"       VARCHAR(500),      -- SSM parameter path; NULL until configured
-  "cert_storage_key" VARCHAR(500),      -- Object Storage key for certificate; NULL until configured
-  "status"           "HaciendaConnectionStatus" NOT NULL DEFAULT 'UNCONFIGURED',
-  "last_verified_at" TIMESTAMPTZ,
-  "created_at"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  "updated_at"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+Proposed future changes only if approved:
 
-  CONSTRAINT "hacienda_connections_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "hacienda_connections_company_id_fkey"
-    FOREIGN KEY ("company_id") REFERENCES "companies"("id") ON DELETE RESTRICT,
-  CONSTRAINT "hacienda_connections_tenant_id_fkey"
-    FOREIGN KEY ("tenant_id") REFERENCES "tenants"("id") ON DELETE RESTRICT,
-  CONSTRAINT "hacienda_connections_company_id_unique" UNIQUE ("company_id")
-);
-
-CREATE INDEX "hacienda_connections_tenant_id_idx" ON "hacienda_connections"("tenant_id");
-CREATE INDEX "hacienda_connections_status_idx" ON "hacienda_connections"("status");
-```
-
-**Migration safety:** All new table; no modification to existing tables. Fully backward-compatible. Additive only.
-
-### Prisma schema additions
-
-New Prisma models corresponding to the migration above, plus relation field on `Company` model.
-
----
+- Optional row/advisory locking or status-guard support for concurrent prepare requests.
+- Optional compound constraints/FKs for tenant/company consistency.
+- Never edit already-applied migrations; use forward-only migrations.
 
 ## 11. API and integration changes
 
-### New Fase 2 endpoints (JWT-authenticated, tenant+company scoped)
+Implemented:
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/api/v1/companies/{id}/hacienda-connection` | Create or update HaciendaConnection config |
-| `GET` | `/api/v1/companies/{id}/hacienda-connection/status` | Get connection status (no credentials) |
-| `POST` | `/api/v1/companies/{id}/hacienda-connection/test` | Verify credentials against Hacienda |
-| `DELETE` | `/api/v1/companies/{id}/hacienda-connection` | Revoke and remove connection |
+- `POST /api/v1/fiscal-documents/:id/prepare-xml` prepares XML and returns sanitized metadata.
 
-### Response contract (status endpoint — no credentials)
+Future only if approved:
 
-```json
-{
-  "companyId": "uuid",
-  "environment": "SANDBOX | PRODUCTION",
-  "status": "UNCONFIGURED | CONFIGURED | VERIFIED | REVOKED",
-  "lastVerifiedAt": "2025-01-01T00:00:00.000Z | null"
-}
-```
-
-### No breaking changes to existing endpoints
-
-All Fase 0 + Fase 1 endpoints retain identical contracts.
-
----
+- Add deterministic invalid-UUID behavior.
+- Add documented 429 behavior for prepare endpoint throttling/quota.
+- No Hacienda submission endpoint until F3.
 
 ## 12. Container and deployment changes
 
-### Fase 2
+Implemented/evidenced:
 
-No new container services required. The existing `SecretsModule` already supports AWS SSM for production secret storage.
+- XSD helper/assets packaged for runtime.
+- Final Docker evidence: `docker build -t billing:f23-task011-xmlcrypto-validation --target runner .` passed.
 
-Possible new environment variables for Fase 2 (to be confirmed):
-- `HACIENDA_SANDBOX_BASE_URL` — Hacienda sandbox endpoint (if different from production)
-- Certificate storage path conventions (already covered by `StorageModule`)
+Future:
 
-### Future scaling (not in Fase 2 scope)
-
-Multi-instance API deployments will require shared throttler state. This conflicts with ADR-003 (no Redis). This decision must be revisited before horizontal scaling is attempted.
-
----
+- If production verifier strategy changes, validate Docker packaging again.
+- Keep Docker Compose/default-secret hardening separate from F2.3 closure.
 
 ## 13. Security changes
 
-| Change | Reason | Priority |
-|---|---|---|
-| TASK-F2-001: Fix DEFECT-001 (GlobalExceptionFilter) | Architectural consistency; minor security edge case | Low |
-| TASK-F2-004: HaciendaConnection credentials stored only as SSM references | REQ-F2-003: Encryption at rest | Critical |
-| TASK-F2-005: Audit all HaciendaConnection CRUD with FISCAL_AUDIT event class | REQ-F2-006: Full auditability | High |
-| TASK-F2-006: Certificate private key never logged or returned via API | REQ-F2-004: Secrets never exposed | Critical |
-| TASK-F2-007: Cross-tenant HaciendaConnection access returns 403 | Multi-tenant isolation | High |
+Implemented:
 
----
+- Certificate secrets loaded through `SecretProviderPort`; DB stores references only.
+- XSD validation blocks DTD/ENTITY and runtime remote schema behavior.
+- No XML/secrets in audit/API responses by default.
+- SHA-1 prohibited by contract/tests.
+
+Future:
+
+- Prepare endpoint throttling/quota.
+- UUID path validation.
+- Dependency vulnerability remediation.
+- Optional stricter production verifier alignment.
 
 ## 14. Test strategy
 
-### Required for Fase 2
+Final validation evidence supplied:
 
-| Test | Type | What it validates |
-|---|---|---|
-| `hacienda-connection.entity.spec.ts` | Unit (domain) | Entity state machine, invariants |
-| `create-hacienda-connection.handler.spec.ts` | Unit (application) | Use case: create connection |
-| `get-hacienda-connection-status.handler.spec.ts` | Unit (application) | Use case: status query |
-| `verify-hacienda-connection.handler.spec.ts` | Unit (application) | Use case: test credentials |
-| `prisma-hacienda-connection.repository.spec.ts` | Unit (infrastructure) | Repository adapter |
-| `hacienda-connection.e2e-spec.ts` | E2E | Full API flow; tenant isolation; credential safety |
-| `security: credentials-not-in-response.spec.ts` | E2E | Credentials absent from all API responses |
+- `npx prisma generate`, `npx prisma validate`, `npx prisma migrate deploy` with `DATABASE_URL` passed.
+- `npm run lint:check` passed.
+- `npm run typecheck` passed.
+- `npm test -- --silent` passed: 217/217.
+- `npm run build` passed.
+- `npm run test:e2e -- --silent --runInBand` passed: 60/60.
+- Docker runner build passed: `billing:f23-task011-xmlcrypto-validation`.
+- TASK-011 signer tests include `xml-crypto` `SignedXml` independent verifier with Hacienda XPath transform; valid FE/TE pass signer verify, xml-crypto verify and XSD; tamper fails.
 
-### Existing tests must pass unchanged
-
-All `test/e2e/fase0/` and `test/e2e/fase1/` tests must pass after Fase 2 changes without modification.
-
----
+This architecture refresh did not execute commands.
 
 ## 15. Migration stages
 
-### Stage 1 — pre-fase-2-hardening ✅ COMPLETE
-
-All items listed in section 2 (Completed) are implemented and confirmed via repository inspection.
-
-### Stage 2 — DEFECT-001 Fix (Proposed)
-
-1. Inject `ConfigService` into `GlobalExceptionFilter` via constructor
-2. Replace `process.env.NODE_ENV === 'production'` with `configService.get<string>('NODE_ENV') === 'production'`
-3. Update unit test if one exists for the filter
-4. Verify no behavioral change in production mode
-
-**Estimated risk:** Very low. Behavior is identical; only source of config changes.
-
-### Stage 3 — Fase 2: HaciendaConnection (Proposed)
-
-Ordered sub-stages to minimize risk:
-
-**3a. Domain model**
-- Define `HaciendaConnection` entity with state machine
-- Define `HaciendaEnvironment` and `HaciendaConnectionStatus` value objects
-- Define `HaciendaConnectionRepository` port
-- Write domain entity unit tests
-
-**3b. Database**
-- Create new Prisma migration for `hacienda_connections` table + ENUMs
-- Update `schema.prisma`
-- Apply migration to dev environment
-- Verify schema consistency
-
-**3c. Application layer**
-- `CreateHaciendaConnectionHandler` use case
-- `GetHaciendaConnectionStatusHandler` use case
-- `VerifyHaciendaConnectionHandler` use case
-- `RevokeHaciendaConnectionHandler` use case
-- Write handler unit tests with mocked port
-
-**3d. Infrastructure — persistence**
-- `PrismaHaciendaConnectionRepository` adapter
-- Tenant isolation enforced
-- Integration tests
-
-**3e. Infrastructure — credential storage**
-- Use existing `SecretsModule`/`SecretProviderPort` for credential storage
-- Store only SSM reference path in database
-- Write mock-based unit tests
-
-**3f. HTTP layer**
-- Request DTOs (create, verify)
-- Response DTOs (status only; no credentials)
-- `HaciendaConnectionController` with JWT guard
-- Input validation
-- Audit logging with `FISCAL_AUDIT` event class
-
-**3g. Tests**
-- Unit tests for all handlers and repository adapter
-- E2E tests for new endpoints
-- Security assertion: credentials absent from all API responses
-
-**3h. Documentation refresh**
-- Update `docs/current-state.md`
-- Update `docs/architecture.md`
-- Update `docs/tasks.md` with completed statuses
-
----
+| Stage | Status | Notes |
+|---|---|---|
+| F2.3 implementation | Complete for confirmed scope | Implemented by `sdd-implementation-agent-4a564c`. |
+| Final audit acceptance | Complete | 8.9/10 Acceptable; AUD-001 closed for scope. |
+| Documentation refresh | Complete by this task | Docs/specs refreshed to remove stale blocked status. |
+| Non-blocking hardening | Proposed | Concurrency, throttling, DB constraints, verifier alignment, UUID validation, dependency triage. |
+| F3 submission | Not started | Requires separate approved SDD. |
 
 ## 16. Risks and mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Hacienda OAuth token format changes | Low | High | Abstract behind `HaciendaAuthPort`; adapter is swappable |
-| Credential leak via logging | Medium | Critical | AuditInterceptor must exclude `HaciendaConnection` payload fields; DTOs must not include secrets |
-| Certificate storage unencrypted | Low | High | Encrypt before upload; document key management |
-| pg-boss schema race (API + worker simultaneous start) | Low | Medium | Worker should start after API; add startup ordering to docker-compose |
-| Cross-tenant HaciendaConnection access | Low (mitigated by design) | High | Enforce tenantId filter in all connection queries; verify in E2E test |
-| Breaking existing API contracts | Low | High | Additive changes only; no existing endpoints modified |
-| Rate limiter state lost on restart | Medium | Low | Documented as known limitation; acceptable for single-instance |
-
----
+| Risk | Severity | Mitigation |
+|---|---|---|
+| `READY_TO_SUBMIT` misread as Hacienda acceptance | High | Documentation states it is local readiness only; F3 not implemented. |
+| Concurrent duplicate prepare race | Medium | Add future characterization/locking task. |
+| Expensive endpoint abuse | Medium | Add future quota/throttling task. |
+| Manual XMLDSig/XAdES assembly drifts | Medium | Keep tests and consider standards-library adapter behind `XmlSignerPort`. |
+| Dependency vulnerabilities | High | Separate supply-chain remediation task. |
+| Real taxpayer cert leakage | Critical | Continue using only test/generated fixtures; never commit production cert material. |
 
 ## 17. Rollback or recovery strategy
 
-- All Fase 2 database changes are additive (new table; no modification to existing tables)
-- The new table can be dropped with a rollback migration without affecting Fase 0/1 data
-- No existing API endpoints are modified; rollback is safe
-- If credential SSM storage fails, `HaciendaConnection` remains `UNCONFIGURED` — no partial state
-
----
+- Documentation changes can be reverted if inaccurate.
+- Signing/verifier future changes should remain behind `XmlSignerPort`.
+- DB future changes must be forward-only with migration validation.
+- Operationally, failed F2.3 processing should remain retryable unless a signed `READY_TO_SUBMIT` artifact already exists.
 
 ## 18. Manual validation
 
-### Before marking Fase 2 tasks complete
+For local F2.3 scope:
 
-- [ ] `POST /api/v1/companies/{id}/hacienda-connection` creates connection record with UNCONFIGURED status
-- [ ] `POST /api/v1/companies/{id}/hacienda-connection` with valid credentials transitions to CONFIGURED
-- [ ] `GET /api/v1/companies/{id}/hacienda-connection/status` returns status, environment, lastVerifiedAt — no credentials
-- [ ] `POST /api/v1/companies/{id}/hacienda-connection/test` calls Hacienda sandbox; VERIFIED on success
-- [ ] Credentials (raw secret, certificate passphrase) absent from all API responses and audit logs
-- [ ] Company from Tenant A is not accessible from Tenant B (returns 403)
-- [ ] All existing Fase 0 + Fase 1 E2E tests pass without modification
-- [ ] `npm test` passes with zero failures
-- [ ] `npm run test:e2e` passes with zero failures
-
----
+1. Prepare a `READY_FOR_XML` invoice and ticket.
+2. Configure test-only PFX/password secrets through `SecretProviderPort`.
+3. Call `/api/v1/fiscal-documents/:id/prepare-xml`.
+4. Confirm `READY_TO_SUBMIT`, artifact metadata, hashes and no XML/secret leakage.
+5. Confirm signer verify, `xml-crypto` verifier and pinned XSD validation pass.
+6. Retry and confirm no signed XML mutation.
+7. Tamper a copy and confirm verification failure.
+8. Confirm no Hacienda submission calls exist.
 
 ## 19. Approval status
 
-| Task | Status |
-|---|---|
-| pre-fase-2-hardening (all tasks) | ✅ Complete |
-| TASK-F2-001: Fix DEFECT-001 | 🔵 **Proposed — requires approval** |
-| TASK-F2-002: HaciendaConnection domain entity | 🔵 **Proposed — requires approval** |
-| TASK-F2-003: Database migration | 🔵 **Proposed — requires approval** |
-| TASK-F2-004: CreateHaciendaConnection use case | 🔵 **Proposed — requires approval** |
-| TASK-F2-005: GetHaciendaConnectionStatus use case | 🔵 **Proposed — requires approval** |
-| TASK-F2-006: VerifyHaciendaConnection use case | 🔵 **Proposed — requires approval** |
-| TASK-F2-007: HaciendaConnection HTTP controller | 🔵 **Proposed — requires approval** |
-| TASK-F2-008: Credential storage via SecretsModule | 🔵 **Proposed — requires approval** |
-| TASK-F2-009: Fase 2 unit + integration + E2E tests | 🔵 **Proposed — requires approval** |
+- F2.3 is accepted for the confirmed local prepare/sign/verify/XSD scope.
+- AUD-001 is closed for this scope and no longer blocking.
+- Remaining hardening tasks are **Proposed** and require explicit approval before code changes.
+- Hacienda submission/F3 remains **not started**.

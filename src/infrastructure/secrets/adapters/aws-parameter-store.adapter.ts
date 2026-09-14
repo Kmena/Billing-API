@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
+import {
+  DeleteParameterCommand,
+  GetParameterCommand,
+  PutParameterCommand,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
 import { SecretProvider } from '../ports/secret-provider.port';
 
 @Injectable()
@@ -38,5 +43,20 @@ export class AwsParameterStoreSecretProvider implements SecretProvider {
 
     // Never log value — only log the parameter path for debugging
     return value;
+  }
+
+  async storeSecret(key: string, value: string): Promise<void> {
+    await this.client.send(
+      new PutParameterCommand({
+        Name: `${this.parameterPrefix}/${key}`,
+        Value: value,
+        Type: 'SecureString',
+        Overwrite: true,
+      }),
+    );
+  }
+
+  async deleteSecret(key: string): Promise<void> {
+    await this.client.send(new DeleteParameterCommand({ Name: `${this.parameterPrefix}/${key}` }));
   }
 }
