@@ -215,7 +215,11 @@ describe('SubmitFiscalDocumentService', () => {
     };
     const { service, queue } = makeService({
       fiscalDocument: {
-        findFirst: jest.fn().mockResolvedValue({ ...readyDocument, submission: terminal }),
+        findFirst: jest.fn().mockResolvedValue({
+          ...readyDocument,
+          status: 'ACCEPTED',
+          submission: terminal,
+        }),
       },
     });
 

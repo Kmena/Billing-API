@@ -72,6 +72,11 @@ export class SubmitFiscalDocumentService {
       throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
     }
 
+    const existing = document.submission;
+    if (existing?.status === 'ACCEPTED' || existing?.status === 'REJECTED') {
+      return { ...this.toResponse(existing), jobName: SUBMIT_FISCAL_DOCUMENT_JOB };
+    }
+
     if (document.status !== 'READY_TO_SUBMIT') {
       throw new ConflictException({ code: 'FISCAL_DOCUMENT_NOT_READY_TO_SUBMIT' });
     }
@@ -81,12 +86,7 @@ export class SubmitFiscalDocumentService {
       throw new BadRequestException({ code: 'SIGNED_XML_ARTIFACT_REQUIRED' });
     }
 
-    const existing = document.submission;
     const submission = existing ?? (await this.createOrLoadSubmission(document, artifact));
-
-    if (submission.status === 'ACCEPTED' || submission.status === 'REJECTED') {
-      return { ...this.toResponse(submission), jobName: SUBMIT_FISCAL_DOCUMENT_JOB };
-    }
 
     const jobName = this.jobNameForSubmissionStatus(submission.status);
     const queuedSubmission = await this.markQueuedWhenSafeToSubmit(submission);
