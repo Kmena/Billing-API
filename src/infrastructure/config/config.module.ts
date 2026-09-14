@@ -8,6 +8,7 @@ import storageConfig from './storage.config';
 import secretsConfig from './secrets.config';
 import haciendaConfig from './hacienda.config';
 import haciendaAuthConfig from './hacienda-auth.config';
+import haciendaSubmissionConfig from './hacienda-submission.config';
 
 export { validationSchema } from './config.validation-schema';
 
@@ -23,6 +24,7 @@ export { validationSchema } from './config.validation-schema';
         secretsConfig,
         haciendaConfig,
         haciendaAuthConfig,
+        haciendaSubmissionConfig,
       ],
       validationSchema,
       validationOptions: {

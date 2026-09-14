@@ -41,6 +41,7 @@ import { DisableConnectionHandler } from './application/use-cases/disable-connec
     GetConnectionHandler,
     ValidateConnectionHandler,
     HaciendaTokenCache,
+    HACIENDA_AUTH_PORT,
   ],
 })
 export class HaciendaConnectionModule {}

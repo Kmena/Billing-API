@@ -61,6 +61,7 @@ export function assertSafeTestDatabaseUrl(databaseUrl = process.env.DATABASE_URL
 
 export async function resetFiscalE2eData(prisma: PrismaClient): Promise<void> {
   assertSafeTestDatabaseUrl();
+  await prisma.fiscalSubmission.deleteMany();
   await prisma.fiscalXmlArtifact.deleteMany();
   await prisma.fiscalSigningCertificate.deleteMany();
   await prisma.companyFiscalProfile.deleteMany();

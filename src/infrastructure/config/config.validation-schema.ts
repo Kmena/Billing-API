@@ -106,4 +106,16 @@ export const validationSchema = Joi.object({
   HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS: Joi.number().integer().positive().default(30000),
   HACIENDA_AUTH_RETRY_5XX_COUNT: Joi.number().integer().positive().default(1),
   HACIENDA_AUTH_RETRY_5XX_DELAY_MS: Joi.number().integer().positive().default(2000),
+
+  // Hacienda CE reception submission
+  HACIENDA_RECEPCION_PRODUCTION_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default('https://api.comprobanteselectronicos.go.cr/recepcion/v1/'),
+  HACIENDA_RECEPCION_SANDBOX_BASE_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .default('https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/'),
+  HACIENDA_SUBMISSION_TIMEOUT_MS: Joi.number().integer().positive().default(15000),
+  HACIENDA_SUBMISSION_CALLBACK_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .optional(),
 });

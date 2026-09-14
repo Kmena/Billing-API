@@ -43,6 +43,9 @@ export class PgBossJobQueue implements JobQueuePort, OnModuleInit, OnModuleDestr
       retryLimit: options?.retryLimit ?? 3,
       retryDelay: options?.retryDelay ?? 10,
       ...(options?.expireInSeconds ? { expireInSeconds: options.expireInSeconds } : {}),
+      ...(options?.startAfterSeconds
+        ? { startAfter: new Date(Date.now() + options.startAfterSeconds * 1000) }
+        : {}),
     });
   }
 

@@ -103,6 +103,21 @@ enum FiscalDocumentStatus {
   XML_VALIDATED
   SIGNED
   READY_TO_SUBMIT
+  ACCEPTED
+  REJECTED
+}
+
+enum FiscalSubmissionStatus {
+  REQUESTED
+  QUEUED
+  SUBMITTING
+  POST_OUTCOME_UNKNOWN
+  ACKNOWLEDGED
+  PROCESSING
+  ACCEPTED
+  REJECTED
+  TECHNICAL_RETRY_PENDING
+  MANUAL_REVIEW_REQUIRED
 }
 
 enum FiscalXmlValidationStatus {
@@ -151,6 +166,7 @@ model Tenant {
   fiscalIdempotencyKeys     FiscalIdempotencyKey[]
   fiscalSigningCertificates FiscalSigningCertificate[]
   fiscalXmlArtifacts        FiscalXmlArtifact[]
+  fiscalSubmissions         FiscalSubmission[]
   companyFiscalProfiles     CompanyFiscalProfile[]
 
   @@map("tenants")
@@ -181,6 +197,7 @@ model Company {
   fiscalIdempotencyKeys      FiscalIdempotencyKey[]
   fiscalSigningCertificates  FiscalSigningCertificate[]
   fiscalXmlArtifacts         FiscalXmlArtifact[]
+  fiscalSubmissions          FiscalSubmission[]
   fiscalProfile              CompanyFiscalProfile?
 
   @@unique([tenantId, identificationNumber])
@@ -286,6 +303,7 @@ model FiscalDocument {
   issuancePoint    FiscalIssuancePoint    @relation(fields: [issuancePointId], references: [id])
   idempotencyKeys  FiscalIdempotencyKey[]
   xmlArtifacts     FiscalXmlArtifact[]
+  submission       FiscalSubmission?
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
@@ -361,6 +379,49 @@ model FiscalXmlArtifact {
   @@index([tenantId, companyId, environment, documentType], map: "fiscal_xml_artifact_scope_type_idx")
   @@index([tenantId, companyId, xsdValidationStatus], map: "fiscal_xml_artifact_validation_idx")
   @@map("fiscal_xml_artifacts")
+}
+
+model FiscalSubmission {
+  id                         String                 @id @db.Uuid
+  tenantId                   String                 @map("tenant_id") @db.Uuid
+  companyId                  String                 @map("company_id") @db.Uuid
+  fiscalDocumentId           String                 @unique @map("fiscal_document_id") @db.Uuid
+  environment                HaciendaEnvironment    @map("environment")
+  documentType               FiscalDocumentType     @map("document_type")
+  clave                      String                 @unique @db.Char(50)
+  signedXmlSha256            String                 @map("signed_xml_sha256") @db.Char(64)
+  signedXmlStorageKey        String                 @map("signed_xml_storage_key") @db.VarChar(700)
+  status                     FiscalSubmissionStatus @default(REQUESTED)
+  technicalStatus            String?                @map("technical_status") @db.VarChar(80)
+  attemptCount               Int                    @default(0) @map("attempt_count")
+  reconciliationAttemptCount Int                    @default(0) @map("reconciliation_attempt_count")
+  firstSubmittedAt           DateTime?              @map("first_submitted_at")
+  lastAttemptAt              DateTime?              @map("last_attempt_at")
+  nextAttemptAt              DateTime?              @map("next_attempt_at")
+  acceptedAt                 DateTime?              @map("accepted_at")
+  rejectedAt                 DateTime?              @map("rejected_at")
+  providerLocation           String?                @map("provider_location") @db.VarChar(700)
+  providerReference          String?                @map("provider_reference") @db.VarChar(255)
+  lastHttpStatus             Int?                   @map("last_http_status")
+  lastNormalizedErrorCode    String?                @map("last_normalized_error_code") @db.VarChar(120)
+  lastSanitizedErrorMessage  String?                @map("last_sanitized_error_message") @db.VarChar(500)
+  lastProviderStatus         String?                @map("last_provider_status") @db.VarChar(40)
+  lastProviderMetadata       Json?                  @map("last_provider_metadata")
+  responseStorageKey         String?                @map("response_storage_key") @db.VarChar(700)
+  responseSha256             String?                @map("response_sha256") @db.Char(64)
+  responseContentType        String?                @map("response_content_type") @db.VarChar(120)
+  responseReceivedAt         DateTime?              @map("response_received_at")
+  version                    Int                    @default(0)
+  createdAt                  DateTime               @default(now()) @map("created_at")
+  updatedAt                  DateTime               @updatedAt @map("updated_at")
+  tenant                     Tenant                 @relation(fields: [tenantId], references: [id])
+  company                    Company                @relation(fields: [companyId], references: [id])
+  fiscalDocument             FiscalDocument         @relation(fields: [fiscalDocumentId], references: [id])
+
+  @@index([tenantId, companyId, status], map: "fiscal_submission_scope_status_idx")
+  @@index([status, nextAttemptAt], map: "fiscal_submission_due_work_idx")
+  @@index([environment, status], map: "fiscal_submission_environment_status_idx")
+  @@map("fiscal_submissions")
 }
 
 model FiscalIdempotencyKey {
