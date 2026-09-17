@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { validateApiKeyScopes } from '../../../domain/value-objects/api-key-scope.vo';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
 import { ApiKey, ApiKeyEnvironment } from '../../../domain/entities/api-key.entity';
@@ -62,7 +62,7 @@ export class CreateApiKeyHandler {
     const keyHash = await argon2.hash(fullKey, { type: argon2.argon2id });
 
     const apiKey = ApiKey.create(
-      uuidv4(),
+      randomUUID(),
       command.tenantId,
       command.name,
       command.environment,

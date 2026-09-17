@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
@@ -23,6 +24,7 @@ import {
   HACIENDA_V44_XADES_CONTRACT,
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
 import { FiscalXmlProcessingResult } from '../../domain/fiscal-xml/fiscal-xml.types';
+import { EnsureInitialFiscalPackageService } from '../delivery/ensure-initial-fiscal-package.service';
 
 @Injectable()
 export class PrepareFiscalXmlService {
@@ -34,6 +36,7 @@ export class PrepareFiscalXmlService {
     @Inject(XSD_VALIDATOR) private readonly xsdValidator: XsdValidatorPort,
     @Inject(XML_SIGNER) private readonly signer: XmlSignerPort,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
+    @Optional() private readonly ensureInitialDelivery?: EnsureInitialFiscalPackageService,
   ) {}
 
   async execute(input: {
@@ -187,6 +190,23 @@ export class PrepareFiscalXmlService {
         durationMs: Date.now() - startedAt,
         schemaVersion: HACIENDA_V44_SCHEMA_VERSION,
       });
+
+      // F4 integration hook (DEC-011): trigger INITIAL_DOCUMENT delivery after READY_TO_SUBMIT
+      // INVARIANT: Does NOT modify FiscalDocument.status. Delivery is independent.
+      if (this.ensureInitialDelivery) {
+        setImmediate(async () => {
+          try {
+            await this.ensureInitialDelivery!.ensure({
+              tenantId: document.tenantId,
+              companyId: document.companyId,
+              fiscalDocumentId: document.id,
+            });
+          } catch {
+            // Hook failure must NOT affect fiscal processing — startup recovery will compensate
+          }
+        });
+      }
+
       return this.toResult(document.id, 'READY_TO_SUBMIT', completed);
     } catch (error) {
       if (error instanceof BadRequestException || error instanceof ConflictException) throw error;

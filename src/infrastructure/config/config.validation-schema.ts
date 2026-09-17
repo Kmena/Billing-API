@@ -107,6 +107,34 @@ export const validationSchema = Joi.object({
   HACIENDA_AUTH_RETRY_5XX_COUNT: Joi.number().integer().positive().default(1),
   HACIENDA_AUTH_RETRY_5XX_DELAY_MS: Joi.number().integer().positive().default(2000),
 
+  // F4: QR content URL base (operator-configured deployment prerequisite)
+  // No default in production — fails fast at startup if missing.
+  // Use MOCK value for CI/test environments.
+  HACIENDA_QR_URL_BASE: Joi.when('NODE_ENV', {
+    is: Joi.valid('production', 'staging'),
+    then: Joi.string()
+      .uri({ scheme: ['https'] })
+      .required(),
+    otherwise: Joi.string().default('https://mock.hacienda.test/qr'),
+  }),
+
+  // F4: Email delivery configuration (production uses SMTP)
+  EMAIL_USE_REAL: Joi.boolean().truthy('true').falsy('false').default(false),
+  SMTP_HOST: Joi.string().optional(),
+  SMTP_PORT: Joi.number().integer().positive().default(587),
+  SMTP_SECURE: Joi.boolean().truthy('true').falsy('false').default(false),
+  SMTP_USER: Joi.string().optional(),
+  SMTP_PASSWORD: Joi.string().optional(),
+  EMAIL_FROM_ADDRESS: Joi.string().email().optional(),
+  EMAIL_FROM_NAME: Joi.string().default('Billing Electrónico'),
+
+  // F4: PDF rendering
+  PDF_RENDER_TIMEOUT_MS: Joi.number().integer().positive().default(30000),
+  PDF_MAX_SIZE_BYTES: Joi.number().integer().positive().default(10485760), // 10 MB
+
+  // F4: Delivery retry horizon
+  DELIVERY_MAX_RETRIES: Joi.number().integer().positive().default(8),
+
   // Hacienda CE reception submission
   HACIENDA_RECEPCION_PRODUCTION_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })

@@ -1,10 +1,11 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { STORAGE_PORT, StoragePort } from '../../../../infrastructure/storage/ports/storage.port';
 import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import { HaciendaSubmissionResult } from './ports/hacienda-submission.port';
 import { FiscalSubmissionStateMachine, FiscalSubmissionStatus } from '../../domain/submission';
+import { EnsureHaciendaResponseDeliveryService } from '../delivery/ensure-hacienda-response-delivery.service';
 
 @Injectable()
 export class FiscalSubmissionStateService {
@@ -14,6 +15,8 @@ export class FiscalSubmissionStateService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
+    @Optional()
+    private readonly haciendaResponseDeliveryService?: EnsureHaciendaResponseDeliveryService,
   ) {}
 
   async applyProviderResult(submissionId: string, result: HaciendaSubmissionResult): Promise<void> {
@@ -104,6 +107,30 @@ export class FiscalSubmissionStateService {
         httpStatus: result.httpStatus,
       },
     });
+
+    // F4 integration hook (DEC-011): trigger Hacienda response delivery after terminal transition
+    // INVARIANT: Does NOT modify FiscalDocument.status. Delivery is independent.
+    if (terminal && this.haciendaResponseDeliveryService) {
+      setImmediate(async () => {
+        try {
+          await this.haciendaResponseDeliveryService!.ensure({
+            tenantId: submission.tenantId,
+            companyId: submission.companyId,
+            fiscalDocumentId: submission.fiscalDocumentId,
+            responseKind: nextStatus as 'ACCEPTED' | 'REJECTED',
+          });
+        } catch (hookError: unknown) {
+          // Hook failure must NOT affect fiscal status — log and continue
+          // Startup recovery scan will catch missed deliveries
+          this.logger.warn({
+            msg: 'F4 Hacienda response delivery hook failed — startup recovery will compensate',
+            submissionId,
+            fiscalDocumentId: submission.fiscalDocumentId,
+            error: String(hookError),
+          });
+        }
+      });
+    }
   }
 
   private async storeResponseArtifactIfPresent(
