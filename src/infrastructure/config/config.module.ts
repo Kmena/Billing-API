@@ -16,6 +16,7 @@ export { validationSchema } from './config.validation-schema';
   imports: [
     NestConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env.local', '.env'],
       load: [
         appConfig,
         databaseConfig,

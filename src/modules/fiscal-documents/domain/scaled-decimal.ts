@@ -39,6 +39,10 @@ export class ScaledDecimal {
     return this.units < 0n;
   }
 
+  isZero(): boolean {
+    return this.units === 0n;
+  }
+
   toString(): string {
     const sign = this.units < 0n ? '-' : '';
     const absolute = this.units < 0n ? -this.units : this.units;

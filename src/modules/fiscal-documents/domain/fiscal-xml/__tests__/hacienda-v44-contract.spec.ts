@@ -70,6 +70,7 @@ describe('Hacienda v4.4 contract assets', () => {
     );
     expect(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentUrl).not.toContain('URLXXXXV4.4');
 
+    // Algorithms used for signing/document/policy digests must not contain SHA-1
     const configuredAlgorithms = [
       HACIENDA_V44_XADES_CONTRACT.canonicalizationAlgorithm,
       HACIENDA_V44_XADES_CONTRACT.signatureMethodAlgorithm,
@@ -88,11 +89,66 @@ describe('Hacienda v4.4 contract assets', () => {
     expect(HACIENDA_V44_XADES_CONTRACT.prohibitedAlgorithms).toContain('rsa-sha1');
   });
 
-  it('pins the official signature-policy document hash', () => {
+  // ── CertDigest SHA-1 (official Hacienda v4.4 Anexo 2 requirement) ───────────
+  it('certDigestAlgorithm is SHA-1 as required by Hacienda v4.4 Anexo 2', () => {
+    // Source: ANEXOS_Y_ESTRUCTURAS_V4.4.pdf, Anexo 2
+    //         "Ejemplo de la etiqueta de firma y su contenido" (pages 87-88)
+    expect(HACIENDA_V44_XADES_CONTRACT.certDigestAlgorithm).toBe(
+      'http://www.w3.org/2000/09/xmldsig#sha1',
+    );
+  });
+
+  it('certDigestAlgorithm is in the prohibitedAlgorithms list (enforced only outside CertDigest)', () => {
+    // SHA-1 is prohibited everywhere except CertDigest. The contract records it in
+    // prohibitedAlgorithms so that guards can detect accidental SHA-1 use in
+    // signing/document digests. The signer strips CertDigest before applying the guard.
+    expect(HACIENDA_V44_XADES_CONTRACT.prohibitedAlgorithms).toContain(
+      HACIENDA_V44_XADES_CONTRACT.certDigestAlgorithm,
+    );
+  });
+
+  // ── Policy document ──────────────────────────────────────────────────────────
+  it('pins the official signature-policy document hash (hex)', () => {
     const filePath = resourcePath(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentFileName);
     const stats = fs.statSync(filePath);
 
     expect(stats.size).toBe(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentFileSizeBytes);
     expect(sha256File(filePath)).toBe(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256);
+  });
+
+  it('signaturePolicyDocumentSha256Base64 is the correct base64 encoding of the hex hash', () => {
+    // XML-DSIG requires <ds:DigestValue> to be base64-encoded binary, NOT hex.
+    const derivedBase64 = Buffer.from(
+      HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256,
+      'hex',
+    ).toString('base64');
+    expect(derivedBase64).toBe(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256Base64);
+    // Must decode back to exactly 32 bytes (SHA-256 output length)
+    expect(Buffer.from(derivedBase64, 'base64').length).toBe(32);
+    // Explicit value guard — pins the official v4.4 Anexo 2 value exactly
+    expect(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256Base64).toBe(
+      'DWxin1xWOeI8OuWQXazh4VjLWAaCLAA954em7DMh0h8=',
+    );
+    expect(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256Base64Length).toBe(44);
+  });
+
+  it('signaturePolicyDocumentSha256Base64 is verified against the real policy PDF on disk', () => {
+    const filePath = resourcePath(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentFileName);
+    const fileHashBase64 = crypto
+      .createHash('sha256')
+      .update(fs.readFileSync(filePath))
+      .digest('base64');
+    expect(fileHashBase64).toBe(HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentSha256Base64);
+  });
+
+  // ── Policy URL format ────────────────────────────────────────────────────────
+  it('signaturePolicyDocumentUrl is the percent-encoded form (official Anexo 2 example)', () => {
+    // Source: ANEXOS_Y_ESTRUCTURAS_V4.4.pdf, Anexo 2 — <xades:Identifier> in official example
+    const url = HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentUrl;
+    expect(url).toContain('%C3%B3'); // ó percent-encoded
+    expect(url).toContain('%C3%A9'); // é percent-encoded
+    expect(url).toBe(
+      'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/Resoluci%C3%B3n_General_sobre_disposiciones_t%C3%A9cnicas_comprobantes_electr%C3%B3nicos_para_efectos_tributarios.pdf',
+    );
   });
 });

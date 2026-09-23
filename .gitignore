@@ -32,6 +32,17 @@ build/
 SIGNED_*.xml
 storage/
 
+# Test output — generated during test runs; never commit
+# test-output/ covers all subdirectories including F4-S evidence.
+# Added by TASK-003.
+test-output/
+
+# Runtime secrets directory — NEVER commit operator secrets here
+# Place .p12 certificates, PINs and credentials under .secrets/ or secrets-local/
+# These directories must be gitignored BEFORE secrets are placed there.
+.secrets/
+secrets-local/
+
 # Editor directories and files
 .idea/
 .vscode/

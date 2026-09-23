@@ -23,7 +23,10 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
-    "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts"
+    "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
+    "test:hacienda-sandbox": "ts-node -r tsconfig-paths/register test/hacienda-sandbox/runner/f4s-runner.ts",
+    "test:hacienda-sandbox:unit": "jest --config ./test/hacienda-sandbox/jest-f4s.json --passWithNoTests --runInBand",
+    "f4s:bootstrap-signing-certificate": "ts-node -r tsconfig-paths/register scripts/f4s-bootstrap-signing-certificate.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.623.0",

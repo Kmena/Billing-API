@@ -1,5 +1,27 @@
 # Changelog — Billing API
 
+## [proveedorSistemas-optional-field-fix] — 2026-09-22
+
+**Agent:** sdd-implementation-agent-86ebff
+**Canonical spec:** `specs/fase-4-s-hacienda-sandbox-validation/`
+**Scope:** Bug fix — `proveedorSistemas` incorrectly required in fiscal profile completeness guard and XML serializer. No schema migration required. 19 new regression tests added.
+
+### Bug fix
+- `FiscalDocumentService.getReadyCompanyFiscalProfile()`: removed `profile.proveedorSistemas` from `requiredProfileFields`. Companies without this value can now proceed to FE/TE creation.
+- `HaciendaV44XmlSerializerAdapter.requireParty()`: removed `'proveedorSistemas'` from the required-fields array. The XSD `<ProveedorSistemas>` element is emitted as empty when absent, which is XSD-valid (maxLength=20, no minLength).
+
+### New tests
+- `src/modules/fiscal-documents/application/__tests__/fiscal-document-profile-validation.spec.ts` — 14 tests covering optional field, fabrication prevention, required fields still enforced.
+- `src/modules/fiscal-documents/infrastructure/xml/__tests__/hacienda-v44-xml-serializer.adapter.spec.ts` — +5 proveedorSistemas regression tests.
+
+### Validation
+- 603/615 main suite tests pass (12 pre-existing integration tests skipped).
+- 222/222 F4-S unit tests pass.
+- TypeScript: 0 errors.
+- ESLint: 0 errors on affected files.
+
+---
+
 ## [fase-3-hacienda-async-submission-final-architecture-refresh] — 2026-09-14
 
 **Agent:** hdd-architecture-agent-4f9f0f
@@ -33,7 +55,7 @@
 - Added explicit line tax metadata support for non-zero tax: `taxCode`, `taxRateCode`, `taxRate`, `taxAmount`.
 - F2.2 rejects missing/invalid tax metadata, non-zero discounts, unsupported unit measures and unsupported sale/payment conditionals before `READY_FOR_XML`.
 - F2.3 serializer consumes tax metadata and `proveedorSistemas` from immutable snapshots and rejects unsupported legacy seeded values.
-- `CompanyFiscalProfile.proveedorSistemas` is required for fiscal readiness and snapshotted for XML generation.
+- `CompanyFiscalProfile.proveedorSistemas` is snapshotted for XML generation. ~~Required for fiscal readiness~~ — corrected: this field is optional (see `[proveedorSistemas-optional-field-fix]` entry above). The XML element `<ProveedorSistemas>` is emitted as empty when absent.
 - Documentation reconciled to record the `CompanyFiscalProfile` ownership model, immutable F2.2 -> F2.3 boundary, `READY_FOR_XML` completeness invariant and `READY_TO_SUBMIT` final pre-F3 boundary.
 
 ### Validation

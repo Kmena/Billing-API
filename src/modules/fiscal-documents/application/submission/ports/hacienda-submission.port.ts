@@ -49,7 +49,14 @@ export type HaciendaSubmissionResultKind =
   | 'REJECTED'
   | 'RETRYABLE_FAILURE'
   | 'AMBIGUOUS_FAILURE'
-  | 'NON_RETRYABLE_FAILURE';
+  | 'NON_RETRYABLE_FAILURE'
+  /**
+   * An undocumented 2xx (e.g. HTTP 202) was received from Hacienda.
+   * The document may or may not have been received — semantics are unknown.
+   * DO NOT treat as ACKNOWLEDGED or ACCEPTED without authoritative proof.
+   * Reconcile via GET /recepcion/{clave}.
+   */
+  | 'UNRESOLVED_PROVIDER_RESPONSE';
 
 export interface HaciendaSubmissionResult {
   readonly kind: HaciendaSubmissionResultKind;
@@ -63,6 +70,8 @@ export interface HaciendaSubmissionResult {
   readonly responseArtifact?: HaciendaSubmissionArtifact;
   readonly rateLimit?: HaciendaRateLimitMetadata;
   readonly providerMetadata?: Record<string, string | number | boolean | null>;
+  /** HTTP status classification from the Hacienda /recepcion contract table. */
+  readonly responseClassification?: string;
 }
 
 export interface HaciendaSubmissionPort {

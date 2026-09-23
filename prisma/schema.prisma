@@ -242,7 +242,7 @@ model CompanyFiscalProfile {
   id                   String   @id @db.Uuid
   tenantId             String   @map("tenant_id") @db.Uuid
   companyId            String   @unique @map("company_id") @db.Uuid
-  economicActivityCode String   @map("economic_activity_code") @db.Char(6)
+  economicActivityCode String   @map("economic_activity_code") @db.VarChar(6)
   proveedorSistemas    String?  @map("proveedor_sistemas") @db.VarChar(20)
   province             String   @db.Char(1)
   canton               String   @db.Char(2)
