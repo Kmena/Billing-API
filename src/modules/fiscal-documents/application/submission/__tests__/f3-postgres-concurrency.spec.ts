@@ -120,9 +120,9 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
     await prisma.fiscalSequence.deleteMany();
     await prisma.haciendaConnection.deleteMany();
     await prisma.apiKeyCompany.deleteMany();
-    await prisma.apiKey.deleteMany();
     await prisma.refreshToken.deleteMany();
     await prisma.auditLog.deleteMany();
+    await prisma.apiKey.deleteMany();
     await prisma.user.deleteMany();
     await prisma.company.deleteMany();
     await prisma.tenant.deleteMany();
