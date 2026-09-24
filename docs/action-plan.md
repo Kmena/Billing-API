@@ -1,6 +1,6 @@
 # Architectural Action Plan
 
-> **Synchronized:** F4 Fiscal Artifacts, PDF & Delivery documentation refresh by `hdd-architecture-agent-65ee79` on 2026-09-17. F4 is functionally complete. This plan records completed F4 work and the remaining forward roadmap only.
+> **Synchronized:** Fiscal-company-configuration-and-secure-credentials refresh by `hdd-architecture-agent-3fd9e0` on 2026-09-23. F4 and F5 (fiscal-company-configuration) are functionally complete. This plan records completed work and the remaining forward roadmap only.
 
 ## 1. Objective
 
@@ -256,7 +256,14 @@ This action plan refresh did not execute commands.
 | F4 APIs/branding/artifact download | Complete | All 10 F4 API endpoints implemented and tested. |
 | F4 F3 integration hooks | Complete | AUD-001–AUD-005 remediated; `@Optional()` + `setImmediate` hooks active. |
 | F4 tests/quality gates | Complete | 531/57 suites; 0 fail; typecheck/lint/build/Prisma all PASS. |
-| F4 pre-production readiness | Proposed | OQ-012, SMTP SecretProvider, QR URL confirmation, storage lifecycle, dependency/security. |
+| F5 certificate domain exceptions + extraction service | Complete | `CrCertificateIdentityExtractorService`, `fiscal-certificate.exceptions.ts` implemented and tested. |
+| F5 upload/rotation service + controller | Complete | `UploadFiscalSigningCertificateService`, `FiscalCertificateController` (POST/PUT/GET), `multer.memoryStorage()` override confirmed. |
+| F5 certificate metadata + readiness | Complete | `FiscalReadCertificateMetadataService`, `FiscalReadinessService` (6 flags) implemented and tested. |
+| F5 defense-in-depth pre-signing check | Complete | `FiscalSigningCertificateService.getActiveCertificate()` modified — identity re-validated before signing. |
+| F5 company identity guard | Complete | `UpdateCompanyHandler`, `UpdateCompanyRequestDto`, `PUT /companies/:id` — DEC-003 enforced; HTTP 409 on conflict. |
+| F5 schema migration | Complete | `20260924000000_add_cert_extracted_identity` — nullable `extracted_identity_number` + `extracted_identity_type` columns. Prisma validate PASS. |
+| F5 tests/quality gates | Complete | 893 tests / 71 suites PASS; typecheck PASS; lint clean on new/modified files; 0 regressions. |
+| Pre-production readiness | Proposed | OQ-012, SMTP SecretProvider, QR URL confirmation, storage lifecycle, dependency/security. |
 | F4.1 rejected document replacement | Not started | Separate specification required. |
 
 ## 16. Risks and mitigations

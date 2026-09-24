@@ -1,5 +1,46 @@
 # Changelog — Billing API
 
+## [fase-4-s-hacienda-sandbox-validation-closed] — 2026-09-22
+
+**Agent:** sdd-implementation-agent-86ebff
+**Canonical spec:** `specs/fase-4-s-hacienda-sandbox-validation/`
+**Scope:** F4-S specification closeout — documentation only. Zero production code changes, zero Hacienda network contact, zero consecutives consumed.
+
+### Result
+F4-S **CLOSED / VERIFIED**. The Billing pipeline was exercised end-to-end against the real Hacienda Costa Rica SANDBOX. One fiscal document was accepted.
+
+### Verified pipeline path
+- XML v4.4 generation → XSD validation PASS
+- XAdES-EPES signature → certificate/emitter identity matched
+- OAuth token via sandbox IdP (HTTP 200, Bearer, expires_in=300)
+- POST /recepcion → HTTP 202 → Billing preserved `POST_OUTCOME_UNKNOWN` (correct)
+- GET /recepcion/{clave} → `ind-estado=aceptado`, Mensaje=1, 0 fiscal/signature errors
+- Billing final state = `ACCEPTED`
+- Production requests = 0 | Secrets exposed = 0
+
+### Accepted sandbox document
+- Clave: `50622092600020753025100100001010000000012177202467`
+- Consecutive: `00100001010000000012`
+- Document ID: `314b07f5-8d56-4973-a6a3-1a280905eb07`
+
+### Issues resolved during F4-S (were bugs in production pipeline)
+1. Hacienda request-envelope mismatch
+2. XAdES Policy structure
+3. Certificate/emitter identity mismatch
+4. Economic activity formatting
+5. CAByS placeholder
+6. Goods/service totals
+7. TotalDesgloseImpuesto
+8. CodigoTarifaIVA conditional handling
+
+### Out-of-scope items (future specifications)
+Durable fiscal configuration audit, self-service onboarding, certificate upload/rotation, secure `.p12`/PIN storage, durable submission recovery, TE sandbox validation, negative scenarios, token lifecycle, callback live observation, F4 delivery integration.
+
+### Documentation updated
+`specs/fase-4-s-hacienda-sandbox-validation/metadata.yaml`, `tasks.md`, `implementation-report.md`, `verification-matrix.md`, `changelog.md`, `current-state.md`.
+
+---
+
 ## [proveedorSistemas-optional-field-fix] — 2026-09-22
 
 **Agent:** sdd-implementation-agent-86ebff

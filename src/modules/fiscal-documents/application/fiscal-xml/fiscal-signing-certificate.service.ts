@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import {
   SECRET_PROVIDER,
@@ -10,6 +10,8 @@ import { HaciendaEnvironment } from '../../domain/fiscal.constants';
 
 @Injectable()
 export class FiscalSigningCertificateService {
+  private readonly logger = new Logger(FiscalSigningCertificateService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(SECRET_PROVIDER) private readonly secrets: SecretProvider,
@@ -47,6 +49,52 @@ export class FiscalSigningCertificateService {
     }
     if (certificate.validTo && certificate.validTo <= now) {
       throw new BadRequestException({ code: FISCAL_XML_ERROR.certificateExpired });
+    }
+
+    // TASK-004 — Defense-in-depth: re-validate certificate ↔ Company identity
+    // before every signing operation.
+    //
+    // FR-013 requires this check for EVERY signing operation.
+    //
+    // A NULL extractedIdentityNumber indicates the certificate was registered
+    // before the F5 identity-extraction feature (F5-LEGACY-001 — e.g. the F4-S
+    // bootstrap record). Such certificates MUST NOT be allowed to sign because
+    // their identity has not been verified against the company.
+    //
+    // Resolution path: operator must re-upload the certificate via
+    // POST /companies/:id/fiscal-certificates/:env to populate the identity.
+    //
+    // This guard protects against: stale configuration, legacy DB changes,
+    // manual mutations, migration inconsistencies, and future bugs.
+    if (!certificate.extractedIdentityNumber) {
+      this.logger.warn(
+        {
+          companyId: input.companyId,
+          environment: input.environment,
+          certIdSuffix: certificate.id.slice(-4),
+        },
+        'Pre-signing identity check: certificate has no extracted identity — blocking signing (F5-LEGACY-001)',
+      );
+      throw new BadRequestException({ code: FISCAL_XML_ERROR.certificateIdentityUnverified });
+    }
+
+    const company = await this.prisma.company.findFirst({
+      where: { id: input.companyId, tenantId: input.tenantId },
+      select: { identificationNumber: true },
+    });
+    const certId = certificate.extractedIdentityNumber.trim().toLowerCase();
+    const companyId = (company?.identificationNumber ?? '').trim().toLowerCase();
+    if (certId !== companyId) {
+      this.logger.warn(
+        {
+          companyId: input.companyId,
+          environment: input.environment,
+          certIdSuffix: certId.slice(-4),
+          companyIdSuffix: companyId.slice(-4),
+        },
+        'Pre-signing identity check failed: certificate emitter does not match company',
+      );
+      throw new BadRequestException({ code: FISCAL_XML_ERROR.certificateEmitterMismatch });
     }
 
     try {

@@ -13,4 +13,8 @@ export const FISCAL_XML_ERROR = {
   signingFailed: 'FISCAL_XML_SIGNING_FAILED',
   signatureVerificationFailed: 'FISCAL_XML_SIGNATURE_VERIFICATION_FAILED',
   artifactStorageFailed: 'FISCAL_XML_ARTIFACT_STORAGE_FAILED',
+  // F5 certificate identity enforcement (TASK-004, TASK-006)
+  certificateEmitterMismatch: 'FISCAL_CERTIFICATE_EMITTER_MISMATCH',
+  certificateIdentityUnverified: 'FISCAL_CERTIFICATE_IDENTITY_UNVERIFIED',
+  certificateIdentityConflict: 'FISCAL_CERTIFICATE_IDENTITY_CONFLICT',
 } as const;

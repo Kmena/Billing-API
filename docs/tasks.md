@@ -1,6 +1,6 @@
 # Repository Tasks
 
-> **Synchronized:** F4 Fiscal Artifacts, PDF & Delivery documentation refresh by `hdd-architecture-agent-65ee79` on 2026-09-17. F4 implementation is complete (all 23 tasks implemented; audit remediations AUD-001–AUD-005 confirmed). TASK-008 is now marked Complete. All other tasks remain Proposed until explicitly approved.
+> **Synchronized:** Fiscal-company-configuration-and-secure-credentials refresh by `hdd-architecture-agent-3fd9e0` on 2026-09-23. F4 and F5 implementations complete. TASK-008 and TASK-014 are marked Complete. All other tasks remain Proposed until explicitly approved.
 
 ---
 
@@ -155,6 +155,18 @@
 **Migration considerations:** None.
 **Rollback or mitigation:** Defer extraction; direct Prisma remains acceptable current architecture.
 **Risk:** Low/Medium refactor risk.
+
+---
+
+## TASK-014: Implement fiscal certificate management and readiness (fiscal-company-configuration-and-secure-credentials)
+**Status:** Complete
+**Priority:** High
+**Domain:** Fiscal Documents / Fiscal XML / Companies
+**Requirement:** `specs/fiscal-company-configuration-and-secure-credentials/` — FR-001 through FR-028; DEC-001 through DEC-009.
+**Reason:** F4-S proved the fiscal pipeline works end-to-end; this spec converts that capability into a durable, secure, self-service product feature available to any authorized company.
+**Current problem (was):** Certificate upload required manual SQL or bootstrap scripts; no identity validation; no readiness status; no company identity guard; no pre-signing defense-in-depth.
+**Outcome:** All 11 tasks implemented. 78 new tests. 893 tests / 71 suites PASS (1 pre-existing failure unchanged). TypeScript: 0 errors. Lint: 0 errors on all new/modified files. Architecture documentation updated by `hdd-architecture-agent-3fd9e0` on 2026-09-23. See `specs/fiscal-company-configuration-and-secure-credentials/implementation-report.md` for complete evidence.
+**Risk:** Closed.
 
 ---
 

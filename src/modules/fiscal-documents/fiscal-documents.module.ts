@@ -11,6 +11,11 @@ import { HaciendaConnectionModule } from '../hacienda-connection/hacienda-connec
 import { FiscalDocumentService } from './application/fiscal-document.service';
 import { PrepareFiscalXmlService } from './application/fiscal-xml/prepare-fiscal-xml.service';
 import { FiscalSigningCertificateService } from './application/fiscal-xml/fiscal-signing-certificate.service';
+import { CrCertificateIdentityExtractorService } from './application/fiscal-xml/cr-certificate-identity-extractor.service';
+import { UploadFiscalSigningCertificateService } from './application/fiscal-xml/upload-fiscal-signing-certificate.service';
+import { FiscalReadCertificateMetadataService } from './application/fiscal-xml/fiscal-read-certificate-metadata.service';
+import { FiscalReadinessService } from './application/fiscal-xml/fiscal-readiness.service';
+import { FiscalCertificateController } from './infrastructure/http/fiscal-certificate.controller';
 import { FISCAL_XML_SERIALIZER } from './application/fiscal-xml/fiscal-xml-serializer.port';
 import { XSD_VALIDATOR } from './application/fiscal-xml/xsd-validator.port';
 import { HaciendaV44XmlSerializerAdapter } from './infrastructure/xml/hacienda-v44-xml-serializer.adapter';
@@ -74,11 +79,18 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     FiscalArtifactsController,
     FiscalDeliveriesController,
     CompanyPdfSettingsController,
+    // F5 certificate management
+    FiscalCertificateController,
   ],
   providers: [
     FiscalDocumentService,
     PrepareFiscalXmlService,
     FiscalSigningCertificateService,
+    // F5: certificate upload and management
+    CrCertificateIdentityExtractorService,
+    UploadFiscalSigningCertificateService,
+    FiscalReadCertificateMetadataService,
+    FiscalReadinessService,
     SubmitFiscalDocumentService,
     GetFiscalSubmissionStatusService,
     RequestFiscalSubmissionReconciliationService,

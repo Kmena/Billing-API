@@ -85,11 +85,11 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       code = 'INTERNAL_SERVER_ERROR';
       message = 'An unexpected error occurred.';
 
-      // Log full error for internal diagnostics
+      // Log sanitized diagnostics — never log raw exception.message to prevent
+      // accidental leakage of secret material from unexpected exceptions.
       this.logger.error(
         {
-          error: exception instanceof Error ? exception.message : String(exception),
-          stack: exception instanceof Error ? exception.stack : undefined,
+          errorType: exception instanceof Error ? exception.constructor.name : typeof exception,
           correlationId,
           url: request.url,
           method: request.method,
@@ -97,7 +97,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         'Unhandled exception',
       );
 
-      // In development, include more info
+      // In development, include more info in the HTTP response (not in the log)
       if (!isProduction && exception instanceof Error) {
         message = exception.message;
       }

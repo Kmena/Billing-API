@@ -24,14 +24,30 @@ function createCertificate(overrides: Record<string, unknown> = {}) {
     createdAt: now,
     updatedAt: now,
     replacedById: null,
+    // FR-013: extractedIdentityNumber is populated by the F5 upload API.
+    // Default matches the company mock's identificationNumber ('3102123456').
+    // Tests that require NULL must explicitly set extractedIdentityNumber: null.
+    extractedIdentityNumber: '3102123456',
+    extractedIdentityType: '02',
     ...overrides,
   };
 }
 
-function createService(certificate: Record<string, unknown> | null, certificateSecret?: string) {
+function createService(
+  certificate: Record<string, unknown> | null,
+  certificateSecret?: string,
+  company?: { identificationNumber: string } | null,
+) {
   const prisma = {
     fiscalSigningCertificate: {
       findFirst: jest.fn().mockResolvedValue(certificate),
+    },
+    company: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue(
+          company !== undefined ? company : { identificationNumber: '3102123456' },
+        ),
     },
   };
   const secrets = {
@@ -178,6 +194,77 @@ describe('FiscalSigningCertificateService', () => {
       FISCAL_XML_ERROR.certificateScopeMismatch,
     );
     expect(secrets.getSecret).not.toHaveBeenCalled();
+  });
+
+  // ── TASK-004: Defense-in-depth identity check ────────────────────────────
+
+  it('TASK-004 / F5-LEGACY-001: blocks signing when certificate has NULL extractedIdentityNumber', async () => {
+    // FR-013: Every signing operation MUST validate certificate identity.
+    // NULL extractedIdentityNumber means the cert was uploaded before F5 identity
+    // extraction was implemented (F5-LEGACY-001 — e.g. F4-S bootstrap record).
+    // Such certs MUST be blocked with FISCAL_CERTIFICATE_IDENTITY_UNVERIFIED.
+    // Resolution: operator must re-upload via POST /companies/:id/fiscal-certificates/:env.
+    const cert = createCertificate({ extractedIdentityNumber: null });
+    const { service, prisma, secrets } = createService(cert);
+
+    await expectFailureCode(
+      service.getActiveCertificate({
+        tenantId: '22222222-2222-4222-8222-222222222222',
+        companyId: '33333333-3333-4333-8333-333333333333',
+        environment: 'SANDBOX',
+      }),
+      FISCAL_XML_ERROR.certificateIdentityUnverified,
+    );
+
+    // Company lookup must NOT be called — guard fires before DB query
+    expect(prisma.company.findFirst).not.toHaveBeenCalled();
+    // Secrets must NOT be loaded
+    expect(secrets.getSecret).not.toHaveBeenCalled();
+  });
+
+  it('TASK-004: passes when extractedIdentityNumber matches company identificationNumber', async () => {
+    const cert = createCertificate({ extractedIdentityNumber: '3102123456' });
+    const { service } = createService(cert, undefined, { identificationNumber: '3102123456' });
+
+    const result = await service.getActiveCertificate({
+      tenantId: '22222222-2222-4222-8222-222222222222',
+      companyId: '33333333-3333-4333-8333-333333333333',
+      environment: 'SANDBOX',
+    });
+
+    expect(result.id).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('TASK-004: fails before loading secrets when extractedIdentityNumber mismatches company', async () => {
+    const cert = createCertificate({ extractedIdentityNumber: '9999999999' });
+    const { service, secrets } = createService(cert, undefined, {
+      identificationNumber: '3102123456',
+    });
+
+    await expectFailureCode(
+      service.getActiveCertificate({
+        tenantId: '22222222-2222-4222-8222-222222222222',
+        companyId: '33333333-3333-4333-8333-333333333333',
+        environment: 'SANDBOX',
+      }),
+      FISCAL_XML_ERROR.certificateEmitterMismatch,
+    );
+
+    // Secrets must NOT be loaded when identity check fails
+    expect(secrets.getSecret).not.toHaveBeenCalled();
+  });
+
+  it('TASK-004: identity check is case and whitespace insensitive', async () => {
+    const cert = createCertificate({ extractedIdentityNumber: '  3102123456  ' });
+    const { service } = createService(cert, undefined, { identificationNumber: '3102123456' });
+
+    // Should not throw
+    const result = await service.getActiveCertificate({
+      tenantId: '22222222-2222-4222-8222-222222222222',
+      companyId: '33333333-3333-4333-8333-333333333333',
+      environment: 'SANDBOX',
+    });
+    expect(result.id).toBe('11111111-1111-4111-8111-111111111111');
   });
 
   it('normalizes invalid secret material without exposing secret values', async () => {
