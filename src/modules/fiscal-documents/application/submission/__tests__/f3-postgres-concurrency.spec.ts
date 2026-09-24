@@ -110,12 +110,18 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
   });
 
   afterAll(async () => {
-    await prisma.fiscalSubmission.deleteMany();
-    await prisma.fiscalXmlArtifact.deleteMany();
+    // Deletion order respects FK constraints.
+    // Children must be deleted before their parents.
+    await prisma.deliveryAttempt.deleteMany(); // FK → documentDelivery
+    await prisma.documentDelivery.deleteMany(); // FK → fiscalDocument
+    await prisma.fiscalArtifact.deleteMany(); // FK → fiscalDocument
+    await prisma.fiscalSubmission.deleteMany(); // FK → fiscalDocument
+    await prisma.fiscalXmlArtifact.deleteMany(); // FK → fiscalDocument, fiscalSigningCertificate
     await prisma.fiscalSigningCertificate.deleteMany();
     await prisma.companyFiscalProfile.deleteMany();
+    await prisma.companyPdfSettings.deleteMany(); // FK → company
     await prisma.fiscalIdempotencyKey.deleteMany();
-    await prisma.fiscalDocument.deleteMany();
+    await prisma.fiscalDocument.deleteMany(); // FK → fiscalIssuancePoint
     await prisma.fiscalIssuancePoint.deleteMany();
     await prisma.fiscalSequence.deleteMany();
     await prisma.haciendaConnection.deleteMany();
