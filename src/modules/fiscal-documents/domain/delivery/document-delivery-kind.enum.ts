@@ -1,0 +1,4 @@
+export enum DocumentDeliveryKind {
+  INITIAL_DOCUMENT = 'INITIAL_DOCUMENT',
+  HACIENDA_RESPONSE = 'HACIENDA_RESPONSE',
+}

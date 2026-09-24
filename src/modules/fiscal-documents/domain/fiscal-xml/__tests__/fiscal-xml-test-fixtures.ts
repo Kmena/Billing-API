@@ -44,7 +44,8 @@ export function createFiscalXmlSnapshot(
     lines: [
       {
         lineNumber: 1,
-        cabysCode: '1234567890123',
+        // Real CAByS catalog entry: "Servicios de consultoría en software" (first digit 8 → SERVICE)
+        cabysCode: '8313100000100',
         description: 'Servicio fiscal de prueba',
         unitMeasure: 'Sp',
         quantity: '1.00000',

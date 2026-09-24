@@ -9,4 +9,11 @@ describe('ScaledDecimal', () => {
   it('rejects values with more than five decimal places', () => {
     expect(() => ScaledDecimal.from('1.123456')).toThrow('at most 5 decimal places');
   });
+
+  it('isZero returns true only for the zero value', () => {
+    expect(ScaledDecimal.zero().isZero()).toBe(true);
+    expect(ScaledDecimal.from('0.00000').isZero()).toBe(true);
+    expect(ScaledDecimal.from('0.00001').isZero()).toBe(false);
+    expect(ScaledDecimal.from('1.00000').isZero()).toBe(false);
+  });
 });

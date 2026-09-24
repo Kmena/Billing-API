@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import * as crypto from 'crypto';
 import { IUserRepository, USER_REPOSITORY } from '../../../domain/ports/user.repository';
 import {
@@ -65,7 +65,7 @@ export class RefreshTokenHandler {
     await this.refreshTokenRepository.markAsUsed(tokenHash);
 
     // Issue new access token
-    const jti = uuidv4();
+    const jti = randomUUID();
     const payload: JwtPayload = {
       sub: user.id,
       tenantId: user.tenantId,

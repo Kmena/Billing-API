@@ -1,5 +1,5 @@
+import { randomUUID } from 'crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
 import { AuditLog, AuditLogProps, EventClass } from '../domain/entities/audit-log.entity';
 import { IAuditLogRepository, AUDIT_LOG_REPOSITORY } from '../domain/ports/audit-log.repository';
 
@@ -22,7 +22,7 @@ export class AuditService {
   record(command: RecordAuditLogCommand): void {
     const log = new AuditLog({
       ...command,
-      id: uuidv4(),
+      id: randomUUID(),
       eventClass: command.eventClass ?? EventClass.TECHNICAL,
     });
 
