@@ -1,5 +1,5 @@
 import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { GetCompanyHandler } from '../../../../companies/application/use-cases/get-company/get-company.handler';
 import { AuditService, EventClass } from '../../../../audit/application/audit.service';
 import {
@@ -64,7 +64,7 @@ export class ConfigureConnectionHandler {
     const reference = `hacienda-conn/${command.companyId}/${command.environment}`;
     await this.secrets.storeSecret(reference, JSON.stringify(credentials));
     const connection = HaciendaConnection.configure(
-      existing?.id ?? uuidv4(),
+      existing?.id ?? randomUUID(),
       command.tenantId,
       command.companyId,
       command.environment,

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import * as argon2 from 'argon2';
 import { User, UserRole } from '../../../domain/entities/user.entity';
 import { IUserRepository, USER_REPOSITORY } from '../../../domain/ports/user.repository';
@@ -34,7 +34,7 @@ export class CreateUserHandler {
     const passwordHash = await argon2.hash(command.password, { type: argon2.argon2id });
 
     const user = User.create(
-      uuidv4(),
+      randomUUID(),
       command.tenantId,
       command.email,
       passwordHash,

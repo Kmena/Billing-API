@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { Company, HaciendaVerificationStatus } from '../../../domain/entities/company.entity';
 import { ICompanyRepository, COMPANY_REPOSITORY } from '../../../domain/ports/company.repository';
 import { CompanyAlreadyExistsException } from '../../../domain/exceptions/company-already-exists.exception';
@@ -54,7 +54,7 @@ export class CreateCompanyHandler {
     }
 
     const company = Company.create(
-      uuidv4(),
+      randomUUID(),
       command.tenantId,
       command.legalName,
       command.identificationType,

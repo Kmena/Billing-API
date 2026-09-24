@@ -462,7 +462,6 @@ export class FiscalDocumentService {
 
     const requiredProfileFields = [
       profile.economicActivityCode,
-      profile.proveedorSistemas,
       profile.province,
       profile.canton,
       profile.district,

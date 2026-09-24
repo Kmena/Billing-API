@@ -144,6 +144,34 @@ enum FiscalIdempotencyStatus {
   COMPLETED
 }
 
+// ─── F4 ENUMS ───────────────────────────────────────────────────────────────
+
+enum FiscalArtifactType {
+  SIGNED_XML
+  HACIENDA_RESPONSE_XML
+  PDF
+}
+
+enum DocumentDeliveryKind {
+  INITIAL_DOCUMENT
+  HACIENDA_RESPONSE
+}
+
+enum DocumentDeliveryChannel {
+  EMAIL
+}
+
+enum DocumentDeliveryStatus {
+  PENDING
+  QUEUED
+  SENDING
+  DELIVERED
+  RETRY_PENDING
+  FAILED
+  MANUAL_REVIEW_REQUIRED
+  CANCELLED
+}
+
 // ─── TENANT ─────────────────────────────────────────────────────────────────
 
 model Tenant {
@@ -168,6 +196,8 @@ model Tenant {
   fiscalXmlArtifacts        FiscalXmlArtifact[]
   fiscalSubmissions         FiscalSubmission[]
   companyFiscalProfiles     CompanyFiscalProfile[]
+  fiscalArtifacts           FiscalArtifact[]
+  documentDeliveries        DocumentDelivery[]
 
   @@map("tenants")
 }
@@ -199,6 +229,9 @@ model Company {
   fiscalXmlArtifacts         FiscalXmlArtifact[]
   fiscalSubmissions          FiscalSubmission[]
   fiscalProfile              CompanyFiscalProfile?
+  companyPdfSettings         CompanyPdfSettings?
+  fiscalArtifacts            FiscalArtifact[]
+  documentDeliveries         DocumentDelivery[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
@@ -209,7 +242,7 @@ model CompanyFiscalProfile {
   id                   String   @id @db.Uuid
   tenantId             String   @map("tenant_id") @db.Uuid
   companyId            String   @unique @map("company_id") @db.Uuid
-  economicActivityCode String   @map("economic_activity_code") @db.Char(6)
+  economicActivityCode String   @map("economic_activity_code") @db.VarChar(6)
   proveedorSistemas    String?  @map("proveedor_sistemas") @db.VarChar(20)
   province             String   @db.Char(1)
   canton               String   @db.Char(2)
@@ -271,39 +304,41 @@ model FiscalSequence {
 }
 
 model FiscalDocument {
-  id               String                 @id @db.Uuid
-  tenantId         String                 @map("tenant_id") @db.Uuid
-  companyId        String                 @map("company_id") @db.Uuid
-  environment      HaciendaEnvironment    @map("environment")
-  type             FiscalDocumentType     @map("type")
-  status           FiscalDocumentStatus   @default(READY_FOR_XML)
-  issuancePointId  String                 @map("issuance_point_id") @db.Uuid
-  branchCode       String                 @map("branch_code") @db.Char(3)
-  terminalCode     String                 @map("terminal_code") @db.Char(5)
-  sequenceValue    BigInt                 @map("sequence_value")
-  consecutive      String                 @db.Char(20)
-  clave            String                 @unique @db.Char(50)
-  securityCode     String                 @map("security_code") @db.Char(8)
-  situation        String                 @default("1") @db.Char(1)
-  issueDate        DateTime               @default(now()) @map("issue_date")
-  issuerSnapshot   Json                   @map("issuer_snapshot")
-  receiverSnapshot Json?                  @map("receiver_snapshot")
-  currency         String                 @db.Char(3)
-  exchangeRate     Decimal?               @map("exchange_rate") @db.Decimal(18, 5)
-  saleCondition    String                 @map("sale_condition") @db.Char(2)
-  paymentMethod    String                 @map("payment_method") @db.Char(2)
-  lines            Json
-  totals           Json
-  idempotencyKey   String?                @map("idempotency_key") @db.VarChar(255)
-  requestHash      String?                @map("request_hash") @db.Char(64)
-  createdAt        DateTime               @default(now()) @map("created_at")
-  updatedAt        DateTime               @updatedAt @map("updated_at")
-  tenant           Tenant                 @relation(fields: [tenantId], references: [id])
-  company          Company                @relation(fields: [companyId], references: [id])
-  issuancePoint    FiscalIssuancePoint    @relation(fields: [issuancePointId], references: [id])
-  idempotencyKeys  FiscalIdempotencyKey[]
-  xmlArtifacts     FiscalXmlArtifact[]
-  submission       FiscalSubmission?
+  id                 String                 @id @db.Uuid
+  tenantId           String                 @map("tenant_id") @db.Uuid
+  companyId          String                 @map("company_id") @db.Uuid
+  environment        HaciendaEnvironment    @map("environment")
+  type               FiscalDocumentType     @map("type")
+  status             FiscalDocumentStatus   @default(READY_FOR_XML)
+  issuancePointId    String                 @map("issuance_point_id") @db.Uuid
+  branchCode         String                 @map("branch_code") @db.Char(3)
+  terminalCode       String                 @map("terminal_code") @db.Char(5)
+  sequenceValue      BigInt                 @map("sequence_value")
+  consecutive        String                 @db.Char(20)
+  clave              String                 @unique @db.Char(50)
+  securityCode       String                 @map("security_code") @db.Char(8)
+  situation          String                 @default("1") @db.Char(1)
+  issueDate          DateTime               @default(now()) @map("issue_date")
+  issuerSnapshot     Json                   @map("issuer_snapshot")
+  receiverSnapshot   Json?                  @map("receiver_snapshot")
+  currency           String                 @db.Char(3)
+  exchangeRate       Decimal?               @map("exchange_rate") @db.Decimal(18, 5)
+  saleCondition      String                 @map("sale_condition") @db.Char(2)
+  paymentMethod      String                 @map("payment_method") @db.Char(2)
+  lines              Json
+  totals             Json
+  idempotencyKey     String?                @map("idempotency_key") @db.VarChar(255)
+  requestHash        String?                @map("request_hash") @db.Char(64)
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id])
+  company            Company                @relation(fields: [companyId], references: [id])
+  issuancePoint      FiscalIssuancePoint    @relation(fields: [issuancePointId], references: [id])
+  idempotencyKeys    FiscalIdempotencyKey[]
+  xmlArtifacts       FiscalXmlArtifact[]
+  submission         FiscalSubmission?
+  fiscalArtifacts    FiscalArtifact[]
+  documentDeliveries DocumentDelivery[]
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
@@ -329,6 +364,8 @@ model FiscalSigningCertificate {
   validTo                    DateTime?                      @map("valid_to")
   activeFrom                 DateTime?                      @map("active_from")
   replacedById               String?                        @map("replaced_by_id") @db.Uuid
+  extractedIdentityNumber    String?                        @map("extracted_identity_number") @db.VarChar(30)
+  extractedIdentityType      String?                        @map("extracted_identity_type") @db.VarChar(20)
   createdAt                  DateTime                       @default(now()) @map("created_at")
   updatedAt                  DateTime                       @updatedAt @map("updated_at")
   tenant                     Tenant                         @relation(fields: [tenantId], references: [id])
@@ -576,4 +613,120 @@ model AuditLog {
   @@index([action, createdAt(sort: Desc)])
   @@index([eventClass, createdAt(sort: Desc)])
   @@map("audit_logs")
+}
+
+// ─── F4: FISCAL ARTIFACTS ───────────────────────────────────────────────────
+// FiscalArtifact: metadata index for SIGNED_XML, HACIENDA_RESPONSE_XML, PDF.
+// XML artifacts reference existing F2.3/F3 storage keys (no byte duplication).
+// PDF artifacts have their own storage key + template/renderer version.
+
+model FiscalArtifact {
+  id               String             @id @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  companyId        String             @map("company_id") @db.Uuid
+  fiscalDocumentId String             @map("fiscal_document_id") @db.Uuid
+  type             FiscalArtifactType @map("type")
+  storageKey       String             @map("storage_key") @db.VarChar(700)
+  sha256           String             @db.Char(64)
+  contentType      String             @map("content_type") @db.VarChar(120)
+  sizeBytes        Int                @map("size_bytes")
+  templateId       String?            @map("template_id") @db.VarChar(80)
+  rendererVersion  String?            @map("renderer_version") @db.VarChar(40)
+  supersededAt     DateTime?          @map("superseded_at")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id])
+  company          Company            @relation(fields: [companyId], references: [id])
+  fiscalDocument   FiscalDocument     @relation(fields: [fiscalDocumentId], references: [id])
+
+  // One active PDF artifact per document+template+rendererVersion combination
+  // XML artifacts: one active per document+type (where templateId/rendererVersion are null)
+  @@unique([fiscalDocumentId, type, templateId, rendererVersion], map: "fiscal_artifact_unique_pdf_idx")
+  @@index([tenantId, companyId, fiscalDocumentId, type], map: "fiscal_artifact_scope_type_idx")
+  @@index([tenantId, companyId, createdAt(sort: Desc)], map: "fiscal_artifact_scope_date_idx")
+  @@map("fiscal_artifacts")
+}
+
+// ─── F4: COMPANY PDF SETTINGS ────────────────────────────────────────────────
+// Controlled branding — no arbitrary HTML/CSS. Logo stored by reference.
+
+model CompanyPdfSettings {
+  id                 String   @id @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  companyId          String   @unique @map("company_id") @db.Uuid
+  templateId         String   @default("BILLING_DEFAULT_V1") @map("template_id") @db.VarChar(80)
+  logoStorageKey     String?  @map("logo_storage_key") @db.VarChar(700)
+  logoSha256         String?  @map("logo_sha256") @db.Char(64)
+  logoContentType    String?  @map("logo_content_type") @db.VarChar(60)
+  primaryColor       String?  @map("primary_color") @db.VarChar(7)
+  secondaryColor     String?  @map("secondary_color") @db.VarChar(7)
+  footerText         String?  @map("footer_text") @db.VarChar(500)
+  showCommercialName Boolean  @default(true) @map("show_commercial_name")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  company            Company  @relation(fields: [companyId], references: [id])
+
+  @@index([tenantId, companyId], map: "company_pdf_settings_scope_idx")
+  @@map("company_pdf_settings")
+}
+
+// ─── F4: DOCUMENT DELIVERY ───────────────────────────────────────────────────────
+// Two delivery kinds per fiscal document: INITIAL_DOCUMENT and HACIENDA_RESPONSE.
+// Each has an independent lifecycle and attempt history.
+// DocumentDelivery.status NEVER modifies FiscalDocument.status (invariant).
+
+model DocumentDelivery {
+  id                 String                  @id @db.Uuid
+  tenantId           String                  @map("tenant_id") @db.Uuid
+  companyId          String                  @map("company_id") @db.Uuid
+  fiscalDocumentId   String                  @map("fiscal_document_id") @db.Uuid
+  kind               DocumentDeliveryKind    @map("kind")
+  channel            DocumentDeliveryChannel @default(EMAIL) @map("channel")
+  recipient          String                  @db.VarChar(320)
+  packageVersion     String?                 @map("package_version") @db.VarChar(80)
+  status             DocumentDeliveryStatus  @default(PENDING) @map("status")
+  attemptCount       Int                     @default(0) @map("attempt_count")
+  lastAttemptAt      DateTime?               @map("last_attempt_at")
+  nextAttemptAt      DateTime?               @map("next_attempt_at")
+  deliveredAt        DateTime?               @map("delivered_at")
+  lastErrorCode      String?                 @map("last_error_code") @db.VarChar(120)
+  lastSanitizedError String?                 @map("last_sanitized_error") @db.VarChar(500)
+  providerMessageId  String?                 @map("provider_message_id") @db.VarChar(255)
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  tenant             Tenant                  @relation(fields: [tenantId], references: [id])
+  company            Company                 @relation(fields: [companyId], references: [id])
+  fiscalDocument     FiscalDocument          @relation(fields: [fiscalDocumentId], references: [id])
+  attempts           DeliveryAttempt[]
+
+  // One active delivery per document+kind+channel+recipient+packageVersion.
+  // Enforced by two partial indexes in migration 20260916000000_f4_fix_delivery_unique_null:
+  //   document_delivery_unique_null_pkg_idx    WHERE package_version IS NULL
+  //   document_delivery_unique_versioned_pkg_idx WHERE package_version IS NOT NULL
+  // NOTE: @@unique is NOT used here because Prisma emits a NULL-unsafe B-tree index;
+  //       PostgreSQL NULL != NULL in unique indexes, allowing duplicate rows.
+  //       The partial-index pattern is the correct PostgreSQL idiom.
+  @@index([tenantId, companyId, fiscalDocumentId], map: "document_delivery_scope_doc_idx")
+  @@index([tenantId, companyId, status], map: "document_delivery_scope_status_idx")
+  @@index([status, nextAttemptAt], map: "document_delivery_due_work_idx")
+  @@map("document_deliveries")
+}
+
+// ─── F4: DELIVERY ATTEMPT ────────────────────────────────────────────────────────
+// Immutable history of delivery attempts. Append-only.
+
+model DeliveryAttempt {
+  id                String           @id @db.Uuid
+  deliveryId        String           @map("delivery_id") @db.Uuid
+  attemptNumber     Int              @map("attempt_number")
+  status            String           @db.VarChar(40)
+  providerStatus    String?          @map("provider_status") @db.VarChar(80)
+  errorCode         String?          @map("error_code") @db.VarChar(120)
+  sanitizedError    String?          @map("sanitized_error") @db.VarChar(500)
+  startedAt         DateTime         @map("started_at")
+  completedAt       DateTime?        @map("completed_at")
+  providerMessageId String?          @map("provider_message_id") @db.VarChar(255)
+  delivery          DocumentDelivery @relation(fields: [deliveryId], references: [id])
+
+  @@index([deliveryId, attemptNumber], map: "delivery_attempt_delivery_idx")
+  @@map("delivery_attempts")
 }

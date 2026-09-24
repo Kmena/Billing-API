@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { Tenant } from '../../../domain/entities/tenant.entity';
 import { ITenantRepository, TENANT_REPOSITORY } from '../../../domain/ports/tenant.repository';
 import { TenantSlugAlreadyExistsException } from '../../../domain/exceptions/tenant-slug-already-exists.exception';
@@ -26,7 +26,7 @@ export class CreateTenantHandler {
       throw new TenantSlugAlreadyExistsException(slug);
     }
 
-    const tenant = Tenant.create(uuidv4(), command.name, slug, command.correlationId);
+    const tenant = Tenant.create(randomUUID(), command.name, slug, command.correlationId);
 
     await this.tenantRepository.save(tenant);
 

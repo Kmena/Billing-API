@@ -8,6 +8,7 @@ import {
   Post,
   Put,
   Request,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -24,8 +25,10 @@ import { CreateCompanyHandler } from '../../application/use-cases/create-company
 import { GetCompanyHandler } from '../../application/use-cases/get-company/get-company.handler';
 import { GetCompanyFiscalProfileHandler } from '../../application/use-cases/get-fiscal-profile/get-company-fiscal-profile.handler';
 import { UpsertCompanyFiscalProfileHandler } from '../../application/use-cases/upsert-fiscal-profile/upsert-company-fiscal-profile.handler';
+import { UpdateCompanyHandler } from '../../application/use-cases/update-company/update-company.handler';
 import { CreateCompanyRequestDto } from './dtos/create-company.request.dto';
 import { CompanyResponseDto } from './dtos/company.response.dto';
+import { UpdateCompanyRequestDto } from './dtos/update-company.request.dto';
 import {
   CompanyFiscalProfileResponseDto,
   UpsertCompanyFiscalProfileRequestDto,
@@ -43,6 +46,7 @@ export class CompanyController {
     private readonly getCompanyHandler: GetCompanyHandler,
     private readonly getCompanyFiscalProfileHandler: GetCompanyFiscalProfileHandler,
     private readonly upsertCompanyFiscalProfileHandler: UpsertCompanyFiscalProfileHandler,
+    private readonly updateCompanyHandler: UpdateCompanyHandler,
   ) {}
 
   @Post()
@@ -74,6 +78,35 @@ export class CompanyController {
       haciendaVerificationStatus: result.haciendaVerificationStatus,
       createdAt: result.createdAt,
     };
+  }
+
+  @Put(':id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Update company fields (TENANT_ADMIN only). Identity changes are blocked when an ACTIVE certificate is incompatible.',
+  })
+  async updateCompany(
+    @Request() req: { user: JwtRequest },
+    @Param('id') id: string,
+    @Body() dto: UpdateCompanyRequestDto,
+  ) {
+    // AUD-API-003: Company updates require TENANT_ADMIN role
+    if (req.user.role !== 'TENANT_ADMIN') {
+      throw new UnauthorizedException({
+        code: 'TENANT_ADMIN_REQUIRED',
+        message: 'Company updates require TENANT_ADMIN role.',
+      });
+    }
+    return this.updateCompanyHandler.execute({
+      tenantId: req.user.tenantId,
+      companyId: id,
+      actorUserId: req.user.userId,
+      legalName: dto.legalName,
+      tradeName: dto.tradeName,
+      identificationType: dto.identificationType,
+      identificationNumber: dto.identificationNumber,
+    });
   }
 
   @Put(':id/fiscal-profile')

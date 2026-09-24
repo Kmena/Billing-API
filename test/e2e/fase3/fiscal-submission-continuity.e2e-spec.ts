@@ -31,6 +31,14 @@ async function configureSigningCertificate(
   companyId: string,
   environment: 'SANDBOX' | 'PRODUCTION' = 'SANDBOX',
 ): Promise<void> {
+  // TASK-004 / FR-013: getActiveCertificate blocks signing when
+  // extractedIdentityNumber is NULL or doesn't match the company.
+  // Fetch the real identificationNumber so the guard passes in tests.
+  const company = await context.prisma.company.findFirstOrThrow({
+    where: { id: companyId, tenantId },
+    select: { identificationNumber: true },
+  });
+
   const certificateSecretReference = `F3_E2E_CERT_${environment}_${companyId.replace(/-/g, '_')}`;
   const passwordSecretReference = `F3_E2E_PASS_${environment}_${companyId.replace(/-/g, '_')}`;
   const secrets = context.app.get<SecretProvider>(SECRET_PROVIDER);
@@ -58,6 +66,7 @@ async function configureSigningCertificate(
       validFrom: new Date('2026-01-01T00:00:00.000Z'),
       validTo: new Date('2027-01-01T00:00:00.000Z'),
       activeFrom: new Date('2026-01-01T00:00:00.000Z'),
+      extractedIdentityNumber: company.identificationNumber,
     },
   });
 }

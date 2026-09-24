@@ -5,6 +5,9 @@ import { FiscalContact } from '../value-objects/fiscal-contact.vo';
 describe('Company fiscal profile value objects', () => {
   it('accepts official issuer fiscal profile values', () => {
     expect(EconomicActivityCode.create('620210').value).toBe('620210');
+    // Hacienda /fe/ae API returns decimal-notation codes like "9609.0" — 6 chars with a dot.
+    // These must be stored verbatim; zero-padding to "009609" is INCORRECT.
+    expect(EconomicActivityCode.create('9609.0').value).toBe('9609.0');
     expect(
       FiscalAddress.create({
         province: '1',

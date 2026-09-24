@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import {
   IRefreshTokenRepository,
@@ -13,7 +13,7 @@ export class PrismaRefreshTokenRepository implements IRefreshTokenRepository {
   async save(record: RefreshTokenRecord): Promise<void> {
     await this.prisma.refreshToken.create({
       data: {
-        id: uuidv4(),
+        id: randomUUID(),
         userId: record.userId,
         tenantId: record.tenantId,
         tokenHash: record.tokenHash,

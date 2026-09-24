@@ -44,7 +44,8 @@ export function createFiscalXmlSnapshot(
     lines: [
       {
         lineNumber: 1,
-        cabysCode: '1234567890123',
+        // Real CAByS catalog entry: "Servicios de consultoría en software" (first digit 8 → SERVICE)
+        cabysCode: '8313100000100',
         description: 'Servicio fiscal de prueba',
         unitMeasure: 'Sp',
         quantity: '1.00000',
@@ -100,5 +101,51 @@ export function createTestSigningMaterial(passphrase = 'test-passphrase') {
       data: pkcs12Der,
       passphrase,
     },
+  };
+}
+
+/**
+ * Creates a test PKCS#12 with a Costa Rica fiscal identity OID 2.5.4.5 in the subject.
+ * The fiscalIdentity parameter should include the prefix if desired (e.g. 'CPJ-3102123456').
+ * Used by TASK-001 tests — never use real certificates.
+ */
+export function createTestSigningMaterialWithFiscalId(
+  fiscalIdentity: string,
+  passphrase = 'test-passphrase',
+  opts: {
+    notBefore?: Date;
+    notAfter?: Date;
+  } = {},
+) {
+  const pair = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const privateKeyPem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  const publicKeyPem = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+  const publicKey = forge.pki.publicKeyFromPem(publicKeyPem);
+  const certificate = forge.pki.createCertificate();
+  certificate.publicKey = publicKey;
+  certificate.serialNumber = '0AF23B002';
+  certificate.validity.notBefore = opts.notBefore ?? new Date('2026-01-01T00:00:00.000Z');
+  certificate.validity.notAfter = opts.notAfter ?? new Date('2027-01-01T00:00:00.000Z');
+  // Include OID 2.5.4.5 (serialNumber) with the fiscal identity
+  certificate.setSubject([
+    { name: 'commonName', value: 'CR Fiscal Test Certificate' },
+    { type: '2.5.4.5', value: fiscalIdentity },
+  ]);
+  certificate.setIssuer([{ name: 'commonName', value: 'CR Test Hacienda CA' }]);
+  certificate.setExtensions([
+    { name: 'basicConstraints', cA: false },
+    { name: 'keyUsage', digitalSignature: true, nonRepudiation: true },
+  ]);
+  certificate.sign(privateKey, forge.md.sha256.create());
+  const pkcs12Asn1 = forge.pkcs12.toPkcs12Asn1(privateKey, certificate, passphrase, {
+    algorithm: '3des',
+  });
+  const pkcs12Der = Buffer.from(forge.asn1.toDer(pkcs12Asn1).getBytes(), 'binary');
+  return {
+    passphrase,
+    pkcs12Bytes: pkcs12Der,
+    pkcs12Base64: pkcs12Der.toString('base64'),
+    fiscalIdentity,
   };
 }

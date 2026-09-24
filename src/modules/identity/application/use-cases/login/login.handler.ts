@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
 import { IUserRepository, USER_REPOSITORY } from '../../../domain/ports/user.repository';
@@ -69,7 +69,7 @@ export class LoginHandler {
     await this.userRepository.save(user);
 
     // Generate access token (15 minutes)
-    const jti = uuidv4();
+    const jti = randomUUID();
     const payload: JwtPayload = {
       sub: user.id,
       tenantId: user.tenantId,

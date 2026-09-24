@@ -1,0 +1,18 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "../..",
+  "testEnvironment": "node",
+  "testRegex": "test/hacienda-sandbox/__tests__/.*\\.spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs/cache-manager|cache-manager|@nestjs/axios)/)"
+  ],
+  "moduleNameMapper": {
+    "^@/modules/(.*)$": "<rootDir>/src/modules/$1",
+    "^@/infrastructure/(.*)$": "<rootDir>/src/infrastructure/$1",
+    "^@/api/(.*)$": "<rootDir>/src/api/$1"
+  },
+  "testTimeout": 30000
+}

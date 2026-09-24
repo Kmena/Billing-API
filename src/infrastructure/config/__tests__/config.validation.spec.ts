@@ -10,6 +10,8 @@ describe('configuration validation schema', () => {
       'https://idp.example.com/auth/realms/rut-stag/protocol/openid-connect/token',
     HACIENDA_IDP_CLIENT_ID_PRODUCTION: 'api-prod',
     HACIENDA_IDP_CLIENT_ID_SANDBOX: 'api-stag',
+    // F4: QR URL base is a required deployment prerequisite in production (R-001)
+    HACIENDA_QR_URL_BASE: 'https://hacienda-ce.example.com/qr',
   };
 
   it('rejects production without CORS_ALLOWED_ORIGINS (AC-001)', () => {

@@ -7,7 +7,30 @@
  *
  * A-004: Seed script is the approved mechanism for first admin user creation.
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { PrismaClient } from '@prisma/client';
+
+// Load .env.local so the script works without a pre-set DATABASE_URL in the shell.
+// Shell env vars always take priority (no override). Never logs values.
+function loadLocalEnv(): void {
+  const envPath = path.join(process.cwd(), '.env.local');
+  try {
+    if (!fs.existsSync(envPath)) return;
+    for (const raw of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq < 1) continue;
+      const key = line.slice(0, eq).trim();
+      const val = line.slice(eq + 1).trim();
+      if (!(key in process.env)) process.env[key] = val;
+    }
+  } catch {
+    // Silently ignore — user may not have .env.local yet
+  }
+}
+loadLocalEnv();
 import * as argon2 from 'argon2';
 import { randomUUID } from 'crypto';
 

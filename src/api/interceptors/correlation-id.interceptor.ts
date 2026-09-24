@@ -1,6 +1,6 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Observable } from 'rxjs';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 export const CORRELATION_ID_HEADER = 'X-Correlation-ID';
 
@@ -16,7 +16,7 @@ export class CorrelationIdInterceptor implements NestInterceptor {
     }>();
 
     // FR-012: generate if not present, propagate if provided
-    const correlationId = request.headers[CORRELATION_ID_HEADER.toLowerCase()] ?? uuidv4();
+    const correlationId = request.headers[CORRELATION_ID_HEADER.toLowerCase()] ?? randomUUID();
 
     request.correlationId = correlationId;
     response.setHeader(CORRELATION_ID_HEADER, correlationId);
