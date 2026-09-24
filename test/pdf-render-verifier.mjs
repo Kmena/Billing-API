@@ -3,6 +3,19 @@ import { createCanvas } from '@napi-rs/canvas';
 import jsQR from 'jsqr';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 
+// Polyfill for Node.js < 22 — Promise.withResolvers() was introduced in v22.
+// pdfjs-dist >=6 uses it internally when instantiating PDFDocumentLoadingTask.
+if (typeof Promise.withResolvers === 'undefined') {
+  Promise.withResolvers = function () {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
 const [pdfPath, expectedQr, outputDir] = process.argv.slice(2);
 if (!pdfPath)
   throw new Error('Usage: node test/pdf-render-verifier.mjs <pdfPath> [expectedQr] [outputDir]');
