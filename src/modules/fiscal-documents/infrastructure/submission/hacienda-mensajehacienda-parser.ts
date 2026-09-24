@@ -105,16 +105,18 @@ function decodeXmlEntities(s: string): string {
  *   8. Bound to maxLength characters
  */
 function sanitizeText(raw: string, maxLength: number): string {
-  return decodeXmlEntities(raw)
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\x1b\[[0-9;]*[mGKHFJABCDsu]/g, '')
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-    .slice(0, maxLength);
+  return (
+    decodeXmlEntities(raw)
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/\x1b\[[0-9;]*[mGKHFJABCDsu]/g, '')
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+      .replace(/<[^>]+>/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+      .slice(0, maxLength)
+  );
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -130,10 +132,7 @@ function sanitizeText(raw: string, maxLength: number): string {
 export function parseMensajeHacienda(xml: Buffer | string): HaciendaFiscalResponseParseResult {
   const xmlStr = Buffer.isBuffer(xml) ? xml.toString('utf8') : xml;
 
-  if (
-    !xmlStr.includes(MENSAJEHACIENDA_MARKER) ||
-    !xmlStr.includes(MENSAJEHACIENDA_NS_FRAGMENT)
-  ) {
+  if (!xmlStr.includes(MENSAJEHACIENDA_MARKER) || !xmlStr.includes(MENSAJEHACIENDA_NS_FRAGMENT)) {
     return { diagnostic: {}, parseError: 'INPUT_NOT_MENSAJEHACIENDA' };
   }
 

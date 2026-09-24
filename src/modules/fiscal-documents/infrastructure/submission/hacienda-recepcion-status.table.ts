@@ -47,20 +47,90 @@ export interface RecepcionStatusInfo {
 // ── Lookup table ──────────────────────────────────────────────────────────────
 
 const TABLE: Readonly<Record<number, RecepcionStatusInfo>> = {
-  200: { classification: 'UNDOCUMENTED_2XX',             inContract: false, meaning: 'HTTP OK — not documented for POST /recepcion',                                      billingAction: 'UNRESOLVED_PROVIDER_RESPONSE' },
-  201: { classification: 'DOCUMENTED_SUCCESSFUL_RECEIPT', inContract: true,  meaning: 'Comprobante recibido; validación pendiente',                                         billingAction: 'ACKNOWLEDGED'                  },
-  202: { classification: 'UNDOCUMENTED_2XX',             inContract: false, meaning: 'Not documented for POST /recepcion in the Hacienda API contract',                    billingAction: 'UNRESOLVED_PROVIDER_RESPONSE' },
-  204: { classification: 'UNDOCUMENTED_2XX',             inContract: false, meaning: 'No Content — not documented for POST /recepcion',                                    billingAction: 'UNRESOLVED_PROVIDER_RESPONSE' },
-  400: { classification: 'DOCUMENTED_VALIDATION_ERROR',  inContract: true,  meaning: 'Error de validación — X-Error-Cause / validation-exception contain the reason',      billingAction: 'NON_RETRYABLE_FAILURE'         },
-  401: { classification: 'DOCUMENTED_AUTH_ERROR',        inContract: true,  meaning: 'No autorizado — access token rejected or expired',                                   billingAction: 'RETRYABLE_FAILURE'             },
-  403: { classification: 'UNDOCUMENTED_4XX',             inContract: false, meaning: 'Forbidden — not documented for POST /recepcion',                                     billingAction: 'NON_RETRYABLE_FAILURE'         },
-  404: { classification: 'UNDOCUMENTED_4XX',             inContract: false, meaning: 'Not Found — not documented for POST /recepcion',                                     billingAction: 'NON_RETRYABLE_FAILURE'         },
-  409: { classification: 'UNDOCUMENTED_4XX',             inContract: false, meaning: 'Conflict — not documented for POST /recepcion',                                      billingAction: 'NON_RETRYABLE_FAILURE'         },
-  429: { classification: 'RATE_LIMIT',                   inContract: false, meaning: 'Rate limit exceeded',                                                                billingAction: 'RETRYABLE_FAILURE'             },
-  500: { classification: 'AMBIGUOUS_SERVER_ERROR',       inContract: false, meaning: 'Internal Server Error — POST outcome ambiguous; reconcile via GET /recepcion/{clave}', billingAction: 'POST_OUTCOME_UNKNOWN'         },
-  502: { classification: 'AMBIGUOUS_SERVER_ERROR',       inContract: false, meaning: 'Bad Gateway — POST outcome ambiguous',                                               billingAction: 'POST_OUTCOME_UNKNOWN'          },
-  503: { classification: 'AMBIGUOUS_SERVER_ERROR',       inContract: false, meaning: 'Service Unavailable — POST outcome ambiguous',                                       billingAction: 'POST_OUTCOME_UNKNOWN'          },
-  504: { classification: 'AMBIGUOUS_SERVER_ERROR',       inContract: false, meaning: 'Gateway Timeout — POST outcome ambiguous',                                           billingAction: 'POST_OUTCOME_UNKNOWN'          },
+  200: {
+    classification: 'UNDOCUMENTED_2XX',
+    inContract: false,
+    meaning: 'HTTP OK — not documented for POST /recepcion',
+    billingAction: 'UNRESOLVED_PROVIDER_RESPONSE',
+  },
+  201: {
+    classification: 'DOCUMENTED_SUCCESSFUL_RECEIPT',
+    inContract: true,
+    meaning: 'Comprobante recibido; validación pendiente',
+    billingAction: 'ACKNOWLEDGED',
+  },
+  202: {
+    classification: 'UNDOCUMENTED_2XX',
+    inContract: false,
+    meaning: 'Not documented for POST /recepcion in the Hacienda API contract',
+    billingAction: 'UNRESOLVED_PROVIDER_RESPONSE',
+  },
+  204: {
+    classification: 'UNDOCUMENTED_2XX',
+    inContract: false,
+    meaning: 'No Content — not documented for POST /recepcion',
+    billingAction: 'UNRESOLVED_PROVIDER_RESPONSE',
+  },
+  400: {
+    classification: 'DOCUMENTED_VALIDATION_ERROR',
+    inContract: true,
+    meaning: 'Error de validación — X-Error-Cause / validation-exception contain the reason',
+    billingAction: 'NON_RETRYABLE_FAILURE',
+  },
+  401: {
+    classification: 'DOCUMENTED_AUTH_ERROR',
+    inContract: true,
+    meaning: 'No autorizado — access token rejected or expired',
+    billingAction: 'RETRYABLE_FAILURE',
+  },
+  403: {
+    classification: 'UNDOCUMENTED_4XX',
+    inContract: false,
+    meaning: 'Forbidden — not documented for POST /recepcion',
+    billingAction: 'NON_RETRYABLE_FAILURE',
+  },
+  404: {
+    classification: 'UNDOCUMENTED_4XX',
+    inContract: false,
+    meaning: 'Not Found — not documented for POST /recepcion',
+    billingAction: 'NON_RETRYABLE_FAILURE',
+  },
+  409: {
+    classification: 'UNDOCUMENTED_4XX',
+    inContract: false,
+    meaning: 'Conflict — not documented for POST /recepcion',
+    billingAction: 'NON_RETRYABLE_FAILURE',
+  },
+  429: {
+    classification: 'RATE_LIMIT',
+    inContract: false,
+    meaning: 'Rate limit exceeded',
+    billingAction: 'RETRYABLE_FAILURE',
+  },
+  500: {
+    classification: 'AMBIGUOUS_SERVER_ERROR',
+    inContract: false,
+    meaning: 'Internal Server Error — POST outcome ambiguous; reconcile via GET /recepcion/{clave}',
+    billingAction: 'POST_OUTCOME_UNKNOWN',
+  },
+  502: {
+    classification: 'AMBIGUOUS_SERVER_ERROR',
+    inContract: false,
+    meaning: 'Bad Gateway — POST outcome ambiguous',
+    billingAction: 'POST_OUTCOME_UNKNOWN',
+  },
+  503: {
+    classification: 'AMBIGUOUS_SERVER_ERROR',
+    inContract: false,
+    meaning: 'Service Unavailable — POST outcome ambiguous',
+    billingAction: 'POST_OUTCOME_UNKNOWN',
+  },
+  504: {
+    classification: 'AMBIGUOUS_SERVER_ERROR',
+    inContract: false,
+    meaning: 'Gateway Timeout — POST outcome ambiguous',
+    billingAction: 'POST_OUTCOME_UNKNOWN',
+  },
 };
 
 /**
@@ -72,13 +142,33 @@ export function classifyRecepcionStatus(status: number): RecepcionStatusInfo {
   if (entry) return entry;
 
   if (status >= 200 && status < 300) {
-    return { classification: 'UNDOCUMENTED_2XX',       inContract: false, meaning: `HTTP ${status} — not documented for POST /recepcion`, billingAction: 'UNRESOLVED_PROVIDER_RESPONSE' };
+    return {
+      classification: 'UNDOCUMENTED_2XX',
+      inContract: false,
+      meaning: `HTTP ${status} — not documented for POST /recepcion`,
+      billingAction: 'UNRESOLVED_PROVIDER_RESPONSE',
+    };
   }
   if (status >= 400 && status < 500) {
-    return { classification: 'UNDOCUMENTED_4XX',       inContract: false, meaning: `HTTP ${status} — not documented for POST /recepcion`, billingAction: 'NON_RETRYABLE_FAILURE'         };
+    return {
+      classification: 'UNDOCUMENTED_4XX',
+      inContract: false,
+      meaning: `HTTP ${status} — not documented for POST /recepcion`,
+      billingAction: 'NON_RETRYABLE_FAILURE',
+    };
   }
   if (status >= 500) {
-    return { classification: 'AMBIGUOUS_SERVER_ERROR', inContract: false, meaning: `HTTP ${status} — POST outcome ambiguous`,             billingAction: 'POST_OUTCOME_UNKNOWN'          };
+    return {
+      classification: 'AMBIGUOUS_SERVER_ERROR',
+      inContract: false,
+      meaning: `HTTP ${status} — POST outcome ambiguous`,
+      billingAction: 'POST_OUTCOME_UNKNOWN',
+    };
   }
-  return   { classification: 'UNDOCUMENTED_4XX',       inContract: false, meaning: `HTTP ${status} — unexpected for POST /recepcion`,     billingAction: 'NON_RETRYABLE_FAILURE'         };
+  return {
+    classification: 'UNDOCUMENTED_4XX',
+    inContract: false,
+    meaning: `HTTP ${status} — unexpected for POST /recepcion`,
+    billingAction: 'NON_RETRYABLE_FAILURE',
+  };
 }

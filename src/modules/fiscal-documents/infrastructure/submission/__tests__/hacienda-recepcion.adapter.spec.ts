@@ -140,9 +140,9 @@ describe('HaciendaRecepcionAdapter', () => {
 
   describe('HTTP 400 classification', () => {
     it('maps HTTP 400 to NON_RETRYABLE_FAILURE / MANUAL_REVIEW_REQUIRED', async () => {
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers: {}, data: {} } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 400, headers: {}, data: {} } })));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.kind).toBe('NON_RETRYABLE_FAILURE');
       expect(result.nextStatus).toBe('MANUAL_REVIEW_REQUIRED');
@@ -150,17 +150,17 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('HTTP 400 is never retried — POST called exactly once', async () => {
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers: {}, data: {} } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 400, headers: {}, data: {} } })));
       await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(post).toHaveBeenCalledTimes(1);
     });
 
     it('production endpoint blocked even when HTTP 400 diagnostic is extracted', async () => {
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers: {}, data: {} } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 400, headers: {}, data: {} } })));
       await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(post.mock.calls[0][0] as string).toContain('recepcion-sandbox');
       expect(post.mock.calls[0][0] as string).not.toContain('/recepcion/v1');
@@ -408,9 +408,7 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('Uint8Array body — parsed same as Buffer', async () => {
-      const uint8 = new Uint8Array(
-        Buffer.from(JSON.stringify({ detail: 'bad clave' }), 'utf8'),
-      );
+      const uint8 = new Uint8Array(Buffer.from(JSON.stringify({ detail: 'bad clave' }), 'utf8'));
       const post = jest.fn().mockReturnValue(
         throwError(() => ({
           response: {
@@ -467,7 +465,9 @@ describe('HaciendaRecepcionAdapter', () => {
         })),
       );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
-      expect(result.providerMetadata?.['providerBodyParseStatus']).toBe('STRING_TOO_LARGE_TO_PARSE');
+      expect(result.providerMetadata?.['providerBodyParseStatus']).toBe(
+        'STRING_TOO_LARGE_TO_PARSE',
+      );
       // Raw body content must not be persisted
       expect(JSON.stringify(result.providerMetadata)).not.toContain('x'.repeat(50));
     });
@@ -484,7 +484,9 @@ describe('HaciendaRecepcionAdapter', () => {
         })),
       );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
-      expect(result.providerMetadata?.['providerBodyParseStatus']).toBe('BUFFER_TOO_LARGE_TO_PARSE');
+      expect(result.providerMetadata?.['providerBodyParseStatus']).toBe(
+        'BUFFER_TOO_LARGE_TO_PARSE',
+      );
     });
 
     it('malformed JSON in Buffer — records BUFFER_PARSE_FAILED', async () => {
@@ -512,7 +514,10 @@ describe('HaciendaRecepcionAdapter', () => {
           response: {
             status: 400,
             headers: { 'content-type': 'application/json' },
-            data: { detail: 'El campo fecha no corresponde con FechaEmision', title: 'Bad Request' },
+            data: {
+              detail: 'El campo fecha no corresponde con FechaEmision',
+              title: 'Bad Request',
+            },
           },
         })),
       );
@@ -615,9 +620,11 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('uses unknown content-type when header is absent', async () => {
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers: {}, data: { a: 1 } } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(
+          throwError(() => ({ response: { status: 400, headers: {}, data: { a: 1 } } })),
+        );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata?.['responseContentType']).toBe('unknown');
     });
@@ -788,9 +795,9 @@ describe('HaciendaRecepcionAdapter', () => {
         'X-Error-Cause': 'firma invalida',
         'Content-Type': 'application/json',
       });
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers, data: '' } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 400, headers, data: '' } })));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata?.['haciendaErrorCause']).toBe('firma invalida');
     });
@@ -798,9 +805,9 @@ describe('HaciendaRecepcionAdapter', () => {
     it('AxiosHeaders.get() is case-insensitive — X-ERROR-CAUSE resolves same value', async () => {
       const { AxiosHeaders } = jest.requireActual<typeof import('axios')>('axios');
       const headers = new AxiosHeaders({ 'x-error-cause': 'consecutive invalido' });
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 400, headers, data: '' } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 400, headers, data: '' } })));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       // AxiosHeaders.get('x-error-cause') should find 'consecutive invalido'
       expect(result.providerMetadata?.['haciendaErrorCause']).toBe('consecutive invalido');
@@ -1000,9 +1007,10 @@ describe('HaciendaRecepcionAdapter', () => {
           },
         })),
       );
-      await makeAdapter({ post }).submitSignedDocument(
-        { ...submitInput(), environment: 'SANDBOX' as const },
-      );
+      await makeAdapter({ post }).submitSignedDocument({
+        ...submitInput(),
+        environment: 'SANDBOX' as const,
+      });
       expect(post.mock.calls[0][0] as string).toContain('recepcion-sandbox');
       expect(post.mock.calls[0][0] as string).not.toContain('/recepcion/v1');
     });
@@ -1103,9 +1111,7 @@ describe('HaciendaRecepcionAdapter', () => {
         data: '',
         config: { secret: 'my-secret-config' },
       };
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response })),
-      );
+      const post = jest.fn().mockReturnValue(throwError(() => ({ response })));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       const serialized = JSON.stringify(result);
       expect(serialized).not.toContain('my-secret-config');
@@ -1126,9 +1132,11 @@ describe('HaciendaRecepcionAdapter', () => {
 
   describe('HTTP response classification', () => {
     it('HTTP 201 → ACKNOWLEDGED + DOCUMENTED_SUCCESSFUL_RECEIPT', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 201, headers: { location: 'https://hacienda.test/rec/clave' }, data: {} }),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(
+          of({ status: 201, headers: { location: 'https://hacienda.test/rec/clave' }, data: {} }),
+        );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.kind).toBe('ACKNOWLEDGED');
       expect(result.nextStatus).toBe('ACKNOWLEDGED');
@@ -1136,9 +1144,7 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('HTTP 201 NEVER maps to ACCEPTED', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 201, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 201, headers: {}, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.kind).not.toBe('ACCEPTED');
       expect(result.nextStatus).not.toBe('ACCEPTED');
@@ -1146,16 +1152,18 @@ describe('HaciendaRecepcionAdapter', () => {
 
     it('HTTP 201 Location header is captured', async () => {
       const post = jest.fn().mockReturnValue(
-        of({ status: 201, headers: { location: 'https://hacienda.test/recepcion/abc' }, data: {} }),
+        of({
+          status: 201,
+          headers: { location: 'https://hacienda.test/recepcion/abc' },
+          data: {},
+        }),
       );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerLocation).toBe('https://hacienda.test/recepcion/abc');
     });
 
     it('HTTP 202 → UNRESOLVED_PROVIDER_RESPONSE (not ACKNOWLEDGED, not NON_RETRYABLE_FAILURE)', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 202, headers: {}, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.kind).toBe('UNRESOLVED_PROVIDER_RESPONSE');
       expect(result.nextStatus).toBe('POST_OUTCOME_UNKNOWN');
@@ -1165,58 +1173,56 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('HTTP 202 classification is UNDOCUMENTED_2XX', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 202, headers: {}, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.responseClassification).toBe('UNDOCUMENTED_2XX');
     });
 
     it('HTTP 202 preserves errorCode HACIENDA_UNDOCUMENTED_2XX_STATUS', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 202, headers: {}, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.normalizedErrorCode).toBe('HACIENDA_UNDOCUMENTED_2XX_STATUS');
     });
 
     it('HTTP 202 providerReference carries clave for later GET query', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 202, headers: {}, data: {} }));
       const input = submitInput();
       const result = await makeAdapter({ post }).submitSignedDocument(input);
       expect(result.providerReference).toBe(input.clave);
     });
 
     it('HTTP 202 captures Location header when present', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: { location: 'https://hacienda.test/rec/xyz' }, data: {} }),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(
+          of({ status: 202, headers: { location: 'https://hacienda.test/rec/xyz' }, data: {} }),
+        );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerLocation).toBe('https://hacienda.test/rec/xyz');
     });
 
     it('HTTP 202 captures x-error-cause in providerMetadata when present', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: { 'x-error-cause': 'motivo desconocido' }, data: {} }),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(
+          of({ status: 202, headers: { 'x-error-cause': 'motivo desconocido' }, data: {} }),
+        );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata?.['haciendaErrorCause']).toBe('motivo desconocido');
     });
 
     it('HTTP 202 captures validation-exception in providerMetadata when present', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: { 'validation-exception': 'campo requerido' }, data: {} }),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(
+          of({ status: 202, headers: { 'validation-exception': 'campo requerido' }, data: {} }),
+        );
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata?.['haciendaValidationException']).toBe('campo requerido');
     });
 
     it('HTTP 202 providerMetadata has responseClassification', async () => {
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: {}, data: {} }),
-      );
+      const post = jest.fn().mockReturnValue(of({ status: 202, headers: {}, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata?.['responseClassification']).toBe('UNDOCUMENTED_2XX');
     });
@@ -1242,9 +1248,9 @@ describe('HaciendaRecepcionAdapter', () => {
         authorization: 'Bearer secret',
         'set-cookie': 'tok=xyz',
       };
-      const post = jest.fn().mockReturnValue(
-        of({ status: 202, headers: sensitiveHeaders, data: {} }),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(of({ status: 202, headers: sensitiveHeaders, data: {} }));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.providerMetadata).not.toBe(sensitiveHeaders);
       const pm = result.providerMetadata ?? {};
@@ -1267,7 +1273,10 @@ describe('HaciendaRecepcionAdapter', () => {
         throwError(() => ({
           response: {
             status: 400,
-            headers: { 'validation-exception': 'emisor no válido', 'content-type': 'application/json' },
+            headers: {
+              'validation-exception': 'emisor no válido',
+              'content-type': 'application/json',
+            },
             data: '',
           },
         })),
@@ -1277,22 +1286,23 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     it('HTTP 401 → DOCUMENTED_AUTH_ERROR classification + RETRYABLE', async () => {
-      const post = jest.fn().mockReturnValue(
-        throwError(() => ({ response: { status: 401, headers: {}, data: {} } })),
-      );
+      const post = jest
+        .fn()
+        .mockReturnValue(throwError(() => ({ response: { status: 401, headers: {}, data: {} } })));
       const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
       expect(result.responseClassification).toBe('DOCUMENTED_AUTH_ERROR');
       expect(result.kind).toBe('RETRYABLE_FAILURE');
     });
 
-    it.each([200, 204] as const)('HTTP %i → UNDOCUMENTED_2XX + UNRESOLVED_PROVIDER_RESPONSE', async (status) => {
-      const post = jest.fn().mockReturnValue(
-        of({ status, headers: {}, data: {} }),
-      );
-      const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
-      expect(result.kind).toBe('UNRESOLVED_PROVIDER_RESPONSE');
-      expect(result.responseClassification).toBe('UNDOCUMENTED_2XX');
-    });
+    it.each([200, 204] as const)(
+      'HTTP %i → UNDOCUMENTED_2XX + UNRESOLVED_PROVIDER_RESPONSE',
+      async (status) => {
+        const post = jest.fn().mockReturnValue(of({ status, headers: {}, data: {} }));
+        const result = await makeAdapter({ post }).submitSignedDocument(submitInput());
+        expect(result.kind).toBe('UNRESOLVED_PROVIDER_RESPONSE');
+        expect(result.responseClassification).toBe('UNDOCUMENTED_2XX');
+      },
+    );
   });
 
   // ── POST /recepcion envelope — scalar field contract ──────────────────────
@@ -1411,46 +1421,39 @@ describe('HaciendaRecepcionAdapter', () => {
     // pass it through unchanged — no wrapping, no transformation.
 
     it.each([
-      ['01', '207530251'],   // FÍSICA — cédula identidad
-      ['02', '3101123456'],  // JURÍDICA — cédula jurídica
-      ['03', '123456789'],   // DIMEX — residentes extranjeros
-      ['04', '987654321'],   // NITE — sin cédula regular
-    ] as const)(
-      'emisor.tipoIdentificacion=%s is sent as scalar string',
-      async (type, number) => {
-        const { post, body } = capturePostBody();
-        await makeAdapter({ post }).submitSignedDocument({
-          ...submitInput(),
-          issuer: { identification: { type, number } },
-        });
-        const emisor = body().emisor as Record<string, unknown>;
-        expect(emisor['tipoIdentificacion']).toBe(type);
-        expect(emisor['numeroIdentificacion']).toBe(number);
-        expect(typeof emisor['tipoIdentificacion']).toBe('string');
-        expect(emisor['tipoIdentificacion']).not.toBeInstanceOf(Object);
-      },
-    );
+      ['01', '207530251'], // FÍSICA — cédula identidad
+      ['02', '3101123456'], // JURÍDICA — cédula jurídica
+      ['03', '123456789'], // DIMEX — residentes extranjeros
+      ['04', '987654321'], // NITE — sin cédula regular
+    ] as const)('emisor.tipoIdentificacion=%s is sent as scalar string', async (type, number) => {
+      const { post, body } = capturePostBody();
+      await makeAdapter({ post }).submitSignedDocument({
+        ...submitInput(),
+        issuer: { identification: { type, number } },
+      });
+      const emisor = body().emisor as Record<string, unknown>;
+      expect(emisor['tipoIdentificacion']).toBe(type);
+      expect(emisor['numeroIdentificacion']).toBe(number);
+      expect(typeof emisor['tipoIdentificacion']).toBe('string');
+      expect(emisor['tipoIdentificacion']).not.toBeInstanceOf(Object);
+    });
 
     it.each([
-      ['01', '207530251'],   // FÍSICA
-      ['02', '3101123456'],  // JURÍDICA
-      ['03', '123456789'],   // DIMEX
-      ['04', '987654321'],   // NITE
-    ] as const)(
-      'receptor.tipoIdentificacion=%s is sent as scalar string',
-      async (type, number) => {
-        const { post, body } = capturePostBody();
-        await makeAdapter({ post }).submitSignedDocument({
-          ...submitInput(),
-          receiver: { identification: { type, number } },
-        });
-        const receptor = body().receptor as Record<string, unknown>;
-        expect(receptor['tipoIdentificacion']).toBe(type);
-        expect(receptor['numeroIdentificacion']).toBe(number);
-        expect(typeof receptor['tipoIdentificacion']).toBe('string');
-        expect(receptor['tipoIdentificacion']).not.toBeInstanceOf(Object);
-      },
-    );
+      ['01', '207530251'], // FÍSICA
+      ['02', '3101123456'], // JURÍDICA
+      ['03', '123456789'], // DIMEX
+      ['04', '987654321'], // NITE
+    ] as const)('receptor.tipoIdentificacion=%s is sent as scalar string', async (type, number) => {
+      const { post, body } = capturePostBody();
+      await makeAdapter({ post }).submitSignedDocument({
+        ...submitInput(),
+        receiver: { identification: { type, number } },
+      });
+      const receptor = body().receptor as Record<string, unknown>;
+      expect(receptor['tipoIdentificacion']).toBe(type);
+      expect(receptor['numeroIdentificacion']).toBe(number);
+      expect(typeof receptor['tipoIdentificacion']).toBe('string');
+      expect(receptor['tipoIdentificacion']).not.toBeInstanceOf(Object);
+    });
   });
 });
-

@@ -108,9 +108,11 @@ function buildMockContext(overrides: {
   bridgeFails?: boolean;
 }): Task009StatusContext {
   return {
-    findSubmissionByClave: jest.fn().mockResolvedValue(
-      overrides.submission !== undefined ? overrides.submission : READY_SUBMISSION,
-    ),
+    findSubmissionByClave: jest
+      .fn()
+      .mockResolvedValue(
+        overrides.submission !== undefined ? overrides.submission : READY_SUBMISSION,
+      ),
 
     bridgeSecrets: overrides.bridgeFails
       ? jest.fn().mockRejectedValue(new Error('BRIDGE_FAILED'))
@@ -118,10 +120,12 @@ function buildMockContext(overrides: {
 
     executeStatusQuery: overrides.queryFails
       ? jest.fn().mockRejectedValue(overrides.queryFails)
-      : jest.fn().mockResolvedValue(
-          overrides.queryResult ??
-            makeQueryResult({ indEstado: 'recibido', newState: 'PROCESSING' }),
-        ),
+      : jest
+          .fn()
+          .mockResolvedValue(
+            overrides.queryResult ??
+              makeQueryResult({ indEstado: 'recibido', newState: 'PROCESSING' }),
+          ),
   };
 }
 
@@ -311,7 +315,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
 
     it('fiscalAcceptance=ACCEPTED when ind-estado=aceptado', async () => {
       const context = buildMockContext({
-        queryResult: makeQueryResult({ indEstado: 'aceptado', newState: 'ACCEPTED', respuestaXmlPresent: true }),
+        queryResult: makeQueryResult({
+          indEstado: 'aceptado',
+          newState: 'ACCEPTED',
+          respuestaXmlPresent: true,
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.fiscalAcceptance).toBe('ACCEPTED');
@@ -320,7 +328,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
     it('ACCEPTED is NEVER produced from HTTP transport status alone — requires ind-estado', async () => {
       // HTTP 200 with no ind-estado must NOT produce ACCEPTED
       const context = buildMockContext({
-        queryResult: makeQueryResult({ getHttpStatus: 200, indEstado: null, newState: 'MANUAL_REVIEW_REQUIRED' }),
+        queryResult: makeQueryResult({
+          getHttpStatus: 200,
+          indEstado: null,
+          newState: 'MANUAL_REVIEW_REQUIRED',
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.fiscalAcceptance).not.toBe('ACCEPTED');
@@ -328,7 +340,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
 
     it('respuestaXmlPresent is propagated into evidence', async () => {
       const context = buildMockContext({
-        queryResult: makeQueryResult({ indEstado: 'aceptado', newState: 'ACCEPTED', respuestaXmlPresent: true }),
+        queryResult: makeQueryResult({
+          indEstado: 'aceptado',
+          newState: 'ACCEPTED',
+          respuestaXmlPresent: true,
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.respuestaXmlPresent).toBe(true);
@@ -340,7 +356,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
   describe('Hacienda status: rechazado (REJECTED — fiscal decision confirmed)', () => {
     it('returns PASS when ind-estado=rechazado', async () => {
       const context = buildMockContext({
-        queryResult: makeQueryResult({ indEstado: 'rechazado', newState: 'REJECTED', respuestaXmlPresent: true }),
+        queryResult: makeQueryResult({
+          indEstado: 'rechazado',
+          newState: 'REJECTED',
+          respuestaXmlPresent: true,
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.status).toBe('PASS');
@@ -350,7 +370,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
     it('REJECTED is NEVER produced from HTTP transport status alone — requires ind-estado', async () => {
       // HTTP 200 with no ind-estado must NOT produce REJECTED
       const context = buildMockContext({
-        queryResult: makeQueryResult({ getHttpStatus: 200, indEstado: null, newState: 'MANUAL_REVIEW_REQUIRED' }),
+        queryResult: makeQueryResult({
+          getHttpStatus: 200,
+          indEstado: null,
+          newState: 'MANUAL_REVIEW_REQUIRED',
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.fiscalAcceptance).not.toBe('REJECTED');
@@ -389,7 +413,11 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
 
     it('fiscalAcceptance=NOT_FOUND on HTTP 404', async () => {
       const context = buildMockContext({
-        queryResult: makeQueryResult({ getHttpStatus: 404, indEstado: null, newState: 'MANUAL_REVIEW_REQUIRED' }),
+        queryResult: makeQueryResult({
+          getHttpStatus: 404,
+          indEstado: null,
+          newState: 'MANUAL_REVIEW_REQUIRED',
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.fiscalAcceptance).toBe('NOT_FOUND');
@@ -451,7 +479,10 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
 
     it('fiscalAcceptance=UNKNOWN for undocumented ind-estado', async () => {
       const context = buildMockContext({
-        queryResult: makeQueryResult({ indEstado: 'undocumented-value-xyz', newState: 'MANUAL_REVIEW_REQUIRED' }),
+        queryResult: makeQueryResult({
+          indEstado: 'undocumented-value-xyz',
+          newState: 'MANUAL_REVIEW_REQUIRED',
+        }),
       });
       const result = await runTask009StatusQueryScenario(baseOptions(context));
       expect(result.evidence.fiscalAcceptance).toBe('UNKNOWN');
@@ -462,9 +493,9 @@ describe('TASK-009-STATUS Scenario — unit tests (no real network)', () => {
 
   describe('Network isolation invariants', () => {
     it.each([
-      ['recibido',  'PROCESSING'],
-      ['procesando','PROCESSING'],
-      ['aceptado',  'ACCEPTED'],
+      ['recibido', 'PROCESSING'],
+      ['procesando', 'PROCESSING'],
+      ['aceptado', 'ACCEPTED'],
       ['rechazado', 'REJECTED'],
     ] as const)('recepcionPostRequestsMade=0 for ind-estado=%s', async (indEstado, newState) => {
       const context = buildMockContext({

@@ -66,12 +66,7 @@ export type Task009StatusFailReason =
  * UNKNOWN = Hacienda responded but with an undocumented ind-estado value.
  */
 export type FiscalAcceptanceStatus =
-  | 'PENDING'
-  | 'ACCEPTED'
-  | 'REJECTED'
-  | 'ERROR'
-  | 'NOT_FOUND'
-  | 'UNKNOWN';
+  'PENDING' | 'ACCEPTED' | 'REJECTED' | 'ERROR' | 'NOT_FOUND' | 'UNKNOWN';
 
 /** Existing submission found in DB by clave. */
 export interface ExistingSubmission {
@@ -374,14 +369,12 @@ async function createLiveStatusContext(
       const httpStatus =
         (updated as unknown as { lastHttpStatus?: number | null }).lastHttpStatus ?? 0;
       const indEstado = updated.lastProviderStatus ?? null;
-      const respuestaXmlPresent = !!(
-        updated as unknown as { responseStorageKey?: string | null }
-      ).responseStorageKey;
+      const respuestaXmlPresent = !!(updated as unknown as { responseStorageKey?: string | null })
+        .responseStorageKey;
 
       // Extract fiscal diagnostic persisted by the adapter into lastProviderMetadata.
-      const meta = (
-        updated as unknown as { lastProviderMetadata?: Record<string, unknown> | null }
-      ).lastProviderMetadata;
+      const meta = (updated as unknown as { lastProviderMetadata?: Record<string, unknown> | null })
+        .lastProviderMetadata;
       const haciendaMensaje =
         typeof meta?.['haciendaMensaje'] === 'string' ? meta['haciendaMensaje'] : undefined;
       const haciendaDetalleMensaje =
@@ -427,15 +420,15 @@ async function createLiveStatusContext(
 export async function runTask009StatusQueryScenario(
   options: Task009StatusScenarioOptions = {},
 ): Promise<Task009StatusResult> {
-  const clave =
-    options.targetClave ??
-    process.env['F4S_EXISTING_SUBMISSION_CLAVE'] ??
-    '';
+  const clave = options.targetClave ?? process.env['F4S_EXISTING_SUBMISSION_CLAVE'] ?? '';
 
   // ── Step 1: USE_REAL_HACIENDA guard ──────────────────────────────────────
   if (!isUseRealHaciendaEnabled()) {
-    return buildAbortResult(clave, 'USE_REAL_HACIENDA_NOT_SET',
-      'USE_REAL_HACIENDA must be set to "true" to query Hacienda status.');
+    return buildAbortResult(
+      clave,
+      'USE_REAL_HACIENDA_NOT_SET',
+      'USE_REAL_HACIENDA must be set to "true" to query Hacienda status.',
+    );
   }
 
   // ── Step 2: Safety guard ─────────────────────────────────────────────────
@@ -444,8 +437,11 @@ export async function runTask009StatusQueryScenario(
   const clientId = process.env['HACIENDA_IDP_CLIENT_ID_SANDBOX'] ?? F4S_ALLOWED_CLIENT_ID;
   const guardResults = validateF4sEndpoints({ receptionBaseUrl: receptionUrl, tokenUrl, clientId });
   if (!allGuardResultsPass(guardResults)) {
-    return buildAbortResult(clave, 'SAFETY_GUARD_FAILED',
-      'Safety guard failed — production endpoint may be configured.');
+    return buildAbortResult(
+      clave,
+      'SAFETY_GUARD_FAILED',
+      'Safety guard failed — production endpoint may be configured.',
+    );
   }
 
   // ── Step 3: Required credentials ─────────────────────────────────────────
@@ -455,13 +451,19 @@ export async function runTask009StatusQueryScenario(
   const tenantId = process.env['F4S_TENANT_ID'];
 
   if (!username || !password || !companyId || !tenantId) {
-    return buildAbortResult(clave, 'MISSING_CREDENTIALS',
-      'F4S_SANDBOX_USERNAME, F4S_SANDBOX_PASSWORD, F4S_COMPANY_ID, and F4S_TENANT_ID are required.');
+    return buildAbortResult(
+      clave,
+      'MISSING_CREDENTIALS',
+      'F4S_SANDBOX_USERNAME, F4S_SANDBOX_PASSWORD, F4S_COMPANY_ID, and F4S_TENANT_ID are required.',
+    );
   }
 
   if (!clave) {
-    return buildAbortResult('', 'MISSING_CREDENTIALS',
-      'Set F4S_EXISTING_SUBMISSION_CLAVE to the clave of the unresolved 202 submission.');
+    return buildAbortResult(
+      '',
+      'MISSING_CREDENTIALS',
+      'Set F4S_EXISTING_SUBMISSION_CLAVE to the clave of the unresolved 202 submission.',
+    );
   }
 
   // ── Step 4: Bootstrap context ─────────────────────────────────────────────
@@ -471,8 +473,11 @@ export async function runTask009StatusQueryScenario(
       ? await options.contextFactory()
       : await createLiveStatusContext(companyId, tenantId);
   } catch (err) {
-    return buildAbortResult(clave, 'CONTEXT_FACTORY_ERROR',
-      `Failed to create scenario context: ${err instanceof Error ? err.message : 'unknown'}`);
+    return buildAbortResult(
+      clave,
+      'CONTEXT_FACTORY_ERROR',
+      `Failed to create scenario context: ${err instanceof Error ? err.message : 'unknown'}`,
+    );
   }
 
   // ── Step 5: Find submission ───────────────────────────────────────────────
@@ -480,20 +485,28 @@ export async function runTask009StatusQueryScenario(
   try {
     submission = await context.findSubmissionByClave(clave);
   } catch (err) {
-    return buildAbortResult(clave, 'UNEXPECTED_ERROR',
-      `findSubmissionByClave failed: ${err instanceof Error ? err.message : 'unknown'}`);
+    return buildAbortResult(
+      clave,
+      'UNEXPECTED_ERROR',
+      `findSubmissionByClave failed: ${err instanceof Error ? err.message : 'unknown'}`,
+    );
   }
 
   if (!submission) {
-    return buildAbortResult(clave, 'EXISTING_SUBMISSION_NOT_FOUND',
-      `No FiscalSubmission found for clave ${clave} in SANDBOX.`);
+    return buildAbortResult(
+      clave,
+      'EXISTING_SUBMISSION_NOT_FOUND',
+      `No FiscalSubmission found for clave ${clave} in SANDBOX.`,
+    );
   }
 
   if (!submission.haciendaConnectionSecretReference) {
     return buildAbortResult(
-      clave, 'MISSING_CREDENTIALS',
+      clave,
+      'MISSING_CREDENTIALS',
       'No active Hacienda SANDBOX connection found for this company.',
-      submission.currentStatus, submission.lastHttpStatus,
+      submission.currentStatus,
+      submission.lastHttpStatus,
     );
   }
 
@@ -510,9 +523,11 @@ export async function runTask009StatusQueryScenario(
     queryResult = await context.executeStatusQuery(submission.submissionId);
   } catch (err) {
     return buildAbortResult(
-      clave, 'UNEXPECTED_ERROR',
+      clave,
+      'UNEXPECTED_ERROR',
       `executeStatusQuery failed: ${err instanceof Error ? err.message : 'unknown'}`,
-      submission.currentStatus, submission.lastHttpStatus,
+      submission.currentStatus,
+      submission.lastHttpStatus,
     );
   }
 
@@ -527,19 +542,28 @@ export async function runTask009StatusQueryScenario(
     productionRequestsMade: 0,
   };
 
-  const isKnownState = acceptance === 'PENDING' || acceptance === 'ACCEPTED' || acceptance === 'REJECTED';
+  const isKnownState =
+    acceptance === 'PENDING' || acceptance === 'ACCEPTED' || acceptance === 'REJECTED';
   const passStatus: Task009StatusStatus = isKnownState ? 'PASS' : 'FAIL';
 
   // normalizedErrorCode takes priority over acceptance-based mapping so that
   // auth/rate-limit/5xx errors are not swallowed by the generic UNKNOWN bucket.
   const failReason: Task009StatusFailReason | undefined =
-    queryResult.normalizedErrorCode === 'HACIENDA_TOKEN_EXPIRED'  ? 'QUERY_AUTH_FAILED'            :
-    queryResult.normalizedErrorCode === 'HACIENDA_RATE_LIMIT'     ? 'QUERY_RATE_LIMITED'           :
-    queryResult.normalizedErrorCode === 'HACIENDA_UNAVAILABLE'    ? 'QUERY_PROVIDER_5XX'           :
-    acceptance === 'NOT_FOUND'                                    ? 'CLAVE_NOT_FOUND_BY_HACIENDA'  :
-    acceptance === 'ERROR'                                        ? 'HACIENDA_PROCESSING_ERROR'    :
-    acceptance === 'UNKNOWN'                                      ? 'UNKNOWN_HACIENDA_STATUS'       :
-    passStatus === 'FAIL'                                         ? 'UNEXPECTED_ERROR'             : undefined;
+    queryResult.normalizedErrorCode === 'HACIENDA_TOKEN_EXPIRED'
+      ? 'QUERY_AUTH_FAILED'
+      : queryResult.normalizedErrorCode === 'HACIENDA_RATE_LIMIT'
+        ? 'QUERY_RATE_LIMITED'
+        : queryResult.normalizedErrorCode === 'HACIENDA_UNAVAILABLE'
+          ? 'QUERY_PROVIDER_5XX'
+          : acceptance === 'NOT_FOUND'
+            ? 'CLAVE_NOT_FOUND_BY_HACIENDA'
+            : acceptance === 'ERROR'
+              ? 'HACIENDA_PROCESSING_ERROR'
+              : acceptance === 'UNKNOWN'
+                ? 'UNKNOWN_HACIENDA_STATUS'
+                : passStatus === 'FAIL'
+                  ? 'UNEXPECTED_ERROR'
+                  : undefined;
 
   const evidence: Task009StatusEvidence = {
     scenario: 'TASK-009-STATUS',

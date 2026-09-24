@@ -124,19 +124,31 @@ describe('extractHttpExceptionDiagnostic', () => {
     });
 
     it('extracts domain code from NotFoundException', () => {
-      const err = fakeHttpException(404, { code: 'FISCAL_DOCUMENT_NOT_FOUND' }, 'NotFoundException');
+      const err = fakeHttpException(
+        404,
+        { code: 'FISCAL_DOCUMENT_NOT_FOUND' },
+        'NotFoundException',
+      );
       const result = extractHttpExceptionDiagnostic(err);
       expect(result?.domainCode).toBe('FISCAL_DOCUMENT_NOT_FOUND');
     });
 
     it('extracts domain code from ConflictException', () => {
-      const err = fakeHttpException(409, { code: 'FISCAL_SEQUENCE_EXHAUSTED' }, 'ConflictException');
+      const err = fakeHttpException(
+        409,
+        { code: 'FISCAL_SEQUENCE_EXHAUSTED' },
+        'ConflictException',
+      );
       const result = extractHttpExceptionDiagnostic(err);
       expect(result?.domainCode).toBe('FISCAL_SEQUENCE_EXHAUSTED');
     });
 
     it('returns null domainCode when response has no code field', () => {
-      const err = fakeHttpException(400, { statusCode: 400, message: 'Bad Request', error: 'Bad Request' });
+      const err = fakeHttpException(400, {
+        statusCode: 400,
+        message: 'Bad Request',
+        error: 'Bad Request',
+      });
       const result = extractHttpExceptionDiagnostic(err);
       expect(result?.domainCode).toBeNull();
     });
@@ -218,9 +230,7 @@ describe('extractHttpExceptionDiagnostic', () => {
     it('does not include errors array from XSD validation failure', () => {
       const err = fakeHttpException(400, {
         code: 'FISCAL_XML_VALIDATION_FAILED',
-        errors: [
-          { code: 'XSD_001', message: '<FacturaElectronica>...</FacturaElectronica>' },
-        ],
+        errors: [{ code: 'XSD_001', message: '<FacturaElectronica>...</FacturaElectronica>' }],
       });
       const result = extractHttpExceptionDiagnostic(err);
       const resultStr = JSON.stringify(result);
@@ -354,7 +364,13 @@ describe('extractHttpExceptionDiagnostic — XSD first error capture', () => {
   it('captures xsdFirstError for FISCAL_XML_VALIDATION_FAILED with errors[0]', () => {
     const err = fakeHttpException(400, {
       code: 'FISCAL_XML_VALIDATION_FAILED',
-      errors: [{ code: 'FISCAL_XML_VALIDATION_FAILED', message: 'value length cannot be lesser than 5', line: 42 }],
+      errors: [
+        {
+          code: 'FISCAL_XML_VALIDATION_FAILED',
+          message: 'value length cannot be lesser than 5',
+          line: 42,
+        },
+      ],
     });
     const result = extractHttpExceptionDiagnostic(err);
     expect(result?.xsdFirstError).toBeDefined();

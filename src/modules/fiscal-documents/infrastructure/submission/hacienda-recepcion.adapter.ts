@@ -110,8 +110,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
           providerLocation: this.headerValue(response, 'location'),
           providerReference: input.clave,
           normalizedErrorCode: 'HACIENDA_UNDOCUMENTED_2XX_STATUS',
-          sanitizedErrorMessage:
-            `Hacienda returned HTTP ${response.status}: ${info.meaning}`,
+          sanitizedErrorMessage: `Hacienda returned HTTP ${response.status}: ${info.meaning}`,
           responseClassification: info.classification,
           providerMetadata: {
             responseClassification: info.classification,
@@ -205,8 +204,10 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
     const { diagnostic, parseError } = parseMensajeHacienda(content);
     const meta: Record<string, string | number | boolean | null> = {};
     if (diagnostic.mensaje !== undefined) meta['haciendaMensaje'] = diagnostic.mensaje;
-    if (diagnostic.detalleMensaje !== undefined) meta['haciendaDetalleMensaje'] = diagnostic.detalleMensaje;
-    if (diagnostic.estadoMensaje !== undefined) meta['haciendaEstadoMensaje'] = diagnostic.estadoMensaje;
+    if (diagnostic.detalleMensaje !== undefined)
+      meta['haciendaDetalleMensaje'] = diagnostic.detalleMensaje;
+    if (diagnostic.estadoMensaje !== undefined)
+      meta['haciendaEstadoMensaje'] = diagnostic.estadoMensaje;
     if (parseError) meta['fiscalDiagnosticParseError'] = parseError;
     return Object.keys(meta).length > 0 ? meta : undefined;
   }
@@ -337,7 +338,10 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
       diagnostic['haciendaErrorCause'] = this.sanitizeHeaderValue(errorCause);
     }
     // validation-exception: documented companion header for HTTP 400 in Hacienda contract
-    const validationException = this.readSafeResponseHeader(response.headers, 'validation-exception');
+    const validationException = this.readSafeResponseHeader(
+      response.headers,
+      'validation-exception',
+    );
     if (validationException !== undefined) {
       diagnostic['haciendaValidationException'] = this.sanitizeHeaderValue(validationException);
     }
@@ -382,10 +386,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
    * NEVER copies or enumerates the full headers object.
    * ONLY the explicitly requested header name is read.
    */
-  private readSafeResponseHeader(
-    headers: unknown,
-    name: string,
-  ): string | undefined {
+  private readSafeResponseHeader(headers: unknown, name: string): string | undefined {
     if (!headers || typeof headers !== 'object') return undefined;
 
     // AxiosHeaders (Axios ≥ 1.x) exposes a case-insensitive .get() method.
@@ -427,13 +428,15 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
    *   5. Cap at MAX_HEADER_VALUE_LENGTH (500) characters.
    */
   private sanitizeHeaderValue(value: string, maxLength = 500): string {
-    return value
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\x00-\x1F\x7F]/g, ' ')  // control characters → space
-      .replace(/<[^>]+>/g, '[xml]')        // XML / HTML tags
-      .replace(/\s+/g, ' ')               // collapse whitespace
-      .trim()
-      .slice(0, maxLength);
+    return (
+      value
+        // eslint-disable-next-line no-control-regex
+        .replace(/[\x00-\x1F\x7F]/g, ' ') // control characters → space
+        .replace(/<[^>]+>/g, '[xml]') // XML / HTML tags
+        .replace(/\s+/g, ' ') // collapse whitespace
+        .trim()
+        .slice(0, maxLength)
+    );
   }
 
   /**
@@ -443,15 +446,12 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
    *
    * NEVER persists the raw string/buffer itself.
    */
-  private resolveResponseBody(
-    data: unknown,
-  ): { body: unknown; parseStatus?: string } {
+  private resolveResponseBody(data: unknown): { body: unknown; parseStatus?: string } {
     // Buffer / Uint8Array must be checked BEFORE the generic object check because
     // Buffer IS an object (typeof Buffer === 'object').  Decode and JSON.parse.
     if (Buffer.isBuffer(data) || data instanceof Uint8Array) {
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as Uint8Array);
-      if (buf.length > 10_000)
-        return { body: buf, parseStatus: 'BUFFER_TOO_LARGE_TO_PARSE' };
+      if (buf.length > 10_000) return { body: buf, parseStatus: 'BUFFER_TOO_LARGE_TO_PARSE' };
       const str = buf.toString('utf8');
       try {
         return { body: JSON.parse(str) as unknown, parseStatus: 'PARSED_FROM_BUFFER' };
@@ -465,8 +465,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
 
     if (typeof data === 'string') {
       if (data.length === 0) return { body: null, parseStatus: 'EMPTY_STRING' };
-      if (data.length > 10_000)
-        return { body: data, parseStatus: 'STRING_TOO_LARGE_TO_PARSE' };
+      if (data.length > 10_000) return { body: data, parseStatus: 'STRING_TOO_LARGE_TO_PARSE' };
       try {
         return { body: JSON.parse(data) as unknown, parseStatus: 'PARSED_FROM_STRING' };
       } catch {
@@ -481,9 +480,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
    * Returns only structural metadata about the body — key names, depth ≤ 2.
    * NEVER returns any values.
    */
-  private captureBodyShape(
-    body: unknown,
-  ): Record<string, string | number | boolean | null> {
+  private captureBodyShape(body: unknown): Record<string, string | number | boolean | null> {
     const shape: Record<string, string | number | boolean | null> = {};
 
     if (body === null || body === undefined) {
@@ -592,10 +589,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
     if (Array.isArray(body['errorCodes'])) {
       const safe = (body['errorCodes'] as unknown[])
         .slice(0, 5)
-        .filter(
-          (c): c is string =>
-            typeof c === 'string' && /^[A-Z0-9_\-]{1,50}$/.test(c),
-        )
+        .filter((c): c is string => typeof c === 'string' && /^[A-Z0-9_\-]{1,50}$/.test(c))
         .join(', ');
       if (safe) diagnostic['haciendaErrorCodes'] = safe;
     }
@@ -606,10 +600,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
           first['message'] as string,
         );
       }
-      if (
-        typeof first?.['code'] === 'string' &&
-        /^[A-Z0-9_\-]{1,50}$/.test(first['code'])
-      ) {
+      if (typeof first?.['code'] === 'string' && /^[A-Z0-9_\-]{1,50}$/.test(first['code'])) {
         diagnostic['haciendaFirstErrorCode'] = first['code'] as string;
       }
     }
@@ -624,7 +615,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
   private sanitizeProviderString(value: string, maxLength = 300): string {
     return value
       .replace(/<[^>]+>/g, '[xml]') // strip XML tags
-      .replace(/\s+/g, ' ')         // collapse whitespace
+      .replace(/\s+/g, ' ') // collapse whitespace
       .trim()
       .slice(0, maxLength);
   }

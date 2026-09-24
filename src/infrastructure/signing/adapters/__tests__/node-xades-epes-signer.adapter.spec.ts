@@ -1,4 +1,6 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { DOMParser, Element as XmldomElement } from '@xmldom/xmldom';
 import { SignedXml } from 'xml-crypto';
 import { NodeXadesEpesSignerAdapter } from '../node-xades-epes-signer.adapter';
@@ -240,14 +242,11 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
       const el = doc.getElementsByTagName(tag)[0];
       return el?.firstChild?.nodeValue?.trim() ?? '(absent)';
     };
-    const getSingleAttr = (tag: string, attr: string): string => {
-      const el = doc.getElementsByTagName(tag)[0];
-      return (el as unknown as Element)?.getAttribute?.(attr) ?? '(absent)';
-    };
-
     // Isolated extractions using regex to avoid DOM ordering issues
     const phAlgM = signedXml.match(/SigPolicyHash[\s\S]*?<ds:DigestMethod[^/]*Algorithm="([^"]+)"/);
-    const phValM = signedXml.match(/SigPolicyHash[\s\S]*?<ds:DigestValue>([^<]+)<\/ds:DigestValue>/);
+    const phValM = signedXml.match(
+      /SigPolicyHash[\s\S]*?<ds:DigestValue>([^<]+)<\/ds:DigestValue>/,
+    );
     const cdAlgM = signedXml.match(/CertDigest[\s\S]*?<ds:DigestMethod[^/]*Algorithm="([^"]+)"/);
     const cdValM = signedXml.match(/CertDigest[\s\S]*?<ds:DigestValue>([^<]+)<\/ds:DigestValue>/);
     const dofRefM = signedXml.match(/DataObjectFormat\s+ObjectReference="([^"]+)"/);
@@ -259,11 +258,11 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
     const refEls = Array.from(doc.getElementsByTagName('ds:Reference')) as unknown as Element[];
     const spEl = doc.getElementsByTagName('xades:SignedProperties')[0] as unknown as Element;
     const qpEl = doc.getElementsByTagName('xades:QualifyingProperties')[0] as unknown as Element;
-    const refSpEl = refEls.find(r =>
-      r.getAttribute('Type') === HACIENDA_V44_XADES_CONTRACT.signedPropertiesReferenceType,
+    const refSpEl = refEls.find(
+      (r) => r.getAttribute('Type') === HACIENDA_V44_XADES_CONTRACT.signedPropertiesReferenceType,
     );
-    const docRefEl = refEls.find(r =>
-      r.getAttribute('Type') !== HACIENDA_V44_XADES_CONTRACT.signedPropertiesReferenceType,
+    const docRefEl = refEls.find(
+      (r) => r.getAttribute('Type') !== HACIENDA_V44_XADES_CONTRACT.signedPropertiesReferenceType,
     );
 
     return {
@@ -302,8 +301,9 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
 
   beforeAll(async () => {
     material = createTestSigningMaterial();
-    const xml = new HaciendaV44XmlSerializerAdapter()
-      .serialize(createFiscalXmlSnapshot('INVOICE')).xml;
+    const xml = new HaciendaV44XmlSerializerAdapter().serialize(
+      createFiscalXmlSnapshot('INVOICE'),
+    ).xml;
     signedXml = await signer.sign(xml, material.certificate);
     policy = parsePolicyRegion(signedXml);
   });
@@ -357,16 +357,16 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
   });
 
   it('SigPolicyHash DigestValue independently verified against policy PDF on disk', () => {
-    const path = require('path') as typeof import('path');
-    const cryptoMod = require('crypto') as typeof import('crypto');
-    const fsMod = require('fs') as typeof import('fs');
     const pdfPath = path.join(
-      process.cwd(), 'resources', 'hacienda', 'v4.4',
+      process.cwd(),
+      'resources',
+      'hacienda',
+      'v4.4',
       HACIENDA_V44_XADES_CONTRACT.signaturePolicyDocumentFileName,
     );
-    const fileHashBase64 = cryptoMod
+    const fileHashBase64 = crypto
       .createHash('sha256')
-      .update(fsMod.readFileSync(pdfPath))
+      .update(fs.readFileSync(pdfPath))
       .digest('base64');
     expect(policy.policyHashValue).toBe(fileHashBase64);
   });
@@ -405,9 +405,9 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
   });
 
   it('All UUIDs in a single signature share the same hexUUID root', () => {
-    const sigHex = policy.signatureId.slice(3);       // strip 'id-'
-    const svHex  = policy.signatureValueId.slice(8);  // strip 'value-id'
-    const spHex  = policy.signedPropertiesId.slice(9); // strip 'xades-id-'
+    const sigHex = policy.signatureId.slice(3); // strip 'id-'
+    const svHex = policy.signatureValueId.slice(8); // strip 'value-id'
+    const spHex = policy.signedPropertiesId.slice(9); // strip 'xades-id-'
     expect(sigHex).toBe(svHex);
     expect(sigHex).toBe(spHex);
   });
@@ -449,7 +449,10 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
     const certDer = Buffer.from(material.certificateDerBase64, 'base64');
     const x509 = new crypto.X509Certificate(certDer);
     const expectedSerial = BigInt('0x' + x509.serialNumber).toString(10);
-    const expectedIssuer = x509.issuer.split('\n').filter(s => s.length > 0).join(',');
+    const expectedIssuer = x509.issuer
+      .split('\n')
+      .filter((s) => s.length > 0)
+      .join(',');
     expect(policy.issuerSerial).toBe(expectedSerial);
     expect(policy.issuerName).toBe(expectedIssuer);
   });
@@ -479,9 +482,8 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
   });
 
   it('xades:CertDigest legitimately contains SHA-1 per official Anexo 2', () => {
-    const certDigestBlock = signedXml.match(
-      /<xades:CertDigest>[\s\S]*?<\/xades:CertDigest>/i,
-    )?.[0] ?? '';
+    const certDigestBlock =
+      signedXml.match(/<xades:CertDigest>[\s\S]*?<\/xades:CertDigest>/i)?.[0] ?? '';
     expect(certDigestBlock).toContain('xmldsig#sha1');
   });
 

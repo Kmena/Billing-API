@@ -20,19 +20,21 @@ const REAL_REJECTION_DETALLE = [
   ']',
 ].join('\n');
 
-const REAL_REJECTION_XML = wrap([
-  '<Clave>50622092600310100000000100001010000000007157079215</Clave>',
-  '<NombreEmisor>DESCONOCIDO</NombreEmisor>',
-  '<TipoIdentificacionEmisor>02</TipoIdentificacionEmisor>',
-  '<NumeroCedulaEmisor>3101000000</NumeroCedulaEmisor>',
-  '<TipoIdentificacionReceptor>02</TipoIdentificacionReceptor>',
-  '<NumeroCedulaReceptor>3101000001</NumeroCedulaReceptor>',
-  '<Mensaje>3</Mensaje>',
-  '<EstadoMensaje>Rechazado</EstadoMensaje>',
-  `<DetalleMensaje>${REAL_REJECTION_DETALLE}</DetalleMensaje>`,
-  '<TotalFactura>0</TotalFactura>',
-  '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">SKIPPED</ds:Signature>',
-].join('\n'));
+const REAL_REJECTION_XML = wrap(
+  [
+    '<Clave>50622092600310100000000100001010000000007157079215</Clave>',
+    '<NombreEmisor>DESCONOCIDO</NombreEmisor>',
+    '<TipoIdentificacionEmisor>02</TipoIdentificacionEmisor>',
+    '<NumeroCedulaEmisor>3101000000</NumeroCedulaEmisor>',
+    '<TipoIdentificacionReceptor>02</TipoIdentificacionReceptor>',
+    '<NumeroCedulaReceptor>3101000001</NumeroCedulaReceptor>',
+    '<Mensaje>3</Mensaje>',
+    '<EstadoMensaje>Rechazado</EstadoMensaje>',
+    `<DetalleMensaje>${REAL_REJECTION_DETALLE}</DetalleMensaje>`,
+    '<TotalFactura>0</TotalFactura>',
+    '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">SKIPPED</ds:Signature>',
+  ].join('\n'),
+);
 
 // ── rechazado + Mensaje + DetalleMensaje ──────────────────────────────────────
 
@@ -85,13 +87,15 @@ describe('parseMensajeHacienda — rechazado', () => {
 // ── aceptado + response XML ───────────────────────────────────────────────────
 
 describe('parseMensajeHacienda — aceptado', () => {
-  const xml = wrap([
-    '<Clave>50601012500310112345600100001010000000001100000001</Clave>',
-    '<Mensaje>1</Mensaje>',
-    '<EstadoMensaje>Aceptado</EstadoMensaje>',
-    '<DetalleMensaje>Comprobante electrónico aceptado satisfactoriamente.</DetalleMensaje>',
-    '<TotalFactura>1000</TotalFactura>',
-  ].join(''));
+  const xml = wrap(
+    [
+      '<Clave>50601012500310112345600100001010000000001100000001</Clave>',
+      '<Mensaje>1</Mensaje>',
+      '<EstadoMensaje>Aceptado</EstadoMensaje>',
+      '<DetalleMensaje>Comprobante electrónico aceptado satisfactoriamente.</DetalleMensaje>',
+      '<TotalFactura>1000</TotalFactura>',
+    ].join(''),
+  );
 
   it('extracts mensaje = "1"', () => {
     expect(parseMensajeHacienda(xml).diagnostic.mensaje).toBe('1');
@@ -175,9 +179,9 @@ describe('parseMensajeHacienda — unknown elements', () => {
   it('ignores unknown elements and still extracts known ones', () => {
     const xml = wrap(
       '<FutureField>should-be-ignored</FutureField>' +
-      '<Mensaje>2</Mensaje>' +
-      '<AnotherNewField><nested>data</nested></AnotherNewField>' +
-      '<EstadoMensaje>Aceptado</EstadoMensaje>',
+        '<Mensaje>2</Mensaje>' +
+        '<AnotherNewField><nested>data</nested></AnotherNewField>' +
+        '<EstadoMensaje>Aceptado</EstadoMensaje>',
     );
     const r = parseMensajeHacienda(xml);
     expect(r.diagnostic.mensaje).toBe('2');
@@ -198,9 +202,9 @@ describe('parseMensajeHacienda — XML namespaces', () => {
   it('does NOT confuse ds:Signature sub-elements with safe elements', () => {
     const xml = wrap(
       '<Mensaje>3</Mensaje>' +
-      '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
-      '<ds:SignedInfo><ds:CanonicalizationMethod/></ds:SignedInfo>' +
-      '</ds:Signature>',
+        '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+        '<ds:SignedInfo><ds:CanonicalizationMethod/></ds:SignedInfo>' +
+        '</ds:Signature>',
     );
     const r = parseMensajeHacienda(xml);
     expect(r.diagnostic.mensaje).toBe('3');
@@ -214,8 +218,7 @@ describe('parseMensajeHacienda — XML namespaces', () => {
 describe('parseMensajeHacienda — multiline DetalleMensaje', () => {
   it('preserves line breaks (normalised to \\n) from multiline content', () => {
     const xml = wrap(
-      '<Mensaje>3</Mensaje>' +
-      '<DetalleMensaje>Line one\nLine two\nLine three</DetalleMensaje>',
+      '<Mensaje>3</Mensaje>' + '<DetalleMensaje>Line one\nLine two\nLine three</DetalleMensaje>',
     );
     const d = parseMensajeHacienda(xml).diagnostic.detalleMensaje ?? '';
     expect(d).toContain('\n');
@@ -224,8 +227,7 @@ describe('parseMensajeHacienda — multiline DetalleMensaje', () => {
 
   it('normalises &#13; (CR entities) to \\n in multiline content', () => {
     const xml = wrap(
-      '<DetalleMensaje>First&#13;\nSecond&#13;\nThird</DetalleMensaje>' +
-      `<Mensaje>3</Mensaje>`,
+      '<DetalleMensaje>First&#13;\nSecond&#13;\nThird</DetalleMensaje>' + `<Mensaje>3</Mensaje>`,
     );
     const d = parseMensajeHacienda(xml).diagnostic.detalleMensaje ?? '';
     expect(d).not.toContain('\r');
@@ -234,10 +236,7 @@ describe('parseMensajeHacienda — multiline DetalleMensaje', () => {
   });
 
   it('collapses 3 or more consecutive blank lines to 2', () => {
-    const xml = wrap(
-      '<Mensaje>3</Mensaje>' +
-      '<DetalleMensaje>A\n\n\n\n\nB</DetalleMensaje>',
-    );
+    const xml = wrap('<Mensaje>3</Mensaje>' + '<DetalleMensaje>A\n\n\n\n\nB</DetalleMensaje>');
     const d = parseMensajeHacienda(xml).diagnostic.detalleMensaje ?? '';
     expect(d).not.toContain('\n\n\n');
     expect(d).toContain('A\n\nB');
@@ -248,7 +247,9 @@ describe('parseMensajeHacienda — multiline DetalleMensaje', () => {
 
 describe('parseMensajeHacienda — sanitisation', () => {
   it('strips ANSI escape sequences from DetalleMensaje', () => {
-    const xml = wrap('<Mensaje>3</Mensaje><DetalleMensaje>normal \x1b[31mred\x1b[0m text</DetalleMensaje>');
+    const xml = wrap(
+      '<Mensaje>3</Mensaje><DetalleMensaje>normal \x1b[31mred\x1b[0m text</DetalleMensaje>',
+    );
     const d = parseMensajeHacienda(xml).diagnostic.detalleMensaje ?? '';
     expect(d).not.toContain('\x1b');
     expect(d).toContain('normal');
@@ -264,7 +265,9 @@ describe('parseMensajeHacienda — sanitisation', () => {
   });
 
   it('strips XML/HTML tags from DetalleMensaje', () => {
-    const xml = wrap('<Mensaje>3</Mensaje><DetalleMensaje>error: <b>bold</b> message</DetalleMensaje>');
+    const xml = wrap(
+      '<Mensaje>3</Mensaje><DetalleMensaje>error: <b>bold</b> message</DetalleMensaje>',
+    );
     const d = parseMensajeHacienda(xml).diagnostic.detalleMensaje ?? '';
     expect(d).not.toContain('<b>');
     expect(d).not.toContain('</b>');

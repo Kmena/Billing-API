@@ -207,9 +207,13 @@ async function runPreflight(): Promise<PreflightReport> {
   if (report.aggregateStatus === 'READY_FOR_SANDBOX_EXECUTION') {
     console.log('  All prerequisites met.');
     console.log('  Available scenarios:');
-    console.log('    npm run test:hacienda-sandbox -- --scenario TASK-008         (authentication only)');
+    console.log(
+      '    npm run test:hacienda-sandbox -- --scenario TASK-008         (authentication only)',
+    );
     console.log('    npm run test:hacienda-sandbox -- --scenario TASK-009         (FE submission)');
-    console.log('    npm run test:hacienda-sandbox -- --scenario TASK-009-STATUS  (query existing 202 submission)');
+    console.log(
+      '    npm run test:hacienda-sandbox -- --scenario TASK-009-STATUS  (query existing 202 submission)',
+    );
     console.log('    npm run test:hacienda-sandbox  (defaults to TASK-008)');
     console.log('  TASK-009-STATUS requires F4S_EXISTING_SUBMISSION_CLAVE in .env.local.');
     console.log('  TASK-010+ (reconciliation) not yet implemented.');

@@ -191,10 +191,7 @@ export class NodeXadesEpesSignerAdapter implements XmlSignerPort {
     const c = HACIENDA_V44_XADES_CONTRACT;
     // CertDigest uses SHA-1 per official v4.4 spec (Anexo 2, pages 87-88)
     const certBytes = Buffer.from(certificateDerBase64, 'base64');
-    const certificateDigest = crypto
-      .createHash('sha1')
-      .update(certBytes)
-      .digest('base64');
+    const certificateDigest = crypto.createHash('sha1').update(certBytes).digest('base64');
     const { issuerName, serialNumber } = this.buildIssuerSerial(certBytes);
 
     return (

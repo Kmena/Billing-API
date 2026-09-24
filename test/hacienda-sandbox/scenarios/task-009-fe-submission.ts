@@ -595,7 +595,9 @@ async function createLiveContext(): Promise<Task009Context> {
       }
 
       const lastProviderMetadata = (
-        updated as unknown as { lastProviderMetadata?: Record<string, string | number | boolean | null> | null }
+        updated as unknown as {
+          lastProviderMetadata?: Record<string, string | number | boolean | null> | null;
+        }
       ).lastProviderMetadata;
 
       return {
@@ -603,10 +605,9 @@ async function createLiveContext(): Promise<Task009Context> {
         // lastHttpStatus is stored by FiscalSubmissionStateService.applyProviderResult()
         httpStatus: (updated as unknown as { lastHttpStatus?: number | null }).lastHttpStatus ?? 0,
         // providerLocation is set by FiscalSubmissionStateService when the adapter
-      // captures a Location header.  lastProviderStatus stores ind-estado (GET only).
-      locationHeaderPresent: !!(
-        (updated as unknown as { providerLocation?: string | null }).providerLocation
-      ),
+        // captures a Location header.  lastProviderStatus stores ind-estado (GET only).
+        locationHeaderPresent: !!(updated as unknown as { providerLocation?: string | null })
+          .providerLocation,
         rateLimitObserved: undefined,
         errorCode: updated.lastNormalizedErrorCode ?? undefined,
         haciendaProviderMetadata: lastProviderMetadata ?? undefined,
@@ -683,7 +684,8 @@ async function createLiveContext(): Promise<Task009Context> {
 function buildUnresolved2xxMessage(outcome: Task009SubmissionOutcome): string {
   const http = outcome.httpStatus > 0 ? outcome.httpStatus : 'unknown';
   const meta = outcome.haciendaProviderMetadata ?? {};
-  const classification = (meta['responseClassification'] as string | undefined) ?? 'UNDOCUMENTED_2XX';
+  const classification =
+    (meta['responseClassification'] as string | undefined) ?? 'UNDOCUMENTED_2XX';
   const location = outcome.locationHeaderPresent ? 'CAPTURED' : 'NOT PRESENT / UNKNOWN';
 
   return [
@@ -737,9 +739,7 @@ function buildHaciendaFailureMessage(outcome: Task009SubmissionOutcome): string 
     // Priority 3: empty body without X-Error-Cause — explicit and actionable
     const parseStatus = meta['providerBodyParseStatus'] as string | undefined;
     if (parseStatus === 'EMPTY_STRING') {
-      return (
-        `Hacienda HTTP ${http} returned an empty response body and no X-Error-Cause header.`
-      );
+      return `Hacienda HTTP ${http} returned an empty response body and no X-Error-Cause header.`;
     }
 
     // Priority 4: content-type known but body not useful
@@ -898,9 +898,14 @@ export async function runTask009FeSubmissionScenario(
       companyId,
       'DOCUMENT_CREATION_FAILED',
       `Document creation failed${diag?.domainCode ? `: ${diag.domainCode}` : ''}`,
-      { pipelineStage: 'DOCUMENT_CREATION', httpStatus: diag?.httpStatus, domainCode: diag?.domainCode },
+      {
+        pipelineStage: 'DOCUMENT_CREATION',
+        httpStatus: diag?.httpStatus,
+        domainCode: diag?.domainCode,
+      },
     );
-    if (!(options.skipEvidenceWrite ?? false)) await writeTask009Summary(result.evidence, 'S04-FE-submission');
+    if (!(options.skipEvidenceWrite ?? false))
+      await writeTask009Summary(result.evidence, 'S04-FE-submission');
     return result;
   }
 
@@ -928,7 +933,8 @@ export async function runTask009FeSubmissionScenario(
         xsdFirstError: diag?.xsdFirstError,
       },
     );
-    if (!(options.skipEvidenceWrite ?? false)) await writeTask009Summary(result.evidence, 'S04-FE-submission');
+    if (!(options.skipEvidenceWrite ?? false))
+      await writeTask009Summary(result.evidence, 'S04-FE-submission');
     return result;
   }
 
@@ -987,7 +993,8 @@ export async function runTask009FeSubmissionScenario(
   } else if (outcome.errorCode === 'HACIENDA_NETWORK_ERROR') {
     submissionStatus = 'FAIL';
     submissionErrorCode = 'SUBMISSION_NETWORK_ERROR';
-    submissionErrorMessage = 'Hacienda submission failed due to a network error (no HTTP response).';
+    submissionErrorMessage =
+      'Hacienda submission failed due to a network error (no HTTP response).';
   } else if (isFailed) {
     submissionStatus = 'FAIL';
     submissionErrorCode = 'SUBMISSION_FAILED';

@@ -139,9 +139,9 @@ const MAX_XSD_MESSAGE_LENGTH = 200;
  */
 export function sanitizeXsdMessage(raw: string): string {
   return raw
-    .replace(/<[^>]+>/g, '[xml]')        // strip XML element/attribute content
+    .replace(/<[^>]+>/g, '[xml]') // strip XML element/attribute content
     .replace(/[A-Za-z]:\\[^\s]*/g, '[path]') // Windows paths
-    .replace(/\/[^\s]+/g, '[path]')     // Unix absolute paths
+    .replace(/\/[^\s]+/g, '[path]') // Unix absolute paths
     .trim()
     .slice(0, MAX_XSD_MESSAGE_LENGTH);
 }

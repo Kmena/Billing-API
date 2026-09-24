@@ -440,7 +440,9 @@ describe('TASK-009 FE Submission Scenario — unit tests (no real network)', () 
       expect(result.evidence.domainCode).toBe('FISCAL_XML_VALIDATION_FAILED');
       expect(result.evidence.xsdFirstError).toBeDefined();
       expect(result.evidence.xsdFirstError?.xsdLine).toBe(42);
-      expect(result.evidence.xsdFirstError?.xsdMessage).toBe('value length cannot be lesser than 5');
+      expect(result.evidence.xsdFirstError?.xsdMessage).toBe(
+        'value length cannot be lesser than 5',
+      );
     });
 
     it('xsdFirstError is absent when DOCUMENT_CREATION fails (not an XSD failure)', async () => {
@@ -1206,7 +1208,9 @@ describe('TASK-009 FE Submission Scenario — unit tests (no real network)', () 
     it('HTTP 202 evidence preserves haciendaDiagnostic with responseClassification', async () => {
       const context = buildMockContext({ outcome: outcome202 });
       const result = await runTask009FeSubmissionScenario(baseOptions(context));
-      expect(result.evidence.haciendaDiagnostic?.['responseClassification']).toBe('UNDOCUMENTED_2XX');
+      expect(result.evidence.haciendaDiagnostic?.['responseClassification']).toBe(
+        'UNDOCUMENTED_2XX',
+      );
     });
 
     it('HTTP 202 http201MappedToAccepted is always false', async () => {

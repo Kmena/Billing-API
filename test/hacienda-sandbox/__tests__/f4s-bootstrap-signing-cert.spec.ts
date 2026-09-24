@@ -36,13 +36,15 @@ const SANDBOX_INPUT: BootstrapInput = {
   passSecretRef: PASS_REF,
 };
 
-function makeCertRow(overrides: Partial<{
-  id: string;
-  environment: string;
-  status: string;
-  certificateSecretReference: string;
-  passwordSecretReference: string;
-}> = {}) {
+function makeCertRow(
+  overrides: Partial<{
+    id: string;
+    environment: string;
+    status: string;
+    certificateSecretReference: string;
+    passwordSecretReference: string;
+  }> = {},
+) {
   return {
     id: 'aaaa0000-0000-4000-8000-000000000001',
     environment: 'SANDBOX',
@@ -91,10 +93,7 @@ function buildPrisma(setup: MockSetup): BootstrapPrisma & {
 
 // ── Helper: expect BootstrapError ─────────────────────────────────────────────
 
-async function expectBootstrapError(
-  action: Promise<unknown>,
-  expectedCode: string,
-): Promise<void> {
+async function expectBootstrapError(action: Promise<unknown>, expectedCode: string): Promise<void> {
   try {
     await action;
     throw new Error('Expected BootstrapError to be thrown but none was');
