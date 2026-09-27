@@ -82,18 +82,9 @@ export class EnsureInitialFiscalPackageService {
       return;
     }
 
-    // Extract recipient email from immutable receiverSnapshot
-    const recipient = this.extractRecipientEmail(doc.receiverSnapshot);
-    if (!recipient) {
-      this.logger.log({
-        msg: 'EnsureInitialPackage: no recipient email in receiverSnapshot — no delivery (expected for TE)',
-        fiscalDocumentId,
-        documentType: doc.type,
-      });
-      return; // Missing email is NOT an error (FR-025)
-    }
-
-    // Generate (or reuse) PDF artifact
+    // Generate (or reuse) PDF artifact independently of email delivery.
+    // Missing recipient email must not make the PDF artifact disappear. Obvious in hindsight,
+    // but apparently software enjoys hiding invoices behind mailboxes. Woof.
     try {
       await this.generatePdfService.generateOrReuse(tenantId, companyId, fiscalDocumentId);
     } catch (err: unknown) {
@@ -104,6 +95,17 @@ export class EnsureInitialFiscalPackageService {
         error: String(err),
       });
       // Continue: delivery worker will handle missing PDF gracefully
+    }
+
+    // Extract recipient email from immutable receiverSnapshot
+    const recipient = this.extractRecipientEmail(doc.receiverSnapshot);
+    if (!recipient) {
+      this.logger.log({
+        msg: 'EnsureInitialPackage: no recipient email in receiverSnapshot — PDF ensured, no delivery (expected for TE)',
+        fiscalDocumentId,
+        documentType: doc.type,
+      });
+      return; // Missing email is NOT an error (FR-025)
     }
 
     // Create/reuse INITIAL_DOCUMENT delivery row (idempotent via unique constraint)

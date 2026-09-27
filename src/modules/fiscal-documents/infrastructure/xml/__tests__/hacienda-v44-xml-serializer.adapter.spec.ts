@@ -90,7 +90,7 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
     ).toThrow('FISCAL_XML_UNSUPPORTED_CATALOG:identificationType');
   });
 
-  it('rejects missing tax metadata and unsupported discount conditionals instead of fabricating metadata', () => {
+  it('rejects missing tax metadata and missing discount metadata instead of fabricating metadata', () => {
     const baseSnapshot = createFiscalXmlSnapshot('INVOICE');
     const baseLine = (baseSnapshot.lines as Array<Record<string, unknown>>)[0];
 
@@ -119,7 +119,7 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           },
         ],
       }),
-    ).toThrow('FISCAL_XML_UNSUPPORTED_CONDITIONAL:discount');
+    ).toThrow('FISCAL_XML_DISCOUNT_METADATA_REQUIRED');
   });
 
   it('fails when official XML-required issuer snapshot fields are absent', () => {

@@ -38,6 +38,12 @@ function makeExtractedData(
     validTo: new Date('2027-01-01'),
     extractedIdentityNumber: VALID_IDENTITY,
     extractedIdentityType: '02',
+    rawIdentity: `CPJ-${VALID_IDENTITY}`,
+    canonicalIdentity: {
+      rawIdentity: `CPJ-${VALID_IDENTITY}`,
+      identityType: 'JURIDICA',
+      normalizedIdentificationNumber: VALID_IDENTITY,
+    },
     ...overrides,
   };
 }
@@ -56,6 +62,7 @@ function createService(opts: {
               id: VALID_COMPANY_ID,
               tenantId: VALID_TENANT_ID,
               identificationNumber: VALID_IDENTITY,
+              identificationType: 'JURIDICA',
             },
       ),
     },
@@ -113,6 +120,7 @@ function createService(opts: {
   };
 
   const secrets = {
+    isDurable: true,
     storeSecret: jest.fn().mockResolvedValue(undefined),
     deleteSecret: jest.fn().mockResolvedValue(undefined),
     getSecret: jest.fn(),

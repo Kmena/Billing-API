@@ -42,7 +42,12 @@ function makeService(current = submission) {
   const audit = { record: jest.fn() };
   const storage = { upload: jest.fn().mockResolvedValue('response.xml') };
   return {
-    service: new FiscalSubmissionStateService(prisma as never, audit as never, storage as never),
+    service: new FiscalSubmissionStateService(
+      prisma as never,
+      audit as never,
+      storage as never,
+      { ensureHaciendaResponseArtifact: jest.fn().mockResolvedValue(undefined) } as never,
+    ),
     prisma,
     audit,
     storage,

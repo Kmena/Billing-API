@@ -312,8 +312,9 @@ export class BillingDefaultV1PdfRendererAdapter implements PdfRendererPort {
       }
     }
 
+    const paymentLabel = document.paymentMethod ?? 'N/A';
     doc.text(
-      `Condición venta: ${document.saleCondition}  |  Medio pago: ${document.paymentMethod}  |  Moneda: ${document.currency}`,
+      `Condición venta: ${document.saleCondition}  |  Medio pago: ${paymentLabel}  |  Moneda: ${document.currency}`,
       MARGIN,
       y,
       {

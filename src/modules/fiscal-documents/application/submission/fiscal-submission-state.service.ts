@@ -6,6 +6,7 @@ import { AuditService, EventClass } from '../../../audit/application/audit.servi
 import { HaciendaSubmissionResult } from './ports/hacienda-submission.port';
 import { FiscalSubmissionStateMachine, FiscalSubmissionStatus } from '../../domain/submission';
 import { EnsureHaciendaResponseDeliveryService } from '../delivery/ensure-hacienda-response-delivery.service';
+import { FiscalArtifactIndexService } from '../artifacts/fiscal-artifact-index.service';
 
 @Injectable()
 export class FiscalSubmissionStateService {
@@ -15,6 +16,7 @@ export class FiscalSubmissionStateService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
+    private readonly artifactIndex: FiscalArtifactIndexService,
     @Optional()
     private readonly haciendaResponseDeliveryService?: EnsureHaciendaResponseDeliveryService,
   ) {}
@@ -90,6 +92,14 @@ export class FiscalSubmissionStateService {
         });
       }
     });
+
+    if (artifactMetadata) {
+      await this.artifactIndex.ensureHaciendaResponseArtifact({
+        tenantId: submission.tenantId,
+        companyId: submission.companyId,
+        fiscalDocumentId: submission.fiscalDocumentId,
+      });
+    }
 
     this.auditService.record({
       tenantId: submission.tenantId,

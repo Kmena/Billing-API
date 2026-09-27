@@ -103,6 +103,9 @@ async function seedReadyDocument(prisma: PrismaClient) {
 
 describeIfDatabase('F3 PostgreSQL concurrency', () => {
   let prisma: PrismaClient;
+  // Track tenant IDs created by this suite so teardown is SCOPED — never deletes
+  // data belonging to other tenants/bootstrap state in the shared dev DB.
+  const testTenantIds: string[] = [];
 
   beforeAll(async () => {
     prisma = new PrismaClient();
@@ -110,33 +113,45 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
   });
 
   afterAll(async () => {
-    // Deletion order respects FK constraints.
-    // Children must be deleted before their parents.
-    await prisma.deliveryAttempt.deleteMany(); // FK → documentDelivery
-    await prisma.documentDelivery.deleteMany(); // FK → fiscalDocument
-    await prisma.fiscalArtifact.deleteMany(); // FK → fiscalDocument
-    await prisma.fiscalSubmission.deleteMany(); // FK → fiscalDocument
-    await prisma.fiscalXmlArtifact.deleteMany(); // FK → fiscalDocument, fiscalSigningCertificate
-    await prisma.fiscalSigningCertificate.deleteMany();
-    await prisma.companyFiscalProfile.deleteMany();
-    await prisma.companyPdfSettings.deleteMany(); // FK → company
-    await prisma.fiscalIdempotencyKey.deleteMany();
-    await prisma.fiscalDocument.deleteMany(); // FK → fiscalIssuancePoint
-    await prisma.fiscalIssuancePoint.deleteMany();
-    await prisma.fiscalSequence.deleteMany();
-    await prisma.haciendaConnection.deleteMany();
-    await prisma.apiKeyCompany.deleteMany();
-    await prisma.refreshToken.deleteMany();
-    await prisma.auditLog.deleteMany();
-    await prisma.apiKey.deleteMany();
-    await prisma.user.deleteMany();
-    await prisma.company.deleteMany();
-    await prisma.tenant.deleteMany();
+    if (testTenantIds.length === 0) {
+      await prisma.$disconnect();
+      return;
+    }
+    // SCOPED cleanup — only deletes rows belonging to tenants created by this test.
+    // This prevents wiping bootstrap/shared data from the dev DB.
+    const t = { tenantId: { in: testTenantIds } };
+    // DeliveryAttempt has no tenantId — must be deleted via its documentDelivery FK
+    await prisma.deliveryAttempt.deleteMany({
+      where: { delivery: { tenantId: { in: testTenantIds } } },
+    });
+    await prisma.documentDelivery.deleteMany({ where: t });
+    await prisma.fiscalArtifact.deleteMany({ where: t });
+    await prisma.fiscalSubmission.deleteMany({ where: t });
+    await prisma.fiscalXmlArtifact.deleteMany({ where: t });
+    await prisma.fiscalSigningCertificate.deleteMany({ where: t });
+    await prisma.companyEconomicActivity.deleteMany({ where: t }); // FK → company (P0)
+    await prisma.companyFiscalProfile.deleteMany({ where: t });
+    await prisma.companyPdfSettings.deleteMany({ where: t });
+    await prisma.fiscalIdempotencyKey.deleteMany({ where: t });
+    await prisma.fiscalDocument.deleteMany({ where: t });
+    await prisma.fiscalIssuancePoint.deleteMany({ where: t });
+    await prisma.fiscalSequence.deleteMany({ where: t });
+    await prisma.haciendaConnection.deleteMany({ where: t });
+    await prisma.apiKeyCompany.deleteMany({
+      where: { apiKey: { tenantId: { in: testTenantIds } } },
+    });
+    await prisma.refreshToken.deleteMany({ where: t });
+    await prisma.auditLog.deleteMany({ where: t });
+    await prisma.apiKey.deleteMany({ where: t });
+    await prisma.user.deleteMany({ where: t });
+    await prisma.company.deleteMany({ where: t });
+    await prisma.tenant.deleteMany({ where: { id: { in: testTenantIds } } });
     await prisma.$disconnect();
   });
 
   it('creates exactly one FiscalSubmission for simultaneous submit commands', async () => {
     const fixture = await seedReadyDocument(prisma);
+    testTenantIds.push(fixture.tenantId); // register for scoped teardown
     const queue = { publish: jest.fn().mockResolvedValue(undefined) };
     const service = new SubmitFiscalDocumentService(
       prisma as never,
@@ -176,6 +191,7 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
       prisma as never,
       { record: jest.fn() } as never,
       { upload } as never,
+      { ensureHaciendaResponseArtifact: jest.fn().mockResolvedValue(undefined) } as never,
     );
 
     await Promise.all([

@@ -48,6 +48,11 @@ function makeTx(profile: Record<string, unknown> | null) {
     companyFiscalProfile: {
       findFirst: jest.fn().mockResolvedValue(profile),
     },
+    // P0: companyEconomicActivity is required by updated tx type;
+    // findUnique is only called when profile.defaultEconomicActivityId is truthy.
+    companyEconomicActivity: {
+      findUnique: jest.fn().mockResolvedValue(null),
+    },
   };
 }
 

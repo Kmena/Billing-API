@@ -4,6 +4,9 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  Max,
+  MaxLength,
+  MinLength,
   IsObject,
   IsOptional,
   IsString,
@@ -21,6 +24,19 @@ export class CreateFiscalLineDto {
   @ApiProperty() @Matches(/^\d+(\.\d{1,5})?$/) quantity!: string;
   @ApiProperty() @Matches(/^\d+(\.\d{1,5})?$/) unitPrice!: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) discountAmount?: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) discountCode?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(80)
+  discountNature?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(100)
+  discountOther?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) taxAmount?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) taxCode?: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) taxRateCode?: string;
@@ -32,7 +48,8 @@ export class CreateFiscalDocumentDto {
   @ApiProperty({ enum: ['CRC', 'USD'] }) @IsIn(['CRC', 'USD']) currency!: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) exchangeRate?: string;
   @ApiProperty() @Matches(/^\d{2}$/) saleCondition!: string;
-  @ApiProperty() @Matches(/^\d{2}$/) paymentMethod!: string;
+  @ApiPropertyOptional() @IsOptional() @IsInt() @Min(1) @Max(99999) creditTermDays?: number;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^\d{2}$/) paymentMethod?: string;
   @ApiProperty({ type: [CreateFiscalLineDto] })
   @IsArray()
   @ValidateNested({ each: true })

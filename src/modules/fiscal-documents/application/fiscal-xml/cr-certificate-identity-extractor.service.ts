@@ -13,6 +13,15 @@ import {
  * Normalized data extracted from a Costa Rica Hacienda PKCS#12 certificate.
  * All fields are safe to log and persist — no secret material is included.
  */
+export interface CrCertificateIdentity {
+  /** Raw OID 2.5.4.5 value exactly as represented by the certificate subject. */
+  rawIdentity: string;
+  /** Canonical Billing/Prisma company identification type, when derivable. */
+  identityType: 'FISICA' | 'JURIDICA' | 'DIMEX' | null;
+  /** Canonical Costa Rica fiscal identification used in electronic invoices. */
+  normalizedIdentificationNumber: string;
+}
+
 export interface CrCertificateExtractedData {
   /** SHA-256 fingerprint of the raw PKCS#12 bytes (hex). */
   fingerprintSha256: string;
@@ -25,29 +34,26 @@ export interface CrCertificateExtractedData {
   validFrom: Date;
   validTo: Date;
   /**
-   * Normalized fiscal identification number extracted from OID 2.5.4.5.
-   * Prefixes (CPJ-, CF-, DIMEX-, PE-, PN-) are stripped.
-   * Example: 'CPJ-3102123456' → '3102123456'
+   * Canonical fiscal identification number extracted from OID 2.5.4.5.
+   * This is intentionally NOT the raw OID string. Example:
+   * 'CPF-02-0753-0251' → '207530251'.
    */
   extractedIdentityNumber: string;
   /**
-   * Identification type code derived from OID prefix.
-   * 'CF-'    → '01' (FISICA)
-   * 'CPJ-'   → '02' (JURIDICA)
-   * 'DIMEX-' → '03' (DIMEX)
-   * Others / unknown → null
+   * Existing persisted certificate type code:
+   * '01'=FISICA, '02'=JURIDICA, '03'=DIMEX, null when no explicit type exists.
    */
   extractedIdentityType: string | null;
+  /** Safe audit metadata: raw OID 2.5.4.5 identity representation. */
+  rawIdentity: string;
+  /** Canonical identity representation used by Billing's domain. */
+  canonicalIdentity: CrCertificateIdentity;
 }
 
-/**
- * OID 2.5.4.5 prefix → normalized CR identification type code.
- * Based on Hacienda certificate convention.
- */
-const PREFIX_TO_TYPE: Record<string, string> = {
-  'CPJ-': '02',
-  'CF-': '01',
-  'DIMEX-': '03',
+const PRISMA_TYPE_TO_CODE: Record<Exclude<CrCertificateIdentity['identityType'], null>, string> = {
+  FISICA: '01',
+  JURIDICA: '02',
+  DIMEX: '03',
 };
 
 /**
@@ -86,7 +92,7 @@ export class CrCertificateIdentityExtractorService {
       throw new FiscalCertificateIdentityUnreadableException();
     }
 
-    const { extractedIdentityNumber, extractedIdentityType } = this.normalizeOidValue(rawOidValue);
+    const canonicalIdentity = this.normalizeOidValue(rawOidValue);
 
     return {
       fingerprintSha256: createHash('sha256').update(pkcs12Bytes).digest('hex'),
@@ -95,8 +101,13 @@ export class CrCertificateIdentityExtractorService {
       issuerName: this.formatDn(cert.issuer.attributes),
       validFrom: new Date(cert.validity.notBefore),
       validTo: new Date(cert.validity.notAfter),
-      extractedIdentityNumber,
-      extractedIdentityType,
+      extractedIdentityNumber: canonicalIdentity.normalizedIdentificationNumber,
+      extractedIdentityType:
+        canonicalIdentity.identityType === null
+          ? null
+          : PRISMA_TYPE_TO_CODE[canonicalIdentity.identityType],
+      rawIdentity: canonicalIdentity.rawIdentity,
+      canonicalIdentity,
     };
   }
 
@@ -169,38 +180,55 @@ export class CrCertificateIdentityExtractorService {
   }
 
   /**
-   * Normalize the raw OID 2.5.4.5 value.
-   * - Strip any known prefix (CPJ-, CF-, DIMEX-, PE-, PN-)
-   * - Trim whitespace
-   * - Derive type code from prefix when possible
+   * Normalize the raw OID 2.5.4.5 value into Billing's canonical fiscal identity.
+   *
+   * Important: this is NOT a blind non-digit strip. Certificate formatting is a
+   * transport representation; Company.identificationNumber stores the canonical
+   * CR fiscal identification used in XML payloads.
    */
-  private normalizeOidValue(rawValue: string): {
-    extractedIdentityNumber: string;
-    extractedIdentityType: string | null;
-  } {
-    const trimmed = rawValue.trim();
-    for (const [prefix, typeCode] of Object.entries(PREFIX_TO_TYPE)) {
-      if (trimmed.toUpperCase().startsWith(prefix.toUpperCase())) {
-        return {
-          extractedIdentityNumber: trimmed.substring(prefix.length).trim(),
-          extractedIdentityType: typeCode,
-        };
+  private normalizeOidValue(rawValue: string): CrCertificateIdentity {
+    const rawIdentity = rawValue.trim();
+    const upper = rawIdentity.toUpperCase();
+
+    const cpf = /^CPF-(\d{2})-(\d{4})-(\d{4})$/i.exec(rawIdentity);
+    if (cpf) {
+      const firstComponent = Number(cpf[1]);
+      if (!Number.isInteger(firstComponent) || firstComponent < 1 || firstComponent > 9) {
+        throw new FiscalCertificateIdentityUnreadableException();
       }
+      return {
+        rawIdentity,
+        identityType: 'FISICA',
+        normalizedIdentificationNumber: `${firstComponent}${cpf[2]}${cpf[3]}`,
+      };
     }
-    // No known prefix — strip generic prefixes (PE-, PN-) and return null type
-    for (const genericPrefix of ['PE-', 'PN-']) {
-      if (trimmed.toUpperCase().startsWith(genericPrefix.toUpperCase())) {
-        return {
-          extractedIdentityNumber: trimmed.substring(genericPrefix.length).trim(),
-          extractedIdentityType: null,
-        };
-      }
+
+    const cf = /^CF-(\d{9})$/i.exec(rawIdentity);
+    if (cf) {
+      return { rawIdentity, identityType: 'FISICA', normalizedIdentificationNumber: cf[1] };
     }
-    // No prefix — raw value is already the number
-    return {
-      extractedIdentityNumber: trimmed,
-      extractedIdentityType: null,
-    };
+
+    const cpj = /^CPJ-(\d{10})$/i.exec(rawIdentity);
+    if (cpj) {
+      return { rawIdentity, identityType: 'JURIDICA', normalizedIdentificationNumber: cpj[1] };
+    }
+
+    const dimex = /^DIMEX-(\d{11,12})$/i.exec(rawIdentity);
+    if (dimex) {
+      return { rawIdentity, identityType: 'DIMEX', normalizedIdentificationNumber: dimex[1] };
+    }
+
+    // Existing supported legacy fixture: a bare numeric fiscal id in OID 2.5.4.5.
+    if (/^\d{9,12}$/.test(rawIdentity)) {
+      return { rawIdentity, identityType: null, normalizedIdentificationNumber: rawIdentity };
+    }
+
+    // Explicit fail-closed behavior for unsupported prefixes/structures.
+    if (upper.includes('-') || /^[A-Z]+/.test(upper)) {
+      throw new FiscalCertificateIdentityUnreadableException();
+    }
+
+    throw new FiscalCertificateIdentityUnreadableException();
   }
 
   /** Build a human-readable DN string from forge certificate attributes. */

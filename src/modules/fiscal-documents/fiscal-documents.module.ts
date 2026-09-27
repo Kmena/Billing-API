@@ -42,6 +42,7 @@ import { FiscalSubmissionWorkerService } from './application/submission/workers/
 import { FiscalEvidenceResolverService } from './application/artifacts/fiscal-evidence-resolver.service';
 import { FiscalArtifactService } from './application/artifacts/fiscal-artifact.service';
 import { GenerateFiscalPdfService } from './application/artifacts/generate-fiscal-pdf.service';
+import { FiscalArtifactIndexService } from './application/artifacts/fiscal-artifact-index.service';
 import { CompanyPdfSettingsService } from './application/pdf/company-pdf-settings.service';
 import { EnsureInitialFiscalPackageService } from './application/delivery/ensure-initial-fiscal-package.service';
 import { EnsureHaciendaResponseDeliveryService } from './application/delivery/ensure-hacienda-response-delivery.service';
@@ -172,6 +173,7 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     // F4: Application services
     FiscalEvidenceResolverService,
     FiscalArtifactService,
+    FiscalArtifactIndexService,
     GenerateFiscalPdfService,
     CompanyPdfSettingsService,
     EnsureInitialFiscalPackageService,
@@ -185,6 +187,8 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     EnsureHaciendaResponseDeliveryService,
     DeliveryWorkerService,
     FiscalEvidenceResolverService,
+    FiscalArtifactIndexService,
+    GenerateFiscalPdfService,
   ],
 })
 export class FiscalDocumentsModule {}

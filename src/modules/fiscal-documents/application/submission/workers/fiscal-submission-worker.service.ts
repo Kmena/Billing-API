@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../../../../infrastructure/database/prisma.service';
 import { JOB_QUEUE, JobQueuePort } from '../../../../../infrastructure/queue/ports/job-queue.port';
@@ -32,8 +32,10 @@ import {
 } from './fiscal-submission-job.constants';
 
 @Injectable()
-export class FiscalSubmissionWorkerService implements OnModuleInit {
+export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDestroy {
+  private static readonly RECOVERY_INTERVAL_MS = 60_000;
   private readonly logger = new Logger(FiscalSubmissionWorkerService.name);
+  private recoveryTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -47,6 +49,12 @@ export class FiscalSubmissionWorkerService implements OnModuleInit {
   ) {}
 
   async onModuleInit(): Promise<void> {
+    if (this.shouldDisableAutoStartInTests()) {
+      this.logger.warn(
+        'Fiscal submission worker auto-start disabled under test runtime; set FISCAL_WORKER_ENABLE_IN_TESTS=true to opt in.',
+      );
+      return;
+    }
     if (!this.jobQueue.registerHandler) return;
     await this.jobQueue.registerHandler<FiscalSubmissionJobPayload>(
       SUBMIT_FISCAL_DOCUMENT_JOB,
@@ -57,6 +65,19 @@ export class FiscalSubmissionWorkerService implements OnModuleInit {
       (job) => this.handleReconcileJob(job.data),
     );
     await this.enqueueDueWork();
+    this.startRecoveryTimer();
+  }
+
+  onModuleDestroy(): void {
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
+  private shouldDisableAutoStartInTests(): boolean {
+    const isTestRuntime = process.env.NODE_ENV === 'test' || Boolean(process.env.JEST_WORKER_ID);
+    return isTestRuntime && process.env.FISCAL_WORKER_ENABLE_IN_TESTS !== 'true';
   }
 
   async handleSubmitJob(payload: FiscalSubmissionJobPayload): Promise<void> {
@@ -206,11 +227,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit {
       )
         ? RECONCILE_FISCAL_SUBMISSION_JOB
         : SUBMIT_FISCAL_DOCUMENT_JOB;
-      await this.jobQueue.publish(
-        jobName,
-        { submissionId: submission.id },
-        { retryLimit: 3, retryDelay: 60 },
-      );
+      await this.publishSubmissionJob(jobName, submission.id, { retryLimit: 3, retryDelay: 60 });
     }
   }
 
@@ -303,6 +320,39 @@ export class FiscalSubmissionWorkerService implements OnModuleInit {
     return this.partyFromSnapshot(snapshot);
   }
 
+  private startRecoveryTimer(): void {
+    if (this.recoveryTimer) return;
+    this.recoveryTimer = setInterval(() => {
+      this.enqueueDueWork().catch((error: unknown) => {
+        this.logger.warn(
+          { error: error instanceof Error ? error.message : 'Unknown recovery failure' },
+          'Fiscal submission periodic recovery failed',
+        );
+      });
+    }, FiscalSubmissionWorkerService.RECOVERY_INTERVAL_MS);
+    this.recoveryTimer.unref?.();
+  }
+
+  private async publishSubmissionJob(
+    jobName: string,
+    submissionId: string,
+    options: { retryLimit: number; retryDelay: number; startAfterSeconds?: number },
+  ): Promise<void> {
+    await this.jobQueue.publish(
+      jobName,
+      { submissionId },
+      {
+        ...options,
+        singletonKey: this.singletonKey(jobName, submissionId),
+        singletonSeconds: 12 * 60 * 60,
+      },
+    );
+  }
+
+  private singletonKey(jobName: string, submissionId: string): string {
+    return `fiscal-submission:${jobName}:${submissionId}`;
+  }
+
   private async scheduleNext(
     submissionId: string,
     result: HaciendaSubmissionResult,
@@ -312,24 +362,20 @@ export class FiscalSubmissionWorkerService implements OnModuleInit {
       result.nextStatus === 'PROCESSING' ||
       result.nextStatus === 'POST_OUTCOME_UNKNOWN'
     ) {
-      await this.jobQueue.publish(
-        RECONCILE_FISCAL_SUBMISSION_JOB,
-        { submissionId },
-        { retryLimit: 3, retryDelay: 60, startAfterSeconds: 60 },
-      );
+      await this.publishSubmissionJob(RECONCILE_FISCAL_SUBMISSION_JOB, submissionId, {
+        retryLimit: 3,
+        retryDelay: 60,
+        startAfterSeconds: 60,
+      });
       return;
     }
 
     if (result.nextStatus === 'TECHNICAL_RETRY_PENDING') {
-      await this.jobQueue.publish(
-        SUBMIT_FISCAL_DOCUMENT_JOB,
-        { submissionId },
-        {
-          retryLimit: 3,
-          retryDelay: 60,
-          startAfterSeconds: result.rateLimit?.retryAfterSeconds ?? 60,
-        },
-      );
+      await this.publishSubmissionJob(SUBMIT_FISCAL_DOCUMENT_JOB, submissionId, {
+        retryLimit: 3,
+        retryDelay: 60,
+        startAfterSeconds: result.rateLimit?.retryAfterSeconds ?? 60,
+      });
     }
   }
 }

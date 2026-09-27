@@ -138,6 +138,7 @@ function createService(
       validatingXsd as never,
       verifyingSigner as never,
       storage as never,
+      { ensureSignedXmlArtifact: jest.fn().mockResolvedValue(undefined) } as never,
     ),
     prisma,
     storage,

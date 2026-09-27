@@ -147,7 +147,10 @@ describe('TASK-009: FiscalSubmissionWorkerService Restart Recovery', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       RECONCILE_FISCAL_SUBMISSION_JOB,
       { submissionId: 'recovery-submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey:
+          'fiscal-submission:fiscal-documents.reconcile-hacienda-status:recovery-submission-id',
+      }),
     );
     expect(queue.publish).not.toHaveBeenCalledWith(
       SUBMIT_FISCAL_DOCUMENT_JOB,
@@ -218,7 +221,10 @@ describe('TASK-009: FiscalSubmissionWorkerService Restart Recovery', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       SUBMIT_FISCAL_DOCUMENT_JOB,
       { submissionId: 'recovery-submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey:
+          'fiscal-submission:fiscal-documents.submit-to-hacienda:recovery-submission-id',
+      }),
     );
     expect(queue.publish).not.toHaveBeenCalledWith(
       RECONCILE_FISCAL_SUBMISSION_JOB,
@@ -248,40 +254,123 @@ describe('TASK-009: FiscalSubmissionWorkerService Restart Recovery', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       RECONCILE_FISCAL_SUBMISSION_JOB,
       { submissionId: 'sub-1' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.reconcile-hacienda-status:sub-1',
+      }),
     );
     expect(queue.publish).toHaveBeenCalledWith(
       RECONCILE_FISCAL_SUBMISSION_JOB,
       { submissionId: 'sub-2' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.reconcile-hacienda-status:sub-2',
+      }),
     );
     // Verify SUBMIT for QUEUED
     expect(queue.publish).toHaveBeenCalledWith(
       SUBMIT_FISCAL_DOCUMENT_JOB,
       { submissionId: 'sub-3' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:sub-3',
+      }),
+    );
+  });
+
+  it.each(['ACCEPTED', 'REJECTED'])(
+    'R8: enqueueDueWork does not republish terminal %s submissions',
+    async (status) => {
+      const { worker, prisma, queue } = makeWorker();
+
+      prisma.fiscalSubmission.findMany.mockImplementation(({ where }: { where: unknown }) => {
+        expect(JSON.stringify(where)).not.toContain(status);
+        return Promise.resolve([]);
+      });
+
+      await worker.enqueueDueWork();
+
+      expect(queue.publish).not.toHaveBeenCalled();
+    },
+  );
+
+  it('R9: repeated orphan recovery publishes the same singleton key for the same submission', async () => {
+    const { worker, prisma, queue } = makeWorker();
+
+    prisma.fiscalSubmission.findMany
+      .mockResolvedValueOnce([{ ...baseSubmission, status: 'QUEUED' }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...baseSubmission, status: 'QUEUED' }])
+      .mockResolvedValueOnce([]);
+
+    await Promise.all([worker.enqueueDueWork(), worker.enqueueDueWork()]);
+
+    expect(queue.publish).toHaveBeenCalledTimes(2);
+    expect(queue.publish).toHaveBeenNthCalledWith(
+      1,
+      SUBMIT_FISCAL_DOCUMENT_JOB,
+      { submissionId: 'recovery-submission-id' },
+      expect.objectContaining({
+        singletonKey:
+          'fiscal-submission:fiscal-documents.submit-to-hacienda:recovery-submission-id',
+      }),
+    );
+    expect(queue.publish).toHaveBeenNthCalledWith(
+      2,
+      SUBMIT_FISCAL_DOCUMENT_JOB,
+      { submissionId: 'recovery-submission-id' },
+      expect.objectContaining({
+        singletonKey:
+          'fiscal-submission:fiscal-documents.submit-to-hacienda:recovery-submission-id',
+      }),
     );
   });
 
   // ── Scenario: onModuleInit calls enqueueDueWork ───────────────────────────────
 
-  it('R8: onModuleInit simulates restart — registers handlers and calls enqueueDueWork', async () => {
-    const { worker, prisma, queue } = makeWorker();
+  it('R10: onModuleInit does not auto-start worker/recovery under Jest without explicit opt-in', async () => {
+    const previousOptIn = process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+    delete process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+    try {
+      const { worker, prisma, queue } = makeWorker();
 
-    prisma.fiscalSubmission.findMany
-      .mockResolvedValueOnce([{ ...baseSubmission, status: 'POST_OUTCOME_UNKNOWN' }])
-      .mockResolvedValueOnce([]);
+      await worker.onModuleInit();
+      worker.onModuleDestroy();
 
-    await worker.onModuleInit();
+      expect(queue.registerHandler).not.toHaveBeenCalled();
+      expect(queue.publish).not.toHaveBeenCalled();
+      expect(prisma.fiscalSubmission.findMany).not.toHaveBeenCalled();
+    } finally {
+      if (previousOptIn === undefined) delete process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+      else process.env.FISCAL_WORKER_ENABLE_IN_TESTS = previousOptIn;
+    }
+  });
 
-    // Handlers registered
-    expect(queue.registerHandler).toHaveBeenCalledTimes(2);
+  it('R11: onModuleInit simulates restart with explicit test opt-in — registers handlers and calls enqueueDueWork', async () => {
+    const previousOptIn = process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+    process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'true';
+    try {
+      const { worker, prisma, queue } = makeWorker();
 
-    // Reconcile scheduled for POST_OUTCOME_UNKNOWN — proves recovery on restart
-    expect(queue.publish).toHaveBeenCalledWith(
-      RECONCILE_FISCAL_SUBMISSION_JOB,
-      { submissionId: 'recovery-submission-id' },
-      expect.any(Object),
-    );
+      prisma.fiscalSubmission.findMany
+        .mockResolvedValueOnce([{ ...baseSubmission, status: 'POST_OUTCOME_UNKNOWN' }])
+        .mockResolvedValueOnce([]);
+
+      await worker.onModuleInit();
+      worker.onModuleDestroy();
+
+      // Handlers registered
+      expect(queue.registerHandler).toHaveBeenCalledTimes(2);
+
+      // Reconcile scheduled for POST_OUTCOME_UNKNOWN — proves recovery on restart
+      expect(queue.publish).toHaveBeenCalledWith(
+        RECONCILE_FISCAL_SUBMISSION_JOB,
+        { submissionId: 'recovery-submission-id' },
+        expect.objectContaining({
+          singletonKey:
+            'fiscal-submission:fiscal-documents.reconcile-hacienda-status:recovery-submission-id',
+        }),
+      );
+    } finally {
+      if (previousOptIn === undefined) delete process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+      else process.env.FISCAL_WORKER_ENABLE_IN_TESTS = previousOptIn;
+    }
   });
 });

@@ -28,7 +28,8 @@ export interface ImmutableFiscalDocumentView {
   readonly currency: string;
   readonly exchangeRate?: number;
   readonly saleCondition: string;
-  readonly paymentMethod: string;
+  readonly creditTermDays?: number | null;
+  readonly paymentMethod?: string | null;
 }
 
 export interface CompanyBrandingView {

@@ -15,7 +15,8 @@ export interface FiscalXmlDocumentSnapshot {
   readonly currency: string;
   readonly exchangeRate?: { toString(): string } | string | null;
   readonly saleCondition: string;
-  readonly paymentMethod: string;
+  readonly creditTermDays?: number | null;
+  readonly paymentMethod?: string | null;
   readonly lines: unknown;
   readonly totals: unknown;
 }

@@ -61,6 +61,7 @@ export class FiscalPublicDocumentsController {
       currency: body.currency,
       exchangeRate: body.exchangeRate,
       saleCondition: body.saleCondition,
+      creditTermDays: body.creditTermDays,
       paymentMethod: body.paymentMethod,
       lines: body.lines,
       idempotencyKey,

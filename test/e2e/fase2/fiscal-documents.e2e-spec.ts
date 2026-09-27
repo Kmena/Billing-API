@@ -263,13 +263,13 @@ describe('Fiscal Documents (E2E)', () => {
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
-      .set('Idempotency-Key', 'unsupported-discount-metadata')
+      .set('Idempotency-Key', 'missing-discount-metadata')
       .send(discountPayload)
       .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_DISCOUNT_METADATA'));
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_DISCOUNT_METADATA_REQUIRED'));
 
     const unsupportedUnitPayload = fiscalInvoicePayload(fixture.companyId);
-    unsupportedUnitPayload.lines[0].unitMeasure = 'Kg';
+    unsupportedUnitPayload.lines[0].unitMeasure = 'box';
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
@@ -283,10 +283,10 @@ describe('Fiscal Documents (E2E)', () => {
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
-      .set('Idempotency-Key', 'unsupported-sale-condition')
+      .set('Idempotency-Key', 'missing-credit-term')
       .send(unsupportedSaleConditionPayload)
       .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_SALE_CONDITION'));
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_CREDIT_TERM_REQUIRED'));
 
     await expectDocumentAndSequenceCounts(fixture.tenantId, fixture.companyId, 'INVOICE', 0, '1');
   });

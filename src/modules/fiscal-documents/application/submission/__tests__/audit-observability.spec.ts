@@ -151,6 +151,7 @@ describe('F3 audit and observability', () => {
         prisma as never,
         audit as never,
         storage as never,
+        { ensureHaciendaResponseArtifact: jest.fn().mockResolvedValue(undefined) } as never,
       );
 
       await service.applyProviderResult('submission-id', {

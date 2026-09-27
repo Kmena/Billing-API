@@ -36,7 +36,7 @@ function createCertificate(overrides: Record<string, unknown> = {}) {
 function createService(
   certificate: Record<string, unknown> | null,
   certificateSecret?: string,
-  company?: { identificationNumber: string } | null,
+  company?: { identificationNumber: string; identificationType?: string } | null,
 ) {
   const prisma = {
     fiscalSigningCertificate: {
@@ -46,11 +46,14 @@ function createService(
       findFirst: jest
         .fn()
         .mockResolvedValue(
-          company !== undefined ? company : { identificationNumber: '3102123456' },
+          company !== undefined
+            ? company
+            : { identificationNumber: '3102123456', identificationType: 'JURIDICA' },
         ),
     },
   };
   const secrets = {
+    isDurable: true,
     getSecret: jest
       .fn()
       .mockResolvedValueOnce(
@@ -224,7 +227,30 @@ describe('FiscalSigningCertificateService', () => {
 
   it('TASK-004: passes when extractedIdentityNumber matches company identificationNumber', async () => {
     const cert = createCertificate({ extractedIdentityNumber: '3102123456' });
-    const { service } = createService(cert, undefined, { identificationNumber: '3102123456' });
+    const { service } = createService(cert, undefined, {
+      identificationNumber: '3102123456',
+      identificationType: 'JURIDICA',
+    });
+
+    const result = await service.getActiveCertificate({
+      tenantId: '22222222-2222-4222-8222-222222222222',
+      companyId: '33333333-3333-4333-8333-333333333333',
+      environment: 'SANDBOX',
+    });
+
+    expect(result.id).toBe('11111111-1111-4111-8111-111111111111');
+  });
+
+  it('TASK-004: passes for normalized CPF/FISICA certificate identity', async () => {
+    const cert = createCertificate({
+      extractedIdentityNumber: '207530251',
+      extractedIdentityType: '01',
+      subjectName: 'SERIALNUMBER=CPF-02-0753-0251, CN=Sandbox',
+    });
+    const { service } = createService(cert, undefined, {
+      identificationNumber: '207530251',
+      identificationType: 'FISICA',
+    });
 
     const result = await service.getActiveCertificate({
       tenantId: '22222222-2222-4222-8222-222222222222',
@@ -239,6 +265,7 @@ describe('FiscalSigningCertificateService', () => {
     const cert = createCertificate({ extractedIdentityNumber: '9999999999' });
     const { service, secrets } = createService(cert, undefined, {
       identificationNumber: '3102123456',
+      identificationType: 'JURIDICA',
     });
 
     await expectFailureCode(
@@ -254,9 +281,34 @@ describe('FiscalSigningCertificateService', () => {
     expect(secrets.getSecret).not.toHaveBeenCalled();
   });
 
+  it('TASK-004: fails before loading secrets when extractedIdentityType mismatches company', async () => {
+    const cert = createCertificate({
+      extractedIdentityNumber: '207530251',
+      extractedIdentityType: '01',
+    });
+    const { service, secrets } = createService(cert, undefined, {
+      identificationNumber: '207530251',
+      identificationType: 'JURIDICA',
+    });
+
+    await expectFailureCode(
+      service.getActiveCertificate({
+        tenantId: '22222222-2222-4222-8222-222222222222',
+        companyId: '33333333-3333-4333-8333-333333333333',
+        environment: 'SANDBOX',
+      }),
+      FISCAL_XML_ERROR.certificateEmitterMismatch,
+    );
+
+    expect(secrets.getSecret).not.toHaveBeenCalled();
+  });
+
   it('TASK-004: identity check is case and whitespace insensitive', async () => {
     const cert = createCertificate({ extractedIdentityNumber: '  3102123456  ' });
-    const { service } = createService(cert, undefined, { identificationNumber: '3102123456' });
+    const { service } = createService(cert, undefined, {
+      identificationNumber: '3102123456',
+      identificationType: 'JURIDICA',
+    });
 
     // Should not throw
     const result = await service.getActiveCertificate({

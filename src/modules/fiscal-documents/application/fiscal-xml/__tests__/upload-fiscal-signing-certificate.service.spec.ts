@@ -25,6 +25,7 @@ const SENTINEL_CERT_B64 = Buffer.from('SENTINEL_PKCS12_BYTES_SPEC_C3D4').toStrin
 const VALID_COMPANY_ID = '33333333-3333-4333-8333-333333333333';
 const VALID_TENANT_ID = '22222222-2222-4222-8222-222222222222';
 const VALID_IDENTITY_NUMBER = '3102123456';
+const VALID_IDENTITY_TYPE = 'JURIDICA';
 const now = new Date('2026-09-13T12:00:00.000Z');
 
 function makeExtractedData(
@@ -39,6 +40,12 @@ function makeExtractedData(
     validTo: new Date('2027-01-01T00:00:00.000Z'),
     extractedIdentityNumber: VALID_IDENTITY_NUMBER,
     extractedIdentityType: '02',
+    rawIdentity: 'CPJ-3102123456',
+    canonicalIdentity: {
+      rawIdentity: 'CPJ-3102123456',
+      identityType: 'JURIDICA',
+      normalizedIdentificationNumber: VALID_IDENTITY_NUMBER,
+    },
     ...overrides,
   };
 }
@@ -87,6 +94,7 @@ function createService(opts: {
               id: VALID_COMPANY_ID,
               tenantId: VALID_TENANT_ID,
               identificationNumber: VALID_IDENTITY_NUMBER,
+              identificationType: VALID_IDENTITY_TYPE,
             },
       ),
     },
@@ -117,6 +125,7 @@ function createService(opts: {
   };
 
   const secrets = {
+    isDurable: true,
     storeSecret: jest
       .fn()
       .mockImplementationOnce(() => {
@@ -218,6 +227,31 @@ describe('UploadFiscalSigningCertificateService', () => {
 
     await expect(service.execute(makeCommand())).rejects.toBeInstanceOf(NotFoundException);
     expect(extractor.extractAndValidate).not.toHaveBeenCalled();
+  });
+
+  it('accepts CPF certificate identity when canonical identity matches FISICA company', async () => {
+    const { service } = createService({
+      company: {
+        id: VALID_COMPANY_ID,
+        tenantId: VALID_TENANT_ID,
+        identificationNumber: '207530251',
+        identificationType: 'FISICA',
+      },
+      extractorResult: makeExtractedData({
+        extractedIdentityNumber: '207530251',
+        extractedIdentityType: '01',
+        rawIdentity: 'CPF-02-0753-0251',
+        canonicalIdentity: {
+          rawIdentity: 'CPF-02-0753-0251',
+          identityType: 'FISICA',
+          normalizedIdentificationNumber: '207530251',
+        },
+      }),
+    });
+
+    const result = await service.execute(makeCommand());
+
+    expect(result.status).toBe('ACTIVE');
   });
 
   it('rejects with FISCAL_CERTIFICATE_EMITTER_MISMATCH when identity does not match company', async () => {

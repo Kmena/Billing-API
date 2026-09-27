@@ -25,6 +25,7 @@ import {
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
 import { FiscalXmlProcessingResult } from '../../domain/fiscal-xml/fiscal-xml.types';
 import { EnsureInitialFiscalPackageService } from '../delivery/ensure-initial-fiscal-package.service';
+import { FiscalArtifactIndexService } from '../artifacts/fiscal-artifact-index.service';
 
 @Injectable()
 export class PrepareFiscalXmlService {
@@ -36,6 +37,7 @@ export class PrepareFiscalXmlService {
     @Inject(XSD_VALIDATOR) private readonly xsdValidator: XsdValidatorPort,
     @Inject(XML_SIGNER) private readonly signer: XmlSignerPort,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
+    private readonly artifactIndex: FiscalArtifactIndexService,
     @Optional() private readonly ensureInitialDelivery?: EnsureInitialFiscalPackageService,
   ) {}
 
@@ -181,6 +183,11 @@ export class PrepareFiscalXmlService {
           data: { status: 'READY_TO_SUBMIT' },
         });
         return updatedArtifact;
+      });
+      await this.artifactIndex.ensureSignedXmlArtifact({
+        tenantId: document.tenantId,
+        companyId: document.companyId,
+        fiscalDocumentId: document.id,
       });
       this.recordAudit(input, document, 'fiscal-xml.validated', {
         artifactHash: signedXmlSha256,

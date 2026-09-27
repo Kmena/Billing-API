@@ -128,6 +128,7 @@ export class GenerateFiscalPdfService {
       currency: doc.currency,
       exchangeRate: doc.exchangeRate ? Number(doc.exchangeRate) : undefined,
       saleCondition: doc.saleCondition,
+      creditTermDays: doc.creditTermDays,
       paymentMethod: doc.paymentMethod,
     };
 

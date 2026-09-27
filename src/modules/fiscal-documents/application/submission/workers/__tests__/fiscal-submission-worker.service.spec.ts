@@ -75,10 +75,19 @@ function makeWorker(
 
 describe('FiscalSubmissionWorkerService', () => {
   it('submits exact persisted signed XML and schedules reconciliation after HTTP 201 acknowledgement', async () => {
-    const { worker, hacienda, state, queue } = makeWorker();
+    const { worker, prisma, hacienda, state, queue } = makeWorker();
 
     await worker.handleSubmitJob({ submissionId: 'submission-id' });
 
+    expect(prisma.fiscalSubmission.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'submission-id', status: { in: ['QUEUED', 'TECHNICAL_RETRY_PENDING'] } },
+        data: expect.objectContaining({
+          status: 'SUBMITTING',
+          attemptCount: { increment: 1 },
+        }),
+      }),
+    );
     expect(hacienda.submitSignedDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         accessToken: 'token',
@@ -93,7 +102,10 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.reconcile-hacienda-status',
       { submissionId: 'submission-id' },
-      expect.objectContaining({ startAfterSeconds: 60 }),
+      expect.objectContaining({
+        startAfterSeconds: 60,
+        singletonKey: 'fiscal-submission:fiscal-documents.reconcile-hacienda-status:submission-id',
+      }),
     );
   });
 
@@ -133,7 +145,10 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.submit-to-hacienda',
       { submissionId: 'submission-id' },
-      expect.objectContaining({ startAfterSeconds: 60 }),
+      expect.objectContaining({
+        startAfterSeconds: 60,
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
     );
   });
 
@@ -155,8 +170,25 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.submit-to-hacienda',
       { submissionId: 'submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
     );
+  });
+
+  it('uses the submission claim as concurrency protection so duplicate jobs do not duplicate provider POSTs', async () => {
+    const { worker, prisma, hacienda } = makeWorker();
+    prisma.fiscalSubmission.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await Promise.all([
+      worker.handleSubmitJob({ submissionId: 'submission-id' }),
+      worker.handleSubmitJob({ submissionId: 'submission-id' }),
+    ]);
+
+    expect(prisma.fiscalSubmission.updateMany).toHaveBeenCalledTimes(2);
+    expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(1);
   });
 
   it('reconciles ambiguous POST outcome by GET status query instead of resubmitting', async () => {
