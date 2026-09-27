@@ -138,9 +138,9 @@ Module wiring uses factory providers (useFactory) for conditional adapter select
 | `AppModule` | Registers infrastructure and business modules, including fiscal documents, Hacienda connection and signing/submission/delivery/PDF infrastructure. |
 | `FiscalDocumentService` | Fiscal FE/TE creation/read/configuration orchestration and immutable snapshot persistence. |
 | `PrepareFiscalXmlService` | Generates, signs, verifies, XSD-validates and stores FE/TE XML; transitions to `READY_TO_SUBMIT`; triggers F4 initial delivery hook via `@Optional()` + `setImmediate`. |
-| `SubmitFiscalDocumentService` | Validates preconditions, creates/reuses `FiscalSubmission`, enqueues submit/reconcile work and returns sanitized state. |
+| `SubmitFiscalDocumentService` | Validates preconditions, creates/reuses one durable `FiscalSubmission`, marks it `QUEUED`/due and publishes submit/reconcile work with a stable queue singleton key. If enqueue fails after persistence, bounded worker recovery rediscovers the due row. |
 | `FiscalSubmissionStateService` | Applies provider results to `FiscalSubmission`, guards terminal regression, persists response artifacts and triggers F4 Hacienda response delivery hook via `@Optional()` + `setImmediate`. |
-| `FiscalSubmissionWorkerService` | Registers submit/reconcile handlers and performs provider calls, token reuse, result classification, state persistence and response artifact storage. |
+| `FiscalSubmissionWorkerService` | Registers submit/reconcile handlers, performs provider calls, token reuse, result classification, state persistence and response artifact storage. On startup and periodically it scans bounded due non-terminal submissions and republishes idempotent pg-boss work; terminal states are never republished. |
 | `FiscalSubmissionStateMachine` | Enforces allowed submission state transitions and terminal non-regression. |
 | `RetryClassifier` | Maps submission provider/technical outcomes into retry, reconcile, terminal or manual-review decisions. |
 | `FiscalEvidenceResolverService` (F4) | Resolves immutable signed XML and Hacienda response bytes from storage; SHA-256 verifies before returning. |
