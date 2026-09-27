@@ -5,8 +5,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "start:api": "node dist/bootstrap/api.main.js",
-    "start:worker": "node dist/bootstrap/worker.main.js",
+    "start:api": "node dist/src/bootstrap/api.main.js",
+    "start:worker": "node dist/src/bootstrap/worker.main.js",
     "start:dev": "nest start --watch --entryFile bootstrap/api.main",
     "start:dev:worker": "nest start --watch --entryFile bootstrap/worker.main",
     "build": "nest build",

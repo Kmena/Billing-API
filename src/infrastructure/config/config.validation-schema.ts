@@ -53,8 +53,11 @@ export const validationSchema = Joi.object({
   AWS_REGION: Joi.string().default('us-east-1'),
 
   // Secrets
-  SECRET_PROVIDER: Joi.string().valid('env', 'ssm').default('env'),
+  // Default to durable SSM. For local dev, point AWS_SSM_ENDPOINT at LocalStack.
+  // EnvSecretProvider remains for tests/bootstrap only and is not durable.
+  SECRET_PROVIDER: Joi.string().valid('env', 'ssm').default('ssm'),
   SSM_PARAMETER_PREFIX: Joi.string().default('/billing'),
+  AWS_SSM_ENDPOINT: Joi.string().uri().optional(),
 
   // CORS
   CORS_ALLOWED_ORIGINS: Joi.when('NODE_ENV', {

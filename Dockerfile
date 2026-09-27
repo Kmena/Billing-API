@@ -14,7 +14,7 @@ RUN npm ci --ignore-scripts
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-RUN apk add --no-cache python3 py3-pip
+RUN apk add --no-cache python3 py3-pip openssl
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -40,7 +40,7 @@ ENV PORT=3000
 ENV PYTHONPATH=/app/python-packages
 
 # Create non-root user — NFR security
-RUN apk add --no-cache python3 && \
+RUN apk add --no-cache python3 openssl && \
     addgroup --system --gid 1001 billing && \
     adduser --system --uid 1001 --ingroup billing billing
 
@@ -60,4 +60,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
-CMD ["node", "dist/bootstrap/api.main.js"]
+CMD ["node", "dist/src/bootstrap/api.main.js"]

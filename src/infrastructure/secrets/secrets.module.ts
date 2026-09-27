@@ -10,7 +10,7 @@ import { AwsParameterStoreSecretProvider } from './adapters/aws-parameter-store.
     {
       provide: SECRET_PROVIDER,
       useFactory: (configService: ConfigService) => {
-        const provider = configService.get<string>('secrets.provider') ?? 'env';
+        const provider = configService.get<string>('secrets.provider') ?? 'ssm';
         if (provider === 'ssm') {
           return new AwsParameterStoreSecretProvider(configService);
         }

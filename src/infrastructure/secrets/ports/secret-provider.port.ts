@@ -1,5 +1,11 @@
 export interface SecretProvider {
   /**
+   * True when secrets stored by this provider survive process restart.
+   * Upload flows that create durable DB references must require this.
+   */
+  readonly isDurable: boolean;
+
+  /**
    * Retrieves a secret by key.
    * @throws Error if the secret does not exist or cannot be retrieved.
    * The secret value is NEVER logged, even in debug mode.

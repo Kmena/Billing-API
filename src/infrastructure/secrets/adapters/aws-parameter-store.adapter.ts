@@ -10,14 +10,21 @@ import { SecretProvider } from '../ports/secret-provider.port';
 
 @Injectable()
 export class AwsParameterStoreSecretProvider implements SecretProvider {
+  readonly isDurable = true;
+
   private readonly client: SSMClient;
   private readonly parameterPrefix: string;
 
   constructor(private readonly configService: ConfigService) {
     const region = this.configService.get<string>('secrets.awsRegion') ?? 'us-east-1';
+    const endpoint = this.configService.get<string>('secrets.ssmEndpoint');
     this.parameterPrefix =
       this.configService.get<string>('secrets.ssmParameterPrefix') ?? '/billing';
-    this.client = new SSMClient({ region });
+    this.client = new SSMClient({
+      region,
+      ...(endpoint ? { endpoint } : {}),
+      ...(endpoint ? { credentials: { accessKeyId: 'test', secretAccessKey: 'test' } } : {}),
+    });
   }
 
   /**

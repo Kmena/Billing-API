@@ -24,13 +24,13 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── LocalStack (S3 mock for dev) ──────────────────────────────────────────────
+  # ── LocalStack (S3 + SSM mocks for dev) ───────────────────────────────────────
   localstack:
     image: localstack/localstack:3
     container_name: billing-localstack
     restart: unless-stopped
     environment:
-      SERVICES: s3
+      SERVICES: s3,ssm
       DEFAULT_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
     ports:
@@ -54,6 +54,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      localstack:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -69,13 +71,16 @@ services:
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: env
+      SECRET_PROVIDER: ssm
+      SSM_PARAMETER_PREFIX: /billing/dev
+      AWS_SSM_ENDPOINT: http://localstack:4566
       LOG_LEVEL: info
       # Hacienda resilience — defaults are production-safe
       HACIENDA_CB_FAILURE_THRESHOLD: ${HACIENDA_CB_FAILURE_THRESHOLD:-5}
       HACIENDA_CB_RESET_TIMEOUT_MS: ${HACIENDA_CB_RESET_TIMEOUT_MS:-30000}
       HACIENDA_CB_OUTBOUND_RATE_PER_SECOND: ${HACIENDA_CB_OUTBOUND_RATE_PER_SECOND:-8}
       USE_REAL_HACIENDA: ${USE_REAL_HACIENDA:-false}
+      HACIENDA_QR_URL_BASE: ${HACIENDA_QR_URL_BASE:-https://mock.hacienda.test/qr}
       HACIENDA_IDP_PRODUCTION_URL: ${HACIENDA_IDP_PRODUCTION_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token}
       HACIENDA_IDP_SANDBOX_URL: ${HACIENDA_IDP_SANDBOX_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token}
       HACIENDA_IDP_CLIENT_ID_PRODUCTION: ${HACIENDA_IDP_CLIENT_ID_PRODUCTION:-api-prod}
@@ -101,9 +106,11 @@ services:
       target: runner
     container_name: billing-worker
     restart: unless-stopped
-    command: ['node', 'dist/bootstrap/worker.main.js']
+    command: ['node', 'dist/src/bootstrap/worker.main.js']
     depends_on:
       postgres:
+        condition: service_healthy
+      localstack:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -115,7 +122,9 @@ services:
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: env
+      SECRET_PROVIDER: ssm
+      SSM_PARAMETER_PREFIX: /billing/dev
+      AWS_SSM_ENDPOINT: http://localstack:4566
       LOG_LEVEL: info
       HACIENDA_IDP_PRODUCTION_URL: ${HACIENDA_IDP_PRODUCTION_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token}
       HACIENDA_IDP_SANDBOX_URL: ${HACIENDA_IDP_SANDBOX_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token}
