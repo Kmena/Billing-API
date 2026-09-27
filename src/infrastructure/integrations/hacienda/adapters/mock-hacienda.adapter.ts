@@ -25,6 +25,8 @@ export class MockHaciendaAdapter implements HaciendaPort {
       identificationType: '02',
       taxRegime: 'Régimen general',
       taxSituation: 'Inscrito',
+      moroso: false,
+      omiso: false,
       economicActivities: [
         {
           code: '6110.0',
@@ -41,6 +43,8 @@ export class MockHaciendaAdapter implements HaciendaPort {
       identificationType: '01',
       taxRegime: 'Régimen simplificado',
       taxSituation: 'Inscrito',
+      moroso: false,
+      omiso: false,
       economicActivities: [
         {
           code: '9609.0',
@@ -57,6 +61,8 @@ export class MockHaciendaAdapter implements HaciendaPort {
       identificationType: '02',
       taxRegime: 'Régimen general',
       taxSituation: 'Inscrito',
+      moroso: true,
+      omiso: false,
       economicActivities: [
         {
           code: '6110.0',
@@ -71,6 +77,56 @@ export class MockHaciendaAdapter implements HaciendaPort {
           type: 'S',
         },
       ],
+    },
+    // P0 test fixture: company with two activities for multi-activity selection test
+    '207530251': {
+      identification: '207530251',
+      name: 'PERSONA FISICA SANDBOX',
+      found: true,
+      identificationType: '01',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Inscrito',
+      moroso: false,
+      omiso: false,
+      economicActivities: [
+        {
+          code: '9609.0',
+          description: 'Otras actividades de servicios personales n.c.p.',
+          status: 'A',
+          type: 'P',
+        },
+      ],
+    },
+    // P0 test fixture: moroso taxpayer
+    '999999999': {
+      identification: '999999999',
+      name: 'CONTRIBUYENTE MOROSO DEMO',
+      found: true,
+      identificationType: '01',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Inscrito',
+      moroso: true,
+      omiso: false,
+      economicActivities: [
+        {
+          code: '9609.0',
+          description: 'Otras actividades de servicios personales n.c.p.',
+          status: 'A',
+          type: 'P',
+        },
+      ],
+    },
+    // P0 test fixture: desinscrito (inactive) taxpayer
+    '888888888': {
+      identification: '888888888',
+      name: 'CONTRIBUYENTE DESINSCRITO DEMO',
+      found: true,
+      identificationType: '01',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Desinscrito',
+      moroso: false,
+      omiso: false,
+      economicActivities: [],
     },
   };
 

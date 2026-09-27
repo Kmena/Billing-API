@@ -1,6 +1,6 @@
 // ─── Prisma Schema — Billing ────────────────────────────────────────────────
 // Fase 0: Foundation
-// Schema version: 1.1 (ADR-009: event_class field in audit_logs)
+// Schema version: 1.2 (P0: CompanyEconomicActivity + taxpayer verification fields)
 // Do NOT modify this file without creating a new migration.
 
 generator client {
@@ -198,6 +198,7 @@ model Tenant {
   companyFiscalProfiles     CompanyFiscalProfile[]
   fiscalArtifacts           FiscalArtifact[]
   documentDeliveries        DocumentDelivery[]
+  companyEconomicActivities CompanyEconomicActivity[]
 
   @@map("tenants")
 }
@@ -216,6 +217,10 @@ model Company {
   haciendaName               String?                     @map("hacienda_name") @db.VarChar(255)
   haciendaVerifiedAt         DateTime?                   @map("hacienda_verified_at")
   haciendaVerificationStatus HaciendaVerificationStatus? @map("hacienda_verification_status")
+  // P0: Taxpayer verification detail fields (nullable — backward-compatible)
+  haciendaTaxSituation       String?                     @map("hacienda_tax_situation") @db.VarChar(50)
+  haciendaMoroso             Boolean?                    @map("hacienda_moroso")
+  haciendaOmiso              Boolean?                    @map("hacienda_omiso")
   createdAt                  DateTime                    @default(now()) @map("created_at")
   updatedAt                  DateTime                    @updatedAt @map("updated_at")
   tenant                     Tenant                      @relation(fields: [tenantId], references: [id])
@@ -232,34 +237,81 @@ model Company {
   companyPdfSettings         CompanyPdfSettings?
   fiscalArtifacts            FiscalArtifact[]
   documentDeliveries         DocumentDelivery[]
+  economicActivities         CompanyEconomicActivity[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
   @@map("companies")
 }
 
+// ─── COMPANY FISCAL PROFILE ─────────────────────────────────────────────────
+
 model CompanyFiscalProfile {
-  id                   String   @id @db.Uuid
-  tenantId             String   @map("tenant_id") @db.Uuid
-  companyId            String   @unique @map("company_id") @db.Uuid
-  economicActivityCode String   @map("economic_activity_code") @db.VarChar(6)
-  proveedorSistemas    String?  @map("proveedor_sistemas") @db.VarChar(20)
-  province             String   @db.Char(1)
-  canton               String   @db.Char(2)
-  district             String   @db.Char(2)
-  barrio               String?  @db.VarChar(50)
-  otrasSenas           String   @map("otras_senas") @db.VarChar(250)
-  email                String   @db.VarChar(160)
-  phoneCountryCode     String?  @map("phone_country_code") @db.VarChar(3)
-  phoneNumber          String?  @map("phone_number") @db.VarChar(20)
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
-  tenant               Tenant   @relation(fields: [tenantId], references: [id])
-  company              Company  @relation(fields: [companyId], references: [id])
+  id                        String                   @id @db.Uuid
+  tenantId                  String                   @map("tenant_id") @db.Uuid
+  companyId                 String                   @unique @map("company_id") @db.Uuid
+  // DEC-006: legacy compatibility field — NOT the new source of truth after P0 verification.
+  // Synced from defaultEconomicActivity.code when a verified default is set.
+  economicActivityCode      String                   @map("economic_activity_code") @db.VarChar(20)
+  proveedorSistemas         String?                  @map("proveedor_sistemas") @db.VarChar(20)
+  province                  String                   @db.Char(1)
+  canton                    String                   @db.Char(2)
+  district                  String                   @db.Char(2)
+  barrio                    String?                  @db.VarChar(50)
+  otrasSenas                String                   @map("otras_senas") @db.VarChar(250)
+  email                     String                   @db.VarChar(160)
+  phoneCountryCode          String?                  @map("phone_country_code") @db.VarChar(3)
+  phoneNumber               String?                  @map("phone_number") @db.VarChar(20)
+  // P0: FK to the verified default CompanyEconomicActivity (nullable until verified)
+  defaultEconomicActivityId String?                  @map("default_economic_activity_id") @db.Uuid
+  createdAt                 DateTime                 @default(now()) @map("created_at")
+  updatedAt                 DateTime                 @updatedAt @map("updated_at")
+  tenant                    Tenant                   @relation(fields: [tenantId], references: [id])
+  company                   Company                  @relation(fields: [companyId], references: [id])
+  defaultEconomicActivity   CompanyEconomicActivity? @relation("ProfileDefaultActivity", fields: [defaultEconomicActivityId], references: [id])
 
   @@unique([tenantId, companyId])
   @@index([tenantId])
+  @@index([defaultEconomicActivityId], map: "company_fiscal_profile_default_activity_idx")
   @@map("company_fiscal_profiles")
+}
+
+// ─── P0: COMPANY ECONOMIC ACTIVITIES ────────────────────────────────────────
+// Persists verified economic activities imported from Hacienda /fe/ae.
+// DEC-001: Hacienda /fe/ae is the ONLY authoritative source — clients cannot
+//          fabricate Hacienda verification.
+// billingEnabled is separate from haciendaStatus — an active Hacienda activity
+//          may still be disabled by the company for Billing document issuance.
+// Historical activities are NEVER physically deleted (append+update only).
+
+model CompanyEconomicActivity {
+  id                 String                 @id @db.Uuid
+  tenantId           String                 @map("tenant_id") @db.Uuid
+  companyId          String                 @map("company_id") @db.Uuid
+  // code is an opaque string from Hacienda — e.g. "9609.0", "6110.0"
+  code               String                 @db.VarChar(20)
+  description        String                 @db.VarChar(255)
+  // haciendaStatus: "A" = active, "I" = inactive (per Hacienda /fe/ae)
+  haciendaStatus     String                 @map("hacienda_status") @db.VarChar(10)
+  // haciendaKind: "P" = principal, "S" = secondary (nullable — not always provided)
+  haciendaKind       String?                @map("hacienda_kind") @db.VarChar(10)
+  // billingEnabled: Company-controlled flag; independent of haciendaStatus
+  billingEnabled     Boolean                @default(true) @map("billing_enabled")
+  // verifiedAt: timestamp of the last successful Hacienda /fe/ae confirmation
+  verifiedAt         DateTime               @map("verified_at")
+  // lastSeenAt: last time this activity appeared in a Hacienda /fe/ae response
+  lastSeenAt         DateTime               @map("last_seen_at")
+  // verificationSource: "HACIENDA_FE_AE" (only valid value for now)
+  verificationSource String                 @map("verification_source") @db.VarChar(50)
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id])
+  company            Company                @relation(fields: [companyId], references: [id])
+  profilesAsDefault  CompanyFiscalProfile[] @relation("ProfileDefaultActivity")
+
+  @@unique([companyId, code])
+  @@index([tenantId, companyId])
+  @@map("company_economic_activities")
 }
 
 model FiscalIssuancePoint {
@@ -324,7 +376,8 @@ model FiscalDocument {
   currency           String                 @db.Char(3)
   exchangeRate       Decimal?               @map("exchange_rate") @db.Decimal(18, 5)
   saleCondition      String                 @map("sale_condition") @db.Char(2)
-  paymentMethod      String                 @map("payment_method") @db.Char(2)
+  creditTermDays     Int?                   @map("credit_term_days")
+  paymentMethod      String?                @map("payment_method") @db.Char(2)
   lines              Json
   totals             Json
   idempotencyKey     String?                @map("idempotency_key") @db.VarChar(255)

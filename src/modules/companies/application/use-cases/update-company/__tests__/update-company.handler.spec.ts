@@ -130,6 +130,44 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
   // ── DEC-003: Block incompatible identity changes ──────────────────────────────
 
+  it('DEC-003: allows CPF/FISICA canonical identity when it matches ACTIVE cert metadata', async () => {
+    const { handler } = createHandler({
+      company: makeCurrentCompany({
+        identificationNumber: '207530251',
+        identificationType: 'FISICA',
+      }),
+      activeCert: makeActiveCert({
+        extractedIdentityNumber: '207530251',
+        extractedIdentityType: '01',
+      }),
+    });
+
+    const result = await handler.execute(
+      makeCommand({ identificationNumber: '207530251', identificationType: 'FISICA' }),
+    );
+
+    expect(result).toBeDefined();
+  });
+
+  it('DEC-003: blocks CPF/FISICA canonical identity change when ACTIVE cert would conflict', async () => {
+    const { handler } = createHandler({
+      company: makeCurrentCompany({
+        identificationNumber: '207530251',
+        identificationType: 'FISICA',
+      }),
+      activeCert: makeActiveCert({
+        extractedIdentityNumber: '207530251',
+        extractedIdentityType: '01',
+      }),
+    });
+
+    await expect(
+      handler.execute(
+        makeCommand({ identificationNumber: '999999999', identificationType: 'FISICA' }),
+      ),
+    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+  });
+
   it('DEC-003: blocks identificationNumber change when ACTIVE cert identity would conflict', async () => {
     const { handler } = createHandler({
       activeCert: makeActiveCert({

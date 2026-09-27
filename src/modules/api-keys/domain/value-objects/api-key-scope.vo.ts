@@ -8,6 +8,10 @@ export const ALLOWED_API_KEY_SCOPES = [
   'taxpayers:read',
   'cabys:read',
   'exchange-rates:read',
+  // P0: Inventori fiscal onboarding — Company-scoped taxpayer & activity management
+  // DEC-007: fiscal-onboarding scopes are P0 (moved from P1 by human decision)
+  'fiscal-onboarding:read',
+  'fiscal-onboarding:write',
   // Fase 2+ stubs — reserved but not yet active
   'invoices:read',
   'invoices:write',

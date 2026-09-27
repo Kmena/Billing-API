@@ -175,6 +175,9 @@ export class HaciendaApiAdapter implements HaciendaPort {
       identificationType: data.tipoIdentificacion,
       taxRegime: data.regimen.descripcion,
       taxSituation: data.situacion.estado,
+      // P0: DEC-003/DEC-004 — map moroso/omiso strings to booleans
+      moroso: data.situacion.moroso?.toUpperCase() === 'SI',
+      omiso: data.situacion.omiso?.toUpperCase() === 'SI',
       economicActivities: data.actividades.map((a) => ({
         code: a.codigo, // activity code "9609.0" — NOT a CABYS code (BR-015)
         description: a.descripcion,

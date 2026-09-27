@@ -22,6 +22,11 @@ export interface ConfigureConnectionCommand {
   environment: HaciendaEnvironment;
   username?: string;
   password?: string;
+  /**
+   * Internal recovery path for re-storing a lost durable secret for an already
+   * validated connection. Public credential changes must not set this flag.
+   */
+  preserveConnectedStatusForSecretRestore?: boolean;
 }
 @Injectable()
 export class ConfigureConnectionHandler {
@@ -63,14 +68,7 @@ export class ConfigureConnectionHandler {
     }
     const reference = `hacienda-conn/${command.companyId}/${command.environment}`;
     await this.secrets.storeSecret(reference, JSON.stringify(credentials));
-    const connection = HaciendaConnection.configure(
-      existing?.id ?? randomUUID(),
-      command.tenantId,
-      command.companyId,
-      command.environment,
-      reference,
-      Boolean(existing),
-    );
+    const connection = this.buildConnection(command, existing, reference);
     await this.repo.save(connection);
     this.cache.invalidate(command.companyId, command.environment);
     this.audit.record({
@@ -83,5 +81,42 @@ export class ConfigureConnectionHandler {
       metadata: { environment: command.environment },
     });
     return connection;
+  }
+
+  private buildConnection(
+    command: ConfigureConnectionCommand,
+    existing: HaciendaConnection | null,
+    reference: string,
+  ): HaciendaConnection {
+    const shouldPreserveConnectedStatus =
+      command.preserveConnectedStatusForSecretRestore === true &&
+      existing?.status === 'CONNECTED' &&
+      Boolean(command.username) &&
+      Boolean(command.password);
+
+    if (shouldPreserveConnectedStatus) {
+      return HaciendaConnection.reconstruct({
+        id: existing.id,
+        tenantId: existing.tenantId,
+        companyId: existing.companyId,
+        environment: existing.environment,
+        status: existing.status,
+        secretReference: reference,
+        lastValidatedAt: existing.lastValidatedAt,
+        lastSuccessfulAuthAt: existing.lastSuccessfulAuthAt,
+        lastValidationErrorCode: existing.lastValidationErrorCode,
+        createdAt: existing.createdAt,
+        updatedAt: new Date(),
+      });
+    }
+
+    return HaciendaConnection.configure(
+      existing?.id ?? randomUUID(),
+      command.tenantId,
+      command.companyId,
+      command.environment,
+      reference,
+      Boolean(existing),
+    );
   }
 }
