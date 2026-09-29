@@ -33,6 +33,12 @@ services:
       SERVICES: s3,ssm
       DEFAULT_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
+      # PERSISTENCE=1: Pro-only feature in LocalStack Community 3.x.
+      # Setting it here signals intent and enables it automatically for Pro users.
+      # Community Edition: SSM state is in-memory only; lost on container restart.
+      # After LocalStack restart (Community): run `npm run dev:seed-ssm` then re-upload
+      # the fiscal certificate to restore readiness.
+      PERSISTENCE: 1
     ports:
       - '4566:4566'
     volumes:

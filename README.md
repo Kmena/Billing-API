@@ -53,6 +53,31 @@ Minimum required variables:
 docker-compose up postgres localstack -d
 ```
 
+### 3b. Seed LocalStack SSM (required on first start or after LocalStack restart)
+
+Billing reads `JWT_SECRET` and fiscal certificate secrets from SSM at runtime.
+LocalStack Community Edition does NOT persist SSM state between container restarts.
+After every fresh LocalStack start, seed the application secrets:
+
+```bash
+# Seeds JWT_SECRET into LocalStack SSM (/billing/dev/JWT_SECRET)
+# Required before starting Billing with SECRET_PROVIDER=ssm
+npm run dev:seed-ssm
+```
+
+After seeding, start Billing and re-upload the fiscal certificate if needed:
+
+```bash
+# Re-upload the certificate to restore fiscal readiness after LocalStack restart:
+# POST /api/v1/companies/:companyId/fiscal-certificates/SANDBOX  (multipart/form-data)
+# OR run the Inventori restore bootstrap (if all DB state was wiped):
+# node scripts/inventori-restore-bootstrap.mjs
+```
+
+> **LocalStack Pro note:** If you have a LocalStack Pro license, set `LOCALSTACK_AUTH_TOKEN`
+> in your environment. The `PERSISTENCE=1` flag in `docker-compose.yml` will then
+> automatically persist all SSM state across container restarts — no manual re-seeding needed.
+
 ### 4. Run database migrations
 
 ```bash
@@ -82,6 +107,7 @@ npm run start:dev
 | Command | Description |
 |---|---|
 | `npm run start:dev` | Start API in watch mode |
+| `npm run dev:seed-ssm` | Seed app secrets (JWT_SECRET) into LocalStack SSM — run after every fresh LocalStack start |
 | `npm run start:dev:worker` | Start Worker in watch mode |
 | `npm run build` | Compile TypeScript to dist/ |
 | `npm run start:api` | Start the compiled API after `npm run build` |
