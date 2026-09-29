@@ -466,23 +466,12 @@ export class FiscalDocumentService {
     });
     if (!profile) throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_REQUIRED' });
 
-    // TASK-008: Resolve codigoActividad from verified default activity (P0).
-    // Falls back to legacy economicActivityCode for backward compatibility
-    // (readiness check should have blocked this path if no verified default exists).
-    let resolvedActivityCode = profile.economicActivityCode;
-    if (profile.defaultEconomicActivityId) {
-      const defaultActivity = await tx.companyEconomicActivity.findUnique({
-        where: { id: profile.defaultEconomicActivityId },
-        select: { code: true, haciendaStatus: true, billingEnabled: true },
-      });
-      if (
-        defaultActivity &&
-        defaultActivity.haciendaStatus === 'A' &&
-        defaultActivity.billingEnabled
-      ) {
-        resolvedActivityCode = defaultActivity.code;
-      }
-    }
+    // Economic activity used for NEW fiscal issuance must come from Billing's
+    // verified CompanyEconomicActivity projection. The legacy
+    // economicActivityCode remains a compatibility projection only; it is never
+    // an independent source of truth for emission. This focused validator runs
+    // before idempotency reservation and before fiscal sequence allocation.
+    const resolvedActivityCode = await this.resolveIssuerEconomicActivity(tx, profile, companyId);
 
     const requiredProfileFields = [
       resolvedActivityCode,
@@ -497,6 +486,53 @@ export class FiscalDocumentService {
       throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_INCOMPLETE' });
     }
     return { ...profile, resolvedActivityCode };
+  }
+
+  private async resolveIssuerEconomicActivity(
+    tx: Pick<PrismaService, 'companyEconomicActivity'>,
+    profile: { defaultEconomicActivityId: string | null },
+    companyId: string,
+  ): Promise<string> {
+    if (profile.defaultEconomicActivityId) {
+      const defaultActivity = await tx.companyEconomicActivity.findUnique({
+        where: { id: profile.defaultEconomicActivityId },
+        select: {
+          id: true,
+          companyId: true,
+          code: true,
+          haciendaStatus: true,
+          billingEnabled: true,
+        },
+      });
+      if (!defaultActivity || defaultActivity.companyId !== companyId) {
+        throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_INVALID' });
+      }
+      if (!this.isValidIssuerEconomicActivity(defaultActivity)) {
+        throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_INVALID' });
+      }
+      return defaultActivity.code;
+    }
+
+    const activities = await tx.companyEconomicActivity.findMany({
+      where: { companyId },
+      select: { id: true, code: true, haciendaStatus: true, billingEnabled: true },
+    });
+    const validActivities = activities.filter((activity) =>
+      this.isValidIssuerEconomicActivity(activity),
+    );
+
+    if (validActivities.length === 1) return validActivities[0].code;
+    if (activities.length === 0) {
+      throw new BadRequestException({ code: 'ECONOMIC_ACTIVITY_MISSING' });
+    }
+    throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_MISSING' });
+  }
+
+  private isValidIssuerEconomicActivity(activity: {
+    haciendaStatus: string;
+    billingEnabled: boolean;
+  }): boolean {
+    return activity.haciendaStatus === 'A' && activity.billingEnabled;
   }
 
   private async findTenantCompany(tenantId: string, companyId: string) {

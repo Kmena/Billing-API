@@ -2,16 +2,23 @@
  * TaxpayerVerificationController — Company-scoped taxpayer & economic activity onboarding.
  *
  * Routes:
- *   POST   /companies/:companyId/taxpayer-verification         → trigger/refresh verification
- *   GET    /companies/:companyId/taxpayer-verification         → read verification status
- *   GET    /companies/:companyId/economic-activities           → list verified activities
- *   PATCH  /companies/:companyId/economic-activities/:code     → enable/disable for Billing
- *   PUT    /companies/:companyId/fiscal-profile/default-activity → set default activity
+ *   POST   /companies/:companyId/taxpayer-verification                    → trigger/refresh verification
+ *   GET    /companies/:companyId/taxpayer-verification                    → read verification status
+ *   GET    /companies/:companyId/economic-activities                      → list verified activities
+ *   PATCH  /companies/:companyId/economic-activities/:code                → enable/disable for Billing
+ *   PUT    /companies/:companyId/fiscal-profile/default-activity          → set default activity
+ *   GET    /companies/:companyId/fiscal-onboarding/:environment/readiness → full fiscal readiness (M2M)
  *
  * Auth:
  *   - Tenant Admin JWT: all operations (existing JwtAuthGuard)
  *   - Inventori M2M API key: reads + mutations via ApiKeyAuthGuard + fiscal-onboarding scopes
  *     (DEC-007: M2M is P0)
+ *
+ * Readiness:
+ *   - GET fiscal-onboarding/:environment/readiness exposes FiscalReadinessService.evaluate()
+ *     over M2M. Read-only. No Hacienda traffic. No mutations.
+ *     Scope: fiscal-onboarding:read
+ *     tenantId source: authenticated API key principal only.
  *
  * Security:
  *   - Never exposes raw Hacienda JSON, Hacienda credentials, P12, PIN, or SecretProvider values.
@@ -45,9 +52,11 @@ import { GetTaxpayerVerificationStatusHandler } from '../../application/use-case
 import { ListEconomicActivitiesHandler } from '../../application/use-cases/list-economic-activities/list-economic-activities.handler';
 import { SetActivityBillingEnabledHandler } from '../../application/use-cases/set-activity-enabled/set-activity-billing-enabled.handler';
 import { SetDefaultEconomicActivityHandler } from '../../application/use-cases/set-default-activity/set-default-economic-activity.handler';
+import { FiscalReadinessService } from '../../../fiscal-documents/application/fiscal-xml/fiscal-readiness.service';
 import {
   EconomicActivityResponseDto,
   FiscalOnboardingStatusResponseDto,
+  FiscalReadinessResponseDto,
   SetActivityBillingEnabledRequestDto,
   SetDefaultEconomicActivityRequestDto,
   SetDefaultEconomicActivityResponseDto,
@@ -159,6 +168,7 @@ export class FiscalOnboardingM2MController {
     private readonly listActivities: ListEconomicActivitiesHandler,
     private readonly setEnabled: SetActivityBillingEnabledHandler,
     private readonly setDefault: SetDefaultEconomicActivityHandler,
+    private readonly readiness: FiscalReadinessService,
   ) {}
 
   @Post('fiscal-onboarding/verify')
@@ -237,5 +247,50 @@ export class FiscalOnboardingM2MController {
       code: body.code,
       actor: `apikey:${req.apiKey.keyPrefix}`,
     });
+  }
+
+  /**
+   * GET /companies/:companyId/fiscal-onboarding/:environment/readiness
+   *
+   * Evaluates full fiscal readiness via FiscalReadinessService.
+   * Read-only — zero mutations, zero Hacienda HTTP calls.
+   * tenantId is resolved exclusively from the authenticated API key principal.
+   *
+   * Response NEVER contains: P12, PIN, certificateSecretReference,
+   * passwordSecretReference, Hacienda credentials, or OAuth tokens.
+   */
+  @Get('fiscal-onboarding/:environment/readiness')
+  @HttpCode(HttpStatus.OK)
+  @Scopes('fiscal-onboarding:read')
+  @ApiOperation({
+    summary: 'Evaluate full fiscal readiness (Inventori M2M)',
+    description:
+      'Returns readyToIssue verdict with hard-blocker reasonCodes and informational warnings. ' +
+      'Read-only — performs no Hacienda calls, no mutations. ' +
+      'Billing is the authoritative source; do NOT synthesize readiness in Inventori.',
+  })
+  @ApiOkResponse({ type: FiscalReadinessResponseDto })
+  async getFiscalReadiness(
+    @Request() req: ApiKeyRequest,
+    @Param('companyId') companyId: string,
+    @Param('environment') environment: string,
+  ): Promise<FiscalReadinessResponseDto> {
+    const result = await this.readiness.evaluate({
+      tenantId: req.user.tenantId, // always from authenticated API-key principal
+      companyId,
+      environment,
+    });
+    // Explicit projection — never spread FiscalReadinessResult.
+    // activeCertificate is excluded: not part of FiscalReadinessResponseDto contract.
+    // Secret references (certificateSecretReference, passwordSecretReference) are never
+    // reachable here; they are consumed internally by FiscalReadinessService only.
+    return {
+      companyId: result.companyId,
+      environment: result.environment,
+      readyToIssue: result.readyToIssue,
+      reasonCodes: result.reasonCodes,
+      warnings: result.warnings,
+      checkedAt: result.checkedAt,
+    };
   }
 }

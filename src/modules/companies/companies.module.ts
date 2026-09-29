@@ -14,6 +14,10 @@ import { GetTaxpayerVerificationStatusHandler } from './application/use-cases/ge
 import { ListEconomicActivitiesHandler } from './application/use-cases/list-economic-activities/list-economic-activities.handler';
 import { SetActivityBillingEnabledHandler } from './application/use-cases/set-activity-enabled/set-activity-billing-enabled.handler';
 import { SetDefaultEconomicActivityHandler } from './application/use-cases/set-default-activity/set-default-economic-activity.handler';
+// M2M readiness — FiscalDocumentsModule cannot be imported here (circular via HaciendaConnectionModule).
+// FiscalReadinessService depends only on PrismaService (@Global) and SECRET_PROVIDER (@Global),
+// so it is safe to provide directly without cross-module import.
+import { FiscalReadinessService } from '../fiscal-documents/application/fiscal-xml/fiscal-readiness.service';
 import { PrismaCompanyRepository } from './infrastructure/persistence/prisma-company.repository';
 import { CompanyController } from './infrastructure/http/company.controller';
 import {
@@ -38,6 +42,9 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
     ListEconomicActivitiesHandler,
     SetActivityBillingEnabledHandler,
     SetDefaultEconomicActivityHandler,
+    // M2M readiness — provided here to avoid circular module dependency.
+    // Dependencies (PrismaService, SECRET_PROVIDER) are global.
+    FiscalReadinessService,
     {
       provide: COMPANY_REPOSITORY,
       useClass: PrismaCompanyRepository,
