@@ -4,13 +4,22 @@ import { HaciendaConnection } from '../../../../domain/entities/hacienda-connect
 const tenantId = 'tenant-id';
 const companyId = 'company-id';
 
-function makeHandler(existing: HaciendaConnection | null) {
+function makeHandler(
+  existing: HaciendaConnection | null,
+  previousSecret: { username: string; password: string } = {
+    username: 'existing-user',
+    password: 'existing-password',
+  },
+) {
   const company = { execute: jest.fn().mockResolvedValue({ id: companyId }) };
   const repo = {
     findByCompanyAndEnvironment: jest.fn().mockResolvedValue(existing),
     save: jest.fn().mockResolvedValue(undefined),
   };
-  const secrets = { storeSecret: jest.fn().mockResolvedValue(undefined) };
+  const secrets = {
+    getSecret: jest.fn().mockResolvedValue(JSON.stringify(previousSecret)),
+    storeSecret: jest.fn().mockResolvedValue(undefined),
+  };
   const cache = { invalidate: jest.fn() };
   const audit = { record: jest.fn() };
   const handler = new ConfigureConnectionHandler(
@@ -20,7 +29,7 @@ function makeHandler(existing: HaciendaConnection | null) {
     cache as never,
     audit as never,
   );
-  return { handler, repo, secrets };
+  return { handler, repo, secrets, cache, audit };
 }
 
 describe('ConfigureConnectionHandler', () => {
@@ -80,5 +89,63 @@ describe('ConfigureConnectionHandler', () => {
     });
 
     expect(result.status).toBe('PENDING_VALIDATION');
+  });
+
+  it('merges username-only updates with the existing password and invalidates token cache', async () => {
+    const existing = HaciendaConnection.reconstruct({
+      id: 'connection-id',
+      tenantId,
+      companyId,
+      environment: 'SANDBOX',
+      status: 'CONNECTED',
+      secretReference: `hacienda-conn/${companyId}/SANDBOX`,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const { handler, secrets, cache } = makeHandler(existing, {
+      username: 'old-user',
+      password: 'preserved-password',
+    });
+
+    await handler.execute({ tenantId, companyId, environment: 'SANDBOX', username: 'new-user' });
+
+    expect(secrets.storeSecret).toHaveBeenCalledWith(
+      `hacienda-conn/${companyId}/SANDBOX`,
+      JSON.stringify({ username: 'new-user', password: 'preserved-password' }),
+    );
+    expect(cache.invalidate).toHaveBeenCalledWith(companyId, 'SANDBOX');
+  });
+
+  it('merges password-only updates with the existing username and never stores plaintext in DB', async () => {
+    const existing = HaciendaConnection.reconstruct({
+      id: 'connection-id',
+      tenantId,
+      companyId,
+      environment: 'SANDBOX',
+      status: 'CONNECTED',
+      secretReference: `hacienda-conn/${companyId}/SANDBOX`,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const { handler, repo, secrets } = makeHandler(existing, {
+      username: 'preserved-user',
+      password: 'old-password',
+    });
+
+    await handler.execute({
+      tenantId,
+      companyId,
+      environment: 'SANDBOX',
+      password: 'new-password',
+    });
+
+    expect(secrets.storeSecret).toHaveBeenCalledWith(
+      `hacienda-conn/${companyId}/SANDBOX`,
+      JSON.stringify({ username: 'preserved-user', password: 'new-password' }),
+    );
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ secretReference: `hacienda-conn/${companyId}/SANDBOX` }),
+    );
+    expect(JSON.stringify(repo.save.mock.calls)).not.toContain('new-password');
   });
 });

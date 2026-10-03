@@ -6,6 +6,7 @@ import { SecretsModule } from '../../infrastructure/secrets/secrets.module';
 import { AuditModule } from '../audit/audit.module';
 import { CompaniesModule } from '../companies/companies.module';
 import { HaciendaConnectionController } from './infrastructure/http/hacienda-connection.controller';
+import { HaciendaCredentialsM2MController } from './infrastructure/http/hacienda-credentials-m2m.controller';
 import { PrismaHaciendaConnectionRepository } from './infrastructure/persistence/prisma-hacienda-connection.repository';
 import { HaciendaTokenCache } from './infrastructure/auth/hacienda-token-cache.service';
 import { HaciendaOidcAuthAdapter } from './infrastructure/auth/hacienda-oidc-auth.adapter';
@@ -16,10 +17,11 @@ import { ConfigureConnectionHandler } from './application/use-cases/configure-co
 import { GetConnectionHandler } from './application/use-cases/get-connection/get-connection.handler';
 import { ValidateConnectionHandler } from './application/use-cases/validate-connection/validate-connection.handler';
 import { DisableConnectionHandler } from './application/use-cases/disable-connection/disable-connection.handler';
+import { ApiKeysModule } from '../api-keys/api-keys.module';
 
 @Module({
-  imports: [HttpModule, DatabaseModule, SecretsModule, AuditModule, CompaniesModule],
-  controllers: [HaciendaConnectionController],
+  imports: [HttpModule, DatabaseModule, SecretsModule, AuditModule, CompaniesModule, ApiKeysModule],
+  controllers: [HaciendaConnectionController, HaciendaCredentialsM2MController],
   providers: [
     ConfigureConnectionHandler,
     GetConnectionHandler,

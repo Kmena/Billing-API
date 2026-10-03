@@ -10,10 +10,18 @@ import {
   FiscalXmlDocumentSnapshot,
   FiscalXmlGenerationResult,
 } from '../../domain/fiscal-xml/fiscal-xml.types';
+import { FISCAL_XML_ERROR } from '../../domain/fiscal-xml/fiscal-xml.errors';
 import { mapIdentificationTypeToXmlCode } from '../../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../../domain/scaled-decimal';
 import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../../domain/fiscal-catalogs';
 import { classifyCabys } from '../../domain/fiscal-cabys-classifier';
+
+/**
+ * Length required by the Hacienda v4.4 FacturaElectronica XSD for
+ * CodigoActividadReceptor: xs:restriction minLength=6, maxLength=6.
+ * TiqueteElectronico does not define this element.
+ */
+const RECEIVER_ACTIVITY_CODE_LENGTH = 6;
 
 /**
  * Tax codes for which CodigoTarifaIVA is required at both line level and
@@ -149,9 +157,21 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       'xmlns:ds': 'http://www.w3.org/2000/09/xmldsig#',
     });
 
+    // Validate and resolve CodigoActividadReceptor before beginning XML emission so that
+    // an invalid receiver activity fails fast — before any elements are written.
+    // Only FacturaElectronica (INVOICE) supports this field; TiqueteElectronico does not.
+    const receiverActivityCode = this.extractReceiverActivityCode(
+      document.receiverSnapshot,
+      document.type,
+    );
+
     root.ele('Clave').txt(document.clave).up();
     root.ele('ProveedorSistemas').txt(issuer.proveedorSistemas).up();
+    // XSD xs:sequence: CodigoActividadEmisor → CodigoActividadReceptor? → NumeroConsecutivo
     root.ele('CodigoActividadEmisor').txt(issuer.codigoActividad).up();
+    if (receiverActivityCode !== null) {
+      root.ele('CodigoActividadReceptor').txt(receiverActivityCode).up();
+    }
     root.ele('NumeroConsecutivo').txt(document.consecutive).up();
     root.ele('FechaEmision').txt(this.formatDate(document.issueDate)).up();
     this.appendParty(root, 'Emisor', issuer, true);
@@ -539,6 +559,44 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     if (!supportedValues.includes(value)) {
       throw new Error(`FISCAL_XML_UNSUPPORTED_CATALOG:${field}`);
     }
+  }
+
+  /**
+   * Extracts and validates the receiver economic activity code for CodigoActividadReceptor.
+   *
+   * Rules (Hacienda v4.4 XSD — FacturaElectronica only):
+   *   - TiqueteElectronico XSD does not define this element → always returns null for TICKET.
+   *   - null / undefined / absent → return null (element omitted per XSD minOccurs=0).
+   *   - empty string → return null (semantically absent; no XSD violation).
+   *   - non-empty but length ≠ 6 → throw FISCAL_XML_INVALID_RECEIVER_ACTIVITY (fail before signing).
+   *   - exactly 6 characters → return the trimmed string (element emitted).
+   *
+   * No truncation, padding, or coercion is performed on a supplied non-empty value.
+   */
+  private extractReceiverActivityCode(
+    receiverSnapshot: Record<string, unknown> | null | undefined,
+    documentType: string,
+  ): string | null {
+    // TiqueteElectronico does not define CodigoActividadReceptor in the v4.4 XSD.
+    if (documentType !== 'INVOICE') return null;
+    if (!receiverSnapshot) return null;
+
+    const raw = receiverSnapshot['economicActivity'];
+
+    // Absent, null, or undefined → element is omitted (XSD optional)
+    if (raw === null || raw === undefined) return null;
+
+    const value = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+
+    // Empty string is treated as absent → element omitted
+    if (value.length === 0) return null;
+
+    // Supplied but violates XSD length contract → fail before signing; never silently omit
+    if (value.length !== RECEIVER_ACTIVITY_CODE_LENGTH) {
+      throw new Error(FISCAL_XML_ERROR.invalidReceiverActivity);
+    }
+
+    return value;
   }
 
   private formatDate(value: Date): string {

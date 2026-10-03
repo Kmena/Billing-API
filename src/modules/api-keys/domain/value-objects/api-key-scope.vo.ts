@@ -12,6 +12,9 @@ export const ALLOWED_API_KEY_SCOPES = [
   // DEC-007: fiscal-onboarding scopes are P0 (moved from P1 by human decision)
   'fiscal-onboarding:read',
   'fiscal-onboarding:write',
+  // Hacienda credential management for trusted M2M fiscal onboarding clients.
+  'fiscal-credentials:write',
+  'fiscal-credentials:validate',
   // Fase 2+ stubs — reserved but not yet active
   'invoices:read',
   'invoices:write',

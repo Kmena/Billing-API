@@ -1,5 +1,55 @@
 # Changelog — Billing API
 
+## [rfr-wave8-codigo-actividad-receptor] — 2026-10-01
+
+**Agent:** code-puppy-a44c29
+**Scope:** Wave 8 — RFR-TASK-801 · CodigoActividadReceptor XML support in FacturaElectronica v4.4.
+Zero Hacienda requests. Zero fiscal documents created. Zero consecutives consumed.
+
+### Summary
+Billing's Hacienda v4.4 XML serializer now emits `<CodigoActividadReceptor>` at the root
+level of `FacturaElectronica` when `receiver.economicActivity` is supplied and valid.
+
+### XSD contract (official `FacturaElectronica.xsd` v4.4)
+- `CodigoActividadReceptor` — `minOccurs=0`, `xs:restriction base=xs:string`, `minLength=6`,
+  `maxLength=6`. **No `xs:pattern`** — no numeric-only requirement proven from XSD.
+- Position: `CodigoActividadEmisor` → `CodigoActividadReceptor?` → `NumeroConsecutivo`.
+- `TiqueteElectronico.xsd` does NOT define this element — TICKET type is unaffected.
+
+### Serialization behavior
+- `receiver.economicActivity` = 6-char string → `<CodigoActividadReceptor>{value}</CodigoActividadReceptor>` emitted at root level.
+- `null` / `undefined` / absent / empty string → element omitted (XSD optional, minOccurs=0).
+- Non-empty string with length ≠ 6 → throws `FISCAL_XML_INVALID_RECEIVER_ACTIVITY` before signing.
+- No truncation. No padding. No coercion. No silent omission of invalid supplied values.
+
+### Mapping chain confirmed intact
+`receiver.economicActivity` (API DTO) → `receiverSnapshot.economicActivity` (DB JSON) →
+`document.receiverSnapshot['economicActivity']` (serializer) → `<CodigoActividadReceptor>` (XML)
+
+### Files changed
+- `src/modules/fiscal-documents/domain/fiscal-xml/fiscal-xml.errors.ts` — added `invalidReceiverActivity: 'FISCAL_XML_INVALID_RECEIVER_ACTIVITY'`.
+- `src/modules/fiscal-documents/infrastructure/xml/hacienda-v44-xml-serializer.adapter.ts` — imports `FISCAL_XML_ERROR`; added `extractReceiverActivityCode()` private method; emits `CodigoActividadReceptor` in XSD-correct position.
+
+### Tests added
+- `src/modules/fiscal-documents/infrastructure/xml/__tests__/hacienda-v44-receiver-activity.spec.ts` — 27 tests covering all 15 required spec cases plus extras: XSD validation (with and without field), Inventori round-trip, ordering guarantee, TiqueteElectronico guard, whitespace trimming, parametrized valid codes.
+
+### Quality gates
+- lint: 0 errors, 0 warnings
+- typecheck: PASS (0 errors)
+- Prisma validate: PASS
+- build: PASS
+- Targeted serializer tests: **84 passed, 0 failed** (5 suites, serial)
+- New Wave 8 tests: **27 passed, 0 failed**
+- XSD validation with CodigoActividadReceptor: PASS (Python xmlschema engine)
+- XSD validation without CodigoActividadReceptor: PASS (backward compatibility)
+- Existing FacturaElectronica regression: PASS
+- Hacienda requests: 0
+- Fiscal documents created: 0
+- Consecutives consumed: 0
+- Real certificates changed: 0
+
+---
+
 ## [inventori-sandbox-bootstrap-taxpayer-verification] — 2026-09-25
 
 **Agent:** sdd-implementation-agent

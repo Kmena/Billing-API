@@ -462,6 +462,7 @@ try {
   const REQUIRED_SCOPES = [
     'taxpayers:read', 'cabys:read', 'exchange-rates:read',
     'fiscal-onboarding:read', 'fiscal-onboarding:write',
+    'fiscal-credentials:write', 'fiscal-credentials:validate',
     'invoices:read', 'invoices:write', 'tickets:read', 'tickets:write',
   ];
 
