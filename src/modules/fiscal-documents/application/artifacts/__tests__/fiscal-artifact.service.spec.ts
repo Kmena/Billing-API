@@ -12,6 +12,7 @@ const createService = (): FiscalArtifactService =>
     {} as ArtifactServiceDeps[0],
     {} as ArtifactServiceDeps[1],
     {} as ArtifactServiceDeps[2],
+    {} as ArtifactServiceDeps[3],
   );
 
 // Minimal mock setup — we test domain behavior only (filename/disposition)

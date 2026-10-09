@@ -1,9 +1,10 @@
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
 import { createHash } from 'crypto';
 import { FiscalArtifactIndexService } from '../fiscal-artifact-index.service';
 import { LocalStorageAdapter } from '../../../../../infrastructure/storage/adapters/local-storage.adapter';
+import {
+  DisposableTestStorage,
+  provisionDisposableTestStorage,
+} from '../../../../../infrastructure/storage/test-storage-safety';
 
 const sha256 = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
 
@@ -12,18 +13,18 @@ describe('FiscalArtifactIndexService', () => {
   const companyId = 'company-1';
   const fiscalDocumentId = 'doc-1';
 
-  let tmp: string;
+  let lease: DisposableTestStorage;
   let storage: LocalStorageAdapter;
   let createdRows: Array<Record<string, unknown>>;
 
-  beforeEach(async () => {
-    tmp = await mkdtemp(join(tmpdir(), 'billing-artifact-index-'));
-    storage = new LocalStorageAdapter(tmp, 'test-secret');
+  beforeEach(() => {
+    lease = provisionDisposableTestStorage();
+    storage = new LocalStorageAdapter(lease.rootPath, 'test-secret');
     createdRows = [];
   });
 
-  afterEach(async () => {
-    await rm(tmp, { recursive: true, force: true });
+  afterEach(() => {
+    lease.dispose();
   });
 
   function prismaMock(options: {
@@ -67,7 +68,7 @@ describe('FiscalArtifactIndexService', () => {
   it('indexes exact existing signed XML bytes without duplicating object content', async () => {
     const key = 'fiscal/test/signed.xml';
     const bytes = Buffer.from('<signed>original</signed>');
-    await storage.upload(key, bytes);
+    await storage.upload({ key, bytes, contentType: 'application/xml' });
 
     const prisma = prismaMock({ signedKey: key, signedSha: sha256(bytes) });
     const service = new FiscalArtifactIndexService(prisma as never, storage);
@@ -93,7 +94,7 @@ describe('FiscalArtifactIndexService', () => {
   it('indexes exact Hacienda response XML and preserves persisted response checksum', async () => {
     const key = 'fiscal-submissions/test/hacienda-response.xml';
     const bytes = Buffer.from('<MensajeHacienda><Mensaje>1</Mensaje></MensajeHacienda>');
-    await storage.upload(key, bytes);
+    await storage.upload({ key, bytes, contentType: 'application/xml' });
 
     const prisma = prismaMock({ responseKey: key, responseSha: sha256(bytes) });
     const service = new FiscalArtifactIndexService(prisma as never, storage);
@@ -119,7 +120,11 @@ describe('FiscalArtifactIndexService', () => {
 
   it('blocks indexing when durable object checksum differs from metadata', async () => {
     const key = 'fiscal/test/signed.xml';
-    await storage.upload(key, Buffer.from('<signed>mutated</signed>'));
+    await storage.upload({
+      key,
+      bytes: Buffer.from('<signed>mutated</signed>'),
+      contentType: 'application/xml',
+    });
 
     const prisma = prismaMock({ signedKey: key, signedSha: '0'.repeat(64) });
     const service = new FiscalArtifactIndexService(prisma as never, storage);

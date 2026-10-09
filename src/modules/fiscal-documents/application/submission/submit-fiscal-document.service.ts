@@ -11,6 +11,7 @@ import { JOB_QUEUE, JobQueuePort } from '../../../../infrastructure/queue/ports/
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import { FiscalDocumentType, HaciendaEnvironment } from '../../domain/fiscal.constants';
+import { FiscalSubmissionStateMachine } from '../../domain/submission';
 import { FiscalSubmissionResponse } from './fiscal-submission-response';
 import {
   RECONCILE_FISCAL_SUBMISSION_JOB,
@@ -73,7 +74,7 @@ export class SubmitFiscalDocumentService {
     }
 
     const existing = document.submission;
-    if (existing?.status === 'ACCEPTED' || existing?.status === 'REJECTED') {
+    if (existing && FiscalSubmissionStateMachine.isTerminal(existing.status)) {
       return { ...this.toResponse(existing), jobName: SUBMIT_FISCAL_DOCUMENT_JOB };
     }
 

@@ -14,6 +14,7 @@
  * - No external network resource loading
  * - Render timeout and memory limits enforced
  */
+import { FiscalRepresentationView } from '../fiscal-representation/read-only-fiscal-xml-parser';
 
 export interface ImmutableFiscalDocumentView {
   readonly type: 'INVOICE' | 'TICKET';
@@ -67,6 +68,38 @@ export interface PdfRendererOutput {
   readonly templateId: string;
   readonly rendererVersion: string;
 }
+
+/**
+ * Wave 2 component contract. This is deliberately separate from PdfRendererPort:
+ * GenerateFiscalPdfService continues using the legacy runtime contract until the
+ * complete safety floor is activated in a later wave.
+ */
+export interface FiscalRepresentationRenderOptions {
+  readonly branding?: CompanyBrandingView;
+  readonly qr?: Readonly<{ enabled: boolean; payload?: string }>;
+  /** Cooperative cancellation owned by the bounded Wave 3 attempt. */
+  readonly signal?: AbortSignal;
+}
+
+export interface FiscalRepresentationPdfRendererPort {
+  renderRepresentation(
+    view: FiscalRepresentationView,
+    options?: FiscalRepresentationRenderOptions,
+  ): Promise<PdfRendererOutput>;
+}
+
+/**
+ * Wave 3 normal-provider token for the signed-XML representation pipeline.
+ * It remains separate from the legacy PDF_RENDERER token until the atomic
+ * safety floor is activated in TASK-016 and verified in Wave 6.
+ */
+export const FISCAL_REPRESENTATION_PDF_RENDERER = Symbol('FiscalRepresentationPdfRendererPort');
+
+/**
+ * Hard activation gate for the complete twelve-component safety floor.
+ * Wave 3 registers false; a later activation wave must switch it atomically.
+ */
+export const FISCAL_PDF_ATOMIC_RUNTIME_ACTIVATED = Symbol('FiscalPdfAtomicRuntimeActivated');
 
 export interface PdfRendererPort {
   /**

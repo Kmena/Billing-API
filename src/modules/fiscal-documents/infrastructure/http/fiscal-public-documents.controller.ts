@@ -31,9 +31,18 @@ export class FiscalPublicDocumentsController {
   async createInvoice(
     @Request() request: ApiKeyRequest,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-fiscal-payload-contract-version') fiscalPayloadContractVersion: string | undefined,
+    @Headers('x-fiscal-payload-hash') fiscalPayloadHash: string | undefined,
     @Body() body: CreatePublicFiscalDocumentDto,
   ) {
-    return this.createDocument(request, 'INVOICE', body, idempotencyKey);
+    return this.createDocument(
+      request,
+      'INVOICE',
+      body,
+      idempotencyKey,
+      fiscalPayloadContractVersion,
+      fiscalPayloadHash,
+    );
   }
 
   @Post('tickets')
@@ -41,9 +50,18 @@ export class FiscalPublicDocumentsController {
   async createTicket(
     @Request() request: ApiKeyRequest,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-fiscal-payload-contract-version') fiscalPayloadContractVersion: string | undefined,
+    @Headers('x-fiscal-payload-hash') fiscalPayloadHash: string | undefined,
     @Body() body: CreatePublicFiscalDocumentDto,
   ) {
-    return this.createDocument(request, 'TICKET', body, idempotencyKey);
+    return this.createDocument(
+      request,
+      'TICKET',
+      body,
+      idempotencyKey,
+      fiscalPayloadContractVersion,
+      fiscalPayloadHash,
+    );
   }
 
   private async createDocument(
@@ -51,6 +69,8 @@ export class FiscalPublicDocumentsController {
     type: FiscalDocumentType,
     body: CreatePublicFiscalDocumentDto,
     idempotencyKey?: string,
+    fiscalPayloadContractVersion?: string,
+    fiscalPayloadHash?: string,
   ) {
     return this.fiscalDocumentService.createDocument({
       tenantId: request.user.tenantId,
@@ -67,6 +87,10 @@ export class FiscalPublicDocumentsController {
       idempotencyKey,
       apiKeyId: request.apiKey.id,
       actor: `apiKey:${request.apiKey.keyPrefix}`,
+      fiscalPayloadEquivalence:
+        fiscalPayloadContractVersion || fiscalPayloadHash
+          ? { contractVersion: fiscalPayloadContractVersion, hash: fiscalPayloadHash }
+          : undefined,
     });
   }
 }

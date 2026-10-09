@@ -184,11 +184,11 @@ describe('Fiscal XML signing prepare flow (E2E)', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     context = await createFiscalE2eApp();
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
   });
 
   afterAll(async () => {
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
     await context?.prisma.$disconnect();
     await context?.app.close();
   });

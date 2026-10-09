@@ -15,6 +15,9 @@ export type DeliveryErrorClass =
   | 'PERMANENT_PROVIDER_REJECTION'
   | 'ARTIFACT_MISSING'
   | 'ARTIFACT_HASH_MISMATCH'
+  | 'ARTIFACT_CORRUPT'
+  | 'ARTIFACT_WRONG_VERSION'
+  | 'HISTORICAL_MOCK'
   | 'PDF_NOT_YET_GENERATED'
   | 'CONFIG_CREDENTIAL_ERROR'
   | 'UNKNOWN_PROVIDER_RESPONSE'
@@ -64,22 +67,44 @@ export class DeliveryRetryClassifier {
     }
 
     // Artifact hash mismatch: security event, manual review, never retry
-    if (errorClass === 'ARTIFACT_HASH_MISMATCH') {
+    if (
+      errorClass === 'ARTIFACT_HASH_MISMATCH' ||
+      errorClass === 'ARTIFACT_CORRUPT' ||
+      errorClass === 'HISTORICAL_MOCK'
+    ) {
       return {
-        nextStatus: DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED,
+        nextStatus: DocumentDeliveryStatus.FAILED,
         immediateRetry: false,
         emitSecurityAudit: true,
         reason: 'Artifact SHA-256 hash mismatch — possible tampering. Delivery blocked.',
       };
     }
 
-    // Missing artifact: manual review, no immediate retry
-    if (errorClass === 'ARTIFACT_MISSING') {
+    if (errorClass === 'ARTIFACT_WRONG_VERSION') {
       return {
-        nextStatus: DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED,
+        nextStatus: DocumentDeliveryStatus.FAILED,
         immediateRetry: false,
         emitSecurityAudit: false,
-        reason: 'Artifact missing — cannot compose delivery package without required artifact.',
+        reason: 'Artifact renderer version is incompatible with current INITIAL_DOCUMENT delivery.',
+      };
+    }
+
+    // Missing current artifact: bounded retry while eligible generation may still complete.
+    if (errorClass === 'ARTIFACT_MISSING') {
+      if (retryCount >= maxRetries) {
+        return {
+          nextStatus: DocumentDeliveryStatus.FAILED,
+          immediateRetry: false,
+          emitSecurityAudit: false,
+          reason: 'Required current artifact remained missing after the bounded retry horizon.',
+        };
+      }
+      return {
+        nextStatus: DocumentDeliveryStatus.RETRY_PENDING,
+        immediateRetry: false,
+        retryDelaySeconds: 30,
+        emitSecurityAudit: false,
+        reason: 'Artifact missing — bounded retry while current eligible generation can complete.',
       };
     }
 
@@ -87,7 +112,7 @@ export class DeliveryRetryClassifier {
     if (errorClass === 'PDF_NOT_YET_GENERATED') {
       if (retryCount >= maxRetries) {
         return {
-          nextStatus: DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED,
+          nextStatus: DocumentDeliveryStatus.FAILED,
           immediateRetry: false,
           emitSecurityAudit: false,
           reason: 'PDF generation did not complete within retry horizon.',

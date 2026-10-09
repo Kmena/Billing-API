@@ -31,10 +31,16 @@ const createArtifactService = (): FiscalArtifactService =>
     {} as ArtifactServiceDeps[0],
     {} as ArtifactServiceDeps[1],
     {} as ArtifactServiceDeps[2],
+    {} as ArtifactServiceDeps[3],
   );
 
 const createPdfSettingsService = (): CompanyPdfSettingsService =>
-  new CompanyPdfSettingsService({} as PdfSettingsDeps[0], {} as PdfSettingsDeps[1]);
+  new CompanyPdfSettingsService(
+    {
+      company: { findFirst: jest.fn().mockResolvedValue({ id: 'c1' }) },
+    } as unknown as PdfSettingsDeps[0],
+    {} as PdfSettingsDeps[1],
+  );
 
 const SVG_CONTENT = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
@@ -96,6 +102,7 @@ describe('Security: Logo validation', () => {
       pdfSettings.uploadLogo({
         tenantId: 't1',
         companyId: 'c1',
+        authorization: CompanyPdfSettingsService.systemAuthorization(),
         logoBytes: SVG_CONTENT,
         declaredMimeType: 'image/svg+xml',
       }),
@@ -108,6 +115,7 @@ describe('Security: Logo validation', () => {
       pdfSettings.uploadLogo({
         tenantId: 't1',
         companyId: 'c1',
+        authorization: CompanyPdfSettingsService.systemAuthorization(),
         logoBytes: bigFile,
         declaredMimeType: 'image/png',
       }),
@@ -119,6 +127,7 @@ describe('Security: Logo validation', () => {
       pdfSettings.uploadLogo({
         tenantId: 't1',
         companyId: 'c1',
+        authorization: CompanyPdfSettingsService.systemAuthorization(),
         logoBytes: Buffer.alloc(0),
         declaredMimeType: 'image/png',
       }),
@@ -131,6 +140,7 @@ describe('Security: Logo validation', () => {
       pdfSettings.uploadLogo({
         tenantId: 't1',
         companyId: 'c1',
+        authorization: CompanyPdfSettingsService.systemAuthorization(),
         logoBytes: htmlContent,
         declaredMimeType: 'image/jpeg',
       }),
@@ -144,6 +154,7 @@ describe('Security: Logo validation', () => {
       pdfSettings.uploadLogo({
         tenantId: 't1',
         companyId: 'c1',
+        authorization: CompanyPdfSettingsService.systemAuthorization(),
         logoBytes: truncatedPng,
         declaredMimeType: 'image/png',
       }),
@@ -191,7 +202,7 @@ describe('Security: Artifact hash mismatch → security audit', () => {
       retryCount: 0,
       maxRetries: 8,
     });
-    expect(result.nextStatus).toBe(DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED);
+    expect(result.nextStatus).toBe(DocumentDeliveryStatus.FAILED);
     expect(result.emitSecurityAudit).toBe(true);
     expect(result.immediateRetry).toBe(false);
   });

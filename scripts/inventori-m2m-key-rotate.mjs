@@ -3,6 +3,7 @@
  * SAFETY: NEVER prints secret to stdout. Writes only to .env.local (gitignored).
  */
 import { readFileSync, writeFileSync } from 'fs';
+import localSecretEnv from './local-secret-env.cjs';
 import { PrismaClient } from '@prisma/client';
 
 const envFile = readFileSync('.env.local', 'utf8');
@@ -16,11 +17,12 @@ for (const line of envFile.split('\n')) {
   if (key && !process.env[key]) process.env[key] = val;
 }
 
+const { requireLocalAdminCredentials, requireLocalSecret } = localSecretEnv;
+const ADMIN = requireLocalAdminCredentials();
 const BASE_URL = `http://localhost:${process.env.PORT ?? 3000}/api/v1`;
 const TENANT_ID  = process.env.INVENTORI_SANDBOX_TENANT_ID;
 const COMPANY_ID = process.env.INVENTORI_SANDBOX_COMPANY_ID;
-const ADMIN_EMAIL    = 'admin@inventori-sandbox.billing';
-const ADMIN_PASSWORD = 'Admin@Billing2026!';
+
 
 const REQUIRED_SCOPES = [
   'taxpayers:read', 'cabys:read', 'exchange-rates:read',
@@ -55,7 +57,7 @@ async function apiDelete(path, token) {
 
 async function main() {
   // Login
-  const auth = await apiPost('/auth/login', { tenantId: TENANT_ID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+  const auth = await apiPost('/auth/login', { tenantId: TENANT_ID, email: ADMIN.email, password: ADMIN.password });
   const JWT = auth.accessToken;
   console.log('[OK] Authenticated.');
 

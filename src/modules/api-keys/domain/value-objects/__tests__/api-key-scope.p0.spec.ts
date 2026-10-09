@@ -17,6 +17,11 @@ describe('API key scope — P0 fiscal-onboarding scopes', () => {
     expect(ALLOWED_API_KEY_SCOPES).toContain('fiscal-onboarding:write');
   });
 
+  it('AFPR resend is a valid least-privilege scope', () => {
+    expect(() => validateApiKeyScopes(['fiscal-deliveries:resend'])).not.toThrow();
+    expect(ALLOWED_API_KEY_SCOPES).toContain('fiscal-deliveries:resend');
+  });
+
   it('invalid scope still throws', () => {
     expect(() => validateApiKeyScopes(['verified:true'])).toThrow();
     expect(() => validateApiKeyScopes(['verification-source:hacienda'])).toThrow();

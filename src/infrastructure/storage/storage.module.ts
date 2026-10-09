@@ -3,11 +3,13 @@ import { ConfigService } from '@nestjs/config';
 import { STORAGE_PORT } from './ports/storage.port';
 import { LocalStorageAdapter } from './adapters/local-storage.adapter';
 import { S3StorageAdapter } from './adapters/s3-storage.adapter';
+import { StorageReadinessService } from './storage-readiness.service';
 import type { StorageConfig } from '../config/storage.config';
 
 @Global()
 @Module({
   providers: [
+    StorageReadinessService,
     {
       provide: STORAGE_PORT,
       useFactory: (configService: ConfigService) => {

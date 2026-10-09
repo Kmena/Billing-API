@@ -22,6 +22,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import localSecretEnv from './local-secret-env.cjs';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomUUID } from 'crypto';
@@ -39,6 +40,8 @@ for (const line of envContent.split('\n')) {
 }
 
 // ── Authoritative bootstrap constants (from previous task + .env.local) ─────
+const { requireLocalAdminCredentials, requireLocalSecret } = localSecretEnv;
+const ADMIN = requireLocalAdminCredentials();
 const TENANT_ID  = process.env.INVENTORI_SANDBOX_TENANT_ID;   // 25ae538c-b272-407b-83d0-ccc78be3c658
 const COMPANY_ID = process.env.INVENTORI_SANDBOX_COMPANY_ID;  // dde91f44-6ceb-4eb7-b322-0139919cc34d
 const API_KEY_ID = process.env.INVENTORI_M2M_API_KEY_ID;      // c255f9ff-3c9d-4665-8718-5c4467ae427a
@@ -46,9 +49,8 @@ const RAW_KEY    = process.env.INVENTORI_M2M_API_KEY;         // bk_test_8c3323e
 const KEY_PREFIX = process.env.INVENTORI_M2M_API_KEY_PREFIX;  // 8c3323eb
 const BASE_URL   = `http://localhost:${process.env.PORT ?? 3000}/api/v1`;
 const CERT_PATH  = process.env.F4S_SANDBOX_CERT_PATH ?? '.secrets/hacienda-sandbox.p12';
-const CERT_PIN   = process.env.F4S_SANDBOX_CERT_PIN ?? '2503';
-const ADMIN_EMAIL    = 'admin@inventori-sandbox.billing';
-const ADMIN_PASSWORD = 'Admin@Billing2026!';
+const CERT_PIN   = requireLocalSecret('F4S_SANDBOX_CERT_PIN');
+
 
 // Authoritative taxpayer data (from Hacienda /fe/ae — verified 2026-09-25)
 const COMPANY_DATA = {
@@ -158,14 +160,14 @@ async function main() {
 
   // ── 2. Seed TENANT_ADMIN user ──────────────────────────────────────────
   // Project uses argon2id for all password hashing (ADR-002)
-  const passwordHash = await argon2.hash(ADMIN_PASSWORD, { type: argon2.argon2id });
+  const passwordHash = await argon2.hash(ADMIN.password, { type: argon2.argon2id });
   const userId = randomUUID();
-  const existingUser = await prisma.user.findFirst({ where: { tenantId: TENANT_ID, email: ADMIN_EMAIL } });
+  const existingUser = await prisma.user.findFirst({ where: { tenantId: TENANT_ID, email: ADMIN.email } });
   let user = existingUser;
   if (!user) {
     user = await prisma.user.create({
       data: {
-        id: userId, tenantId: TENANT_ID, email: ADMIN_EMAIL,
+        id: userId, tenantId: TENANT_ID, email: ADMIN.email,
         passwordHash, role: 'TENANT_ADMIN', status: 'ACTIVE',
       },
     });
@@ -230,7 +232,7 @@ async function main() {
     console.log(`[OK] Certificate DB record seeded (no P12 backing): ${CERT_DB.id}`);
   } else {
     // Login first
-    const auth = await post('/auth/login', { tenantId: TENANT_ID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+    const auth = await post('/auth/login', { tenantId: TENANT_ID, email: ADMIN.email, password: ADMIN.password });
     const JWT = auth.accessToken;
 
     // Check if cert already exists (active)

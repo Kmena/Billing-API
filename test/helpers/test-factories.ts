@@ -2,9 +2,10 @@
  * Test factories for creating test data in E2E tests.
  * Used to set up fixtures quickly without going through HTTP endpoints.
  */
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomBytes, randomUUID } from 'crypto';
+import { registerOwnedTestTenant } from './test-database-ownership';
 
 export interface TestTenant {
   id: string;
@@ -40,6 +41,7 @@ export async function createTestTenant(
       .replace(/[^a-z0-9]/g, '-')
       .replace(/-+/g, '-');
 
+  await registerOwnedTestTenant(prisma, id);
   await prisma.tenant.create({
     data: { id, name, slug, status: 'ACTIVE', plan: 'TRIAL' },
   });

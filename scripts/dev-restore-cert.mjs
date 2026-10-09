@@ -25,6 +25,7 @@
  */
 
 import { readFileSync } from 'fs';
+import localSecretEnv from './local-secret-env.cjs';
 import http from 'http';
 
 // ── Load .env.local ───────────────────────────────────────────────────────────
@@ -39,13 +40,14 @@ for (const line of envContent.split('\n')) {
   if (k && !process.env[k]) process.env[k] = v;
 }
 
+const { requireLocalAdminCredentials, requireLocalSecret } = localSecretEnv;
+const ADMIN = requireLocalAdminCredentials();
 const TENANT_ID  = process.env.INVENTORI_SANDBOX_TENANT_ID;
 const COMPANY_ID = process.env.INVENTORI_SANDBOX_COMPANY_ID;
 const CERT_PATH  = process.env.F4S_SANDBOX_CERT_PATH ?? '.secrets/hacienda-sandbox.p12';
-const CERT_PIN   = process.env.F4S_SANDBOX_CERT_PIN;
+const CERT_PIN = requireLocalSecret('F4S_SANDBOX_CERT_PIN');
 const BASE_URL   = `http://localhost:${process.env.PORT ?? 3000}/api/v1`;
-const ADMIN_EMAIL    = 'admin@inventori-sandbox.billing';
-const ADMIN_PASSWORD = 'Admin@Billing2026!';
+
 
 if (!TENANT_ID || !COMPANY_ID) {
   console.error('[FAIL] INVENTORI_SANDBOX_TENANT_ID or INVENTORI_SANDBOX_COMPANY_ID not set in .env.local');
@@ -70,7 +72,7 @@ function httpRequest(opts, body) {
 }
 
 // ── 1. Login ──────────────────────────────────────────────────────────────────
-const loginPayload = JSON.stringify({ tenantId: TENANT_ID, email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+const loginPayload = JSON.stringify({ tenantId: TENANT_ID, email: ADMIN.email, password: ADMIN.password });
 const loginUrl = new URL(`${BASE_URL}/auth/login`);
 const loginResp = await httpRequest({
   hostname: loginUrl.hostname, port: parseInt(loginUrl.port), path: loginUrl.pathname,
@@ -127,6 +129,6 @@ if (uploadResp.status === 201) {
   console.log('     P12/PIN NOT in response (safe metadata only)');
 } else {
   console.error('[FAIL] Certificate upload failed:', uploadResp.status);
-  console.error('       Response:', uploadResp.body);
+  console.error('       Response details redacted.');
   process.exit(1);
 }

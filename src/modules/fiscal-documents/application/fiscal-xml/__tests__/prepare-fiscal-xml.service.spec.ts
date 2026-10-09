@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { PrepareFiscalXmlService } from '../prepare-fiscal-xml.service';
 import { HaciendaV44XmlSerializerAdapter } from '../../../infrastructure/xml/hacienda-v44-xml-serializer.adapter';
 import { Xsd11ValidatorAdapter } from '../../../infrastructure/xml/xsd11-validator.adapter';
@@ -64,9 +64,9 @@ function createService(
   const prisma = {
     fiscalDocument: {
       findFirst: jest.fn().mockResolvedValue(document),
-      update: jest.fn().mockImplementation(({ data }) => {
+      updateMany: jest.fn().mockImplementation(({ data }) => {
         Object.assign(document, data);
-        return Promise.resolve({ ...document });
+        return Promise.resolve({ count: 1 });
       }),
     },
     fiscalXmlArtifact: {
@@ -109,8 +109,9 @@ function createService(
     }),
   };
   const storage = {
-    upload: jest.fn().mockImplementation((key: string, content: Buffer) => {
-      uploads.set(key, Buffer.from(content));
+    ensureReady: jest.fn().mockResolvedValue(undefined),
+    upload: jest.fn().mockImplementation(({ key, bytes }) => {
+      uploads.set(key, Buffer.from(bytes));
       return Promise.resolve(key);
     }),
     download: jest.fn((key: string) => Promise.resolve(uploads.get(key) ?? Buffer.alloc(0))),
@@ -177,13 +178,35 @@ describe('PrepareFiscalXmlService', () => {
       const signedUpload = uploads.get(artifact().signedXmlStorageKey ?? '');
       expect(signedUpload?.toString('utf8')).toContain('<ds:Signature');
       expect(artifact().signedXmlSha256).toBeDefined();
-      expect(storage.upload).toHaveBeenCalledWith(
-        artifact().signedXmlStorageKey,
-        signedUpload,
-        expect.objectContaining({ artifactKind: 'signed' }),
-      );
+      expect(storage.upload).toHaveBeenCalledWith({
+        key: artifact().signedXmlStorageKey,
+        bytes: signedUpload,
+        contentType: 'application/xml',
+        metadata: expect.objectContaining({ artifactKind: 'signed' }),
+      });
     },
   );
+
+  it('fails closed before recording an XML attempt when storage is unavailable', async () => {
+    const document = createDocument('INVOICE');
+    const { service, prisma, storage, signer, xsdValidator } = createService(document);
+    storage.ensureReady.mockRejectedValueOnce(new Error('bucket unavailable'));
+
+    await expect(
+      service.execute({
+        tenantId: document.tenantId,
+        documentId: document.id,
+        apiKeyId,
+        scopes: ['invoices:write'],
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(prisma.fiscalXmlArtifact.create).not.toHaveBeenCalled();
+    expect(prisma.fiscalXmlArtifact.update).not.toHaveBeenCalled();
+    expect(storage.upload).not.toHaveBeenCalled();
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(xsdValidator.validate).not.toHaveBeenCalled();
+  });
 
   it('returns READY_TO_SUBMIT metadata without mutating signed artifacts', async () => {
     const document = createDocument('INVOICE');
@@ -212,6 +235,24 @@ describe('PrepareFiscalXmlService', () => {
     expect(storage.upload).not.toHaveBeenCalled();
     expect(signer.sign).not.toHaveBeenCalled();
     expect(xsdValidator.validate).not.toHaveBeenCalled();
+  });
+
+  it('does not reactivate a document superseded during XML preparation', async () => {
+    const document = createDocument('INVOICE');
+    const { service, prisma, signer } = createService(document);
+    prisma.fiscalDocument.updateMany.mockResolvedValueOnce({ count: 0 });
+
+    await expect(
+      service.execute({
+        tenantId: document.tenantId,
+        documentId: document.id,
+        apiKeyId,
+        scopes: ['invoices:write'],
+      }),
+    ).rejects.toMatchObject({ response: { code: FISCAL_XML_ERROR.documentNotReady } });
+
+    expect(document.status).toBe('READY_FOR_XML');
+    expect(signer.sign).not.toHaveBeenCalled();
   });
 
   it('does not persist signed bytes when signed XML fails official XSD validation', async () => {

@@ -30,7 +30,7 @@ build/
 
 # Signed fiscal documents — contain real fiscal data; must never be committed
 SIGNED_*.xml
-storage/
+/storage/
 
 # Test output — generated during test runs; never commit
 # test-output/ covers all subdirectories including F4-S evidence.

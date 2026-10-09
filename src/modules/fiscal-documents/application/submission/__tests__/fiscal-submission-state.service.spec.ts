@@ -67,11 +67,12 @@ describe('FiscalSubmissionStateService', () => {
     });
 
     const expectedSha = createHash('sha256').update(response).digest('hex');
-    expect(storage.upload).toHaveBeenCalledWith(
-      expect.stringContaining(submission.clave),
-      response,
-      expect.objectContaining({ sha256: expectedSha }),
-    );
+    expect(storage.upload).toHaveBeenCalledWith({
+      key: expect.stringContaining(submission.clave),
+      bytes: response,
+      contentType: 'application/xml',
+      metadata: expect.objectContaining({ sha256: expectedSha }),
+    });
     expect(prisma.fiscalSubmission.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: 'ACCEPTED', responseSha256: expectedSha }),
@@ -85,16 +86,19 @@ describe('FiscalSubmissionStateService', () => {
     );
   });
 
-  it('ignores stale non-terminal updates after terminal state', async () => {
-    const { service, prisma, storage } = makeService({ ...submission, status: 'ACCEPTED' });
+  it.each(['ACCEPTED', 'REJECTED', 'SUPERSEDED'] as const)(
+    'ignores stale updates after terminal %s state',
+    async (status) => {
+      const { service, prisma, storage } = makeService({ ...submission, status });
 
-    await service.applyProviderResult('submission-id', {
-      kind: 'PROCESSING',
-      nextStatus: 'PROCESSING',
-      providerStatus: 'procesando',
-    });
+      await service.applyProviderResult('submission-id', {
+        kind: 'PROCESSING',
+        nextStatus: 'PROCESSING',
+        providerStatus: 'procesando',
+      });
 
-    expect(prisma.fiscalSubmission.updateMany).not.toHaveBeenCalled();
-    expect(storage.upload).not.toHaveBeenCalled();
-  });
+      expect(prisma.fiscalSubmission.updateMany).not.toHaveBeenCalled();
+      expect(storage.upload).not.toHaveBeenCalled();
+    },
+  );
 });

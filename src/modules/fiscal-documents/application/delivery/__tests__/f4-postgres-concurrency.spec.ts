@@ -1,8 +1,9 @@
 /**
  * F4 Real PostgreSQL Concurrency Tests — TASK-018 database-level verification
  *
- * Requires: DATABASE_URL pointing to a real PostgreSQL instance.
- * Skipped automatically when DATABASE_URL is absent.
+ * Requires: RUN_DB_TESTS=1 and BILLING_TEST_DATABASE_URL pointing to a
+ * PostgreSQL database whose name ends in `_test`.
+ * DATABASE_URL is never accepted as authorization for destructive tests.
  *
  * Proves:
  * A. Duplicate INITIAL_DOCUMENT delivery creation → exactly one row (DB unique index)
@@ -14,20 +15,31 @@
  * G. Concurrent attempt numbering isolation
  * H. Delivery cannot change FiscalDocument.status (invariant)
  */
-// eslint-disable-next-line no-restricted-imports
-import { PrismaClient } from '@prisma/client';
 import { randomUUID, createHash } from 'crypto';
+import { installGuardedTestDatabaseEnvironment } from '../../../../../../test/helpers/test-database-safety';
+import { createGuardedTestPrisma } from '../../../../../../test/helpers/guarded-test-prisma';
+type GuardedPrismaClient = Awaited<ReturnType<typeof createGuardedTestPrisma>>['prisma'];
+import {
+  assertOwnedTestTenants,
+  registerOwnedTestTenant,
+  releaseOwnedTestTenants,
+} from '../../../../../../test/helpers/test-database-ownership';
 
-const describeIfDatabase = process.env.DATABASE_URL ? describe : describe.skip;
+const runDatabaseTests = process.env.RUN_DB_TESTS === '1';
+if (runDatabaseTests) {
+  installGuardedTestDatabaseEnvironment();
+}
+const describeIfDatabase = runDatabaseTests ? describe : describe.skip;
 
 const VALID_CLAVE = '50601012500310112345600100001010000000001100000001';
 
-async function seedF4TestFixture(prisma: PrismaClient) {
+async function seedF4TestFixture(prisma: GuardedPrismaClient) {
   const tenantId = randomUUID();
   const companyId = randomUUID();
   const pointId = randomUUID();
   const documentId = randomUUID();
 
+  await registerOwnedTestTenant(prisma, tenantId);
   await prisma.tenant.create({
     data: { id: tenantId, name: `F4 Tenant ${tenantId}`, slug: `f4-${tenantId.slice(0, 8)}` },
   });
@@ -80,7 +92,8 @@ async function seedF4TestFixture(prisma: PrismaClient) {
   return { tenantId, companyId, documentId };
 }
 
-async function cleanupF4TestData(prisma: PrismaClient, tenantId: string) {
+async function cleanupF4TestData(prisma: GuardedPrismaClient, tenantId: string) {
+  await assertOwnedTestTenants(prisma, [tenantId]);
   await prisma.deliveryAttempt.deleteMany({ where: { delivery: { tenantId } } });
   await prisma.documentDelivery.deleteMany({ where: { tenantId } });
   await prisma.fiscalArtifact.deleteMany({ where: { tenantId } });
@@ -90,10 +103,11 @@ async function cleanupF4TestData(prisma: PrismaClient, tenantId: string) {
   await prisma.fiscalIssuancePoint.deleteMany({ where: { tenantId } });
   await prisma.company.deleteMany({ where: { tenantId } });
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
+  await releaseOwnedTestTenants(prisma, [tenantId]);
 }
 
 async function createDelivery(
-  prisma: PrismaClient,
+  prisma: GuardedPrismaClient,
   tenantId: string,
   companyId: string,
   fiscalDocumentId: string,
@@ -128,7 +142,7 @@ async function createDelivery(
 }
 
 async function createArtifact(
-  prisma: PrismaClient,
+  prisma: GuardedPrismaClient,
   tenantId: string,
   companyId: string,
   fiscalDocumentId: string,
@@ -164,14 +178,13 @@ async function createArtifact(
 }
 
 describeIfDatabase('F4 PostgreSQL concurrency — real database', () => {
-  let prisma: PrismaClient;
+  let prisma: GuardedPrismaClient;
   let tenantId: string;
   let companyId: string;
   let documentId: string;
 
   beforeAll(async () => {
-    prisma = new PrismaClient();
-    await prisma.$connect();
+    ({ prisma } = await createGuardedTestPrisma());
     const fixture = await seedF4TestFixture(prisma);
     tenantId = fixture.tenantId;
     companyId = fixture.companyId;

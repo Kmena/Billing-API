@@ -22,6 +22,8 @@ export const ALLOWED_API_KEY_SCOPES = [
   'tickets:write',
   'documents:read',
   'documents:write',
+  // AFPR: narrowly authorizes delivery retry of an already accepted package.
+  'fiscal-deliveries:resend',
 ] as const;
 
 export type ApiKeyScope = (typeof ALLOWED_API_KEY_SCOPES)[number];

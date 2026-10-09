@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
@@ -64,6 +65,14 @@ export class PrepareFiscalXmlService {
       throw new ConflictException({ code: FISCAL_XML_ERROR.documentNotReady });
     }
 
+    try {
+      await this.storage.ensureReady();
+    } catch {
+      // Do this before recording an XML attempt: unavailable storage must not
+      // consume a processing attempt or leave mutable fiscal metadata behind.
+      throw new ServiceUnavailableException({ code: 'FISCAL_STORAGE_NOT_READY' });
+    }
+
     const startedAt = Date.now();
     const artifact = await this.upsertAttemptArtifact(document, existingArtifact?.id);
     try {
@@ -77,13 +86,22 @@ export class PrepareFiscalXmlService {
       const unsignedXmlBuffer = Buffer.from(generated.xml, 'utf8');
       const unsignedXmlSha256 = this.sha256(unsignedXmlBuffer);
       const unsignedKey = this.storageKey(document, 'unsigned');
-      await this.storage.upload(
-        unsignedKey,
-        unsignedXmlBuffer,
-        this.storageMetadata(document, 'unsigned'),
-      );
-      await this.prisma.$transaction([
-        this.prisma.fiscalXmlArtifact.update({
+      await this.storage.upload({
+        key: unsignedKey,
+        bytes: unsignedXmlBuffer,
+        contentType: 'application/xml',
+        metadata: this.storageMetadata(document, 'unsigned'),
+      });
+      await this.prisma.$transaction(async (tx) => {
+        const documentUpdate = await tx.fiscalDocument.updateMany({
+          where: {
+            id: document.id,
+            status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+          },
+          data: { status: 'XML_GENERATED' },
+        });
+        this.assertDocumentStatusAdvanced(documentUpdate.count);
+        await tx.fiscalXmlArtifact.update({
           where: { id: artifact.id },
           data: {
             unsignedXmlStorageKey: unsignedKey,
@@ -91,12 +109,8 @@ export class PrepareFiscalXmlService {
             lastErrorCode: null,
             lastErrorMessage: null,
           },
-        }),
-        this.prisma.fiscalDocument.update({
-          where: { id: document.id },
-          data: { status: 'XML_GENERATED' },
-        }),
-      ]);
+        });
+      });
       this.assertPreSignStructure(generated.xml);
       this.recordAudit(input, document, 'fiscal-xml.generated', {
         artifactHash: unsignedXmlSha256,
@@ -112,10 +126,7 @@ export class PrepareFiscalXmlService {
         generated.xml,
         this.toPkcs12Certificate(certificate.secret),
       );
-      await this.prisma.fiscalDocument.update({
-        where: { id: document.id },
-        data: { status: 'SIGNED' },
-      });
+      await this.advanceDocumentStatus(document.id, 'SIGNED');
       this.recordAudit(input, document, 'fiscal-xml.signed', {
         certificateId: certificate.id,
         signatureProfile: HACIENDA_V44_XADES_CONTRACT.profile,
@@ -153,12 +164,21 @@ export class PrepareFiscalXmlService {
       const signedBuffer = Buffer.from(signedGenerated.xml, 'utf8');
       const signedXmlSha256 = this.sha256(signedBuffer);
       const signedKey = this.storageKey(document, 'signed');
-      await this.storage.upload(signedKey, signedBuffer, this.storageMetadata(document, 'signed'));
+      await this.storage.upload({
+        key: signedKey,
+        bytes: signedBuffer,
+        contentType: 'application/xml',
+        metadata: this.storageMetadata(document, 'signed'),
+      });
       const completed = await this.prisma.$transaction(async (tx) => {
-        await tx.fiscalDocument.update({
-          where: { id: document.id },
+        const validatedUpdate = await tx.fiscalDocument.updateMany({
+          where: {
+            id: document.id,
+            status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+          },
           data: { status: 'XML_VALIDATED' },
         });
+        this.assertDocumentStatusAdvanced(validatedUpdate.count);
         const updatedArtifact = await tx.fiscalXmlArtifact.update({
           where: { id: artifact.id },
           data: {
@@ -178,10 +198,14 @@ export class PrepareFiscalXmlService {
             lastErrorMessage: null,
           },
         });
-        await tx.fiscalDocument.update({
-          where: { id: document.id },
+        const readyUpdate = await tx.fiscalDocument.updateMany({
+          where: {
+            id: document.id,
+            status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+          },
           data: { status: 'READY_TO_SUBMIT' },
         });
+        this.assertDocumentStatusAdvanced(readyUpdate.count);
         return updatedArtifact;
       });
       await this.artifactIndex.ensureSignedXmlArtifact({
@@ -230,6 +254,23 @@ export class PrepareFiscalXmlService {
         normalizedErrorCode: code,
       });
       throw new BadRequestException({ code });
+    }
+  }
+
+  private async advanceDocumentStatus(documentId: string, status: 'SIGNED'): Promise<void> {
+    const update = await this.prisma.fiscalDocument.updateMany({
+      where: {
+        id: documentId,
+        status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+      },
+      data: { status },
+    });
+    this.assertDocumentStatusAdvanced(update.count);
+  }
+
+  private assertDocumentStatusAdvanced(count: number): void {
+    if (count !== 1) {
+      throw new ConflictException({ code: FISCAL_XML_ERROR.documentNotReady });
     }
   }
 

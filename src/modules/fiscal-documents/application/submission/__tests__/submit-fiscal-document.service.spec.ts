@@ -214,6 +214,40 @@ describe('SubmitFiscalDocumentService', () => {
     );
   });
 
+  it('returns a SUPERSEDED existing submission without re-enqueueing', async () => {
+    const superseded = {
+      id: 'submission-id',
+      fiscalDocumentId: readyDocument.id,
+      clave: readyDocument.clave,
+      environment: readyDocument.environment,
+      status: 'SUPERSEDED',
+      attemptCount: 1,
+      reconciliationAttemptCount: 1,
+      nextAttemptAt: null,
+      acceptedAt: null,
+      rejectedAt: null,
+      lastNormalizedErrorCode: null,
+      lastSanitizedErrorMessage: null,
+      lastProviderStatus: null,
+      responseSha256: null,
+      responseContentType: null,
+      responseReceivedAt: null,
+    };
+    const { service, prisma, queue } = makeService({
+      fiscalDocument: {
+        findFirst: jest.fn().mockResolvedValue({
+          ...readyDocument,
+          status: 'SUPERSEDED',
+          submission: superseded,
+        }),
+      },
+    });
+
+    await expect(service.execute(input())).resolves.toMatchObject({ status: 'SUPERSEDED' });
+    expect(prisma.fiscalSubmission.update).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
+  });
+
   it('returns terminal existing submission without re-enqueueing', async () => {
     const terminal = {
       id: 'submission-id',

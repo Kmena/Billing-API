@@ -1,31 +1,59 @@
-/**
- * FiscalArtifactService — F4 fiscal artifact listing and metadata.
- *
- * F4 — TASK-005
- * Lists artifact metadata for tenant/company-scoped fiscal documents.
- * Internal storage keys are NEVER exposed in API responses.
- * Provides signed artifact downloads after integrity verification.
- *
- * FR-017: Protected downloads — authenticated, tenant/company-scoped.
- * FR-020: SHA-256 integrity verified before streaming.
- * FR-027: Content-Disposition filenames follow official Hacienda convention.
- */
-import { Injectable, Logger } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { STORAGE_PORT, StoragePort } from '../../../../infrastructure/storage/ports/storage.port';
 import {
   FiscalEvidenceResolverService,
+  ArtifactIntegrityException,
   ArtifactNotFoundException,
 } from './fiscal-evidence-resolver.service';
 import { DomainException } from '../../../shared/domain/domain-exception';
+import {
+  FiscalPdfArtifactPolicyException,
+  FiscalPdfArtifactStateService,
+  FiscalPdfArtifactState,
+} from './fiscal-pdf-artifact-state.service';
+import { VALID_PDF_VERIFIER, ValidPdfVerifier } from '../pdf/valid-pdf-verifier.port';
+
+type RequestedDocumentType = 'INVOICE' | 'TICKET';
+type RequestedEnvironment = 'PRODUCTION' | 'SANDBOX';
 
 export class FiscalArtifactAccessDeniedException extends DomainException {
   readonly code = 'FISCAL_ARTIFACT_ACCESS_DENIED';
   readonly httpStatus = 403;
   constructor() {
-    super('Access to fiscal artifact denied — insufficient authorization.');
+    super('Access to fiscal artifact denied.');
   }
+}
+
+export class FiscalArtifactPolicyDeniedException extends DomainException {
+  readonly httpStatus: number;
+  constructor(
+    readonly code: string,
+    state: FiscalPdfArtifactState,
+  ) {
+    super(`Fiscal PDF artifact is unavailable for this operation: ${state}.`);
+    this.httpStatus =
+      code === 'ARTIFACT_MISSING'
+        ? 404
+        : code === 'PDF_OVERSIZED'
+          ? 413
+          : code === 'PDF_INVALID_STRUCTURE' || code === 'ARTIFACT_HASH_MISMATCH'
+            ? 422
+            : 409;
+  }
+}
+
+export interface ArtifactAccessContext {
+  readonly tenantId: string;
+  readonly companyId: string;
+  readonly apiKeyId: string;
+  readonly scopes: readonly string[];
+}
+
+export interface ArtifactDocumentContext {
+  readonly fiscalDocumentId: string;
+  readonly environment: RequestedEnvironment;
+  readonly documentType: RequestedDocumentType;
 }
 
 export interface FiscalArtifactMetadata {
@@ -38,14 +66,14 @@ export interface FiscalArtifactMetadata {
   readonly templateId: string | null;
   readonly rendererVersion: string | null;
   readonly createdAt: Date;
-  /** External filename per Hacienda convention (FR-027). Never the internal storage key. */
   readonly externalFilename: string;
+  readonly artifactState?: FiscalPdfArtifactState;
+  readonly legacyInvalid?: boolean;
 }
 
 export interface ArtifactDownload {
   readonly bytes: Buffer;
   readonly contentType: string;
-  /** External filename for Content-Disposition header (FR-027). */
   readonly externalFilename: string;
   readonly sizeBytes: number;
 }
@@ -58,86 +86,111 @@ export class FiscalArtifactService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
     private readonly evidenceResolver: FiscalEvidenceResolverService,
+    @Inject(VALID_PDF_VERIFIER) private readonly pdfVerifier: ValidPdfVerifier,
+    private readonly artifactState?: FiscalPdfArtifactStateService,
   ) {}
 
-  /**
-   * List artifact metadata for a fiscal document.
-   * Enforces tenant/company isolation. Never exposes internal storage keys.
-   */
   async listArtifacts(
-    tenantId: string,
-    companyId: string,
-    fiscalDocumentId: string,
+    access: ArtifactAccessContext,
+    request: ArtifactDocumentContext,
   ): Promise<FiscalArtifactMetadata[]> {
-    // Verify document ownership
-    const doc = await this.prisma.fiscalDocument.findFirst({
-      where: { id: fiscalDocumentId, tenantId, companyId },
-    });
-    if (!doc) {
-      throw new ArtifactNotFoundException(fiscalDocumentId, 'document');
-    }
-
+    await this.assertCompanyAccess(access, request.documentType);
+    const document = await this.resolveDocument(access, request);
     const artifacts = await this.prisma.fiscalArtifact.findMany({
-      where: { tenantId, companyId, fiscalDocumentId, supersededAt: null },
+      where: {
+        tenantId: access.tenantId,
+        companyId: access.companyId,
+        fiscalDocumentId: request.fiscalDocumentId,
+        supersededAt: null,
+      },
       orderBy: { createdAt: 'asc' },
     });
 
-    return artifacts.map((a) => ({
-      id: a.id,
-      fiscalDocumentId: a.fiscalDocumentId,
-      type: a.type,
-      contentType: a.contentType,
-      sizeBytes: a.sizeBytes,
-      sha256: a.sha256,
-      templateId: a.templateId,
-      rendererVersion: a.rendererVersion,
-      createdAt: a.createdAt,
-      externalFilename: this.buildExternalFilename(doc.clave, a.type),
-    }));
+    return Promise.all(
+      artifacts.map(async (artifact) => {
+        this.assertArtifactMetadata(artifact);
+        const assessment =
+          artifact.type === 'PDF'
+            ? await this.requireArtifactState().assess(artifact, {
+                documentType: document.type,
+                clave: document.clave,
+                consecutive: document.consecutive,
+              })
+            : undefined;
+        return {
+          id: artifact.id,
+          fiscalDocumentId: artifact.fiscalDocumentId,
+          type: artifact.type,
+          contentType: artifact.contentType,
+          sizeBytes: artifact.sizeBytes,
+          sha256: artifact.sha256,
+          templateId: artifact.templateId,
+          rendererVersion: artifact.rendererVersion,
+          createdAt: artifact.createdAt,
+          externalFilename: this.buildExternalFilename(document.clave, artifact.type),
+          ...(assessment ? { artifactState: assessment.state } : {}),
+          ...(assessment?.state === 'HISTORICAL_MOCK' ? { legacyInvalid: true } : {}),
+        };
+      }),
+    );
   }
 
-  /**
-   * Download artifact bytes after integrity verification.
-   * Enforces tenant/company/artifact ownership isolation.
-   * Returns external filename for Content-Disposition (FR-027).
-   * Never exposes internal storage keys.
-   */
   async downloadArtifact(
-    tenantId: string,
-    companyId: string,
-    artifactId: string,
+    access: ArtifactAccessContext,
+    request: ArtifactDocumentContext & Readonly<{ artifactId: string }>,
   ): Promise<ArtifactDownload> {
+    await this.assertCompanyAccess(access, request.documentType);
+    const document = await this.resolveDocument(access, request);
     const artifact = await this.prisma.fiscalArtifact.findFirst({
-      where: { id: artifactId, tenantId, companyId, supersededAt: null },
-      include: { fiscalDocument: { select: { clave: true } } },
+      where: {
+        id: request.artifactId,
+        tenantId: access.tenantId,
+        companyId: access.companyId,
+        fiscalDocumentId: request.fiscalDocumentId,
+        supersededAt: null,
+      },
     });
+    if (!artifact) throw new ArtifactNotFoundException(request.artifactId, 'artifact');
+    this.assertArtifactMetadata(artifact);
 
-    if (!artifact) {
-      throw new ArtifactNotFoundException(artifactId, 'artifact');
+    let bytes: Buffer;
+    if (artifact.type === 'PDF') {
+      try {
+        bytes = this.requireArtifactState().requireDownloadable(
+          await this.requireArtifactState().assess(artifact, {
+            documentType: document.type,
+            clave: document.clave,
+            consecutive: document.consecutive,
+          }),
+        );
+      } catch (error: unknown) {
+        if (error instanceof FiscalPdfArtifactPolicyException) {
+          throw new FiscalArtifactPolicyDeniedException(error.code, error.state);
+        }
+        throw error;
+      }
+    } else {
+      bytes = await this.storage.download(artifact.storageKey);
+      await this.evidenceResolver.verifyIntegrity(
+        bytes,
+        artifact.sha256,
+        artifact.fiscalDocumentId,
+        artifact.type,
+      );
+      if (bytes.length !== artifact.sizeBytes) {
+        throw new ArtifactIntegrityException(artifact.fiscalDocumentId, artifact.type);
+      }
     }
 
-    const bytes = await this.storage.download(artifact.storageKey);
-    await this.evidenceResolver.verifyIntegrity(
-      bytes,
-      artifact.sha256,
-      artifact.fiscalDocumentId,
-      artifact.type,
-    );
-
-    const externalFilename = this.buildExternalFilename(
-      artifact.fiscalDocument.clave,
-      artifact.type,
-    );
-
+    const externalFilename = this.buildExternalFilename(document.clave, artifact.type);
     this.logger.log({
       msg: 'Artifact download served',
-      artifactId,
+      artifactId: artifact.id,
       type: artifact.type,
       sizeBytes: bytes.length,
-      tenantId,
-      companyId,
+      tenantId: access.tenantId,
+      companyId: access.companyId,
     });
-
     return {
       bytes,
       contentType: artifact.contentType,
@@ -146,15 +199,6 @@ export class FiscalArtifactService {
     };
   }
 
-  /**
-   * Build the official external filename for an artifact (FR-027).
-   * NEVER returns the internal storage key.
-   *
-   * Convention:
-   * - SIGNED_XML: {clave}.xml
-   * - HACIENDA_RESPONSE_XML: {clave}_respuesta.xml
-   * - PDF: {clave}.pdf
-   */
   buildExternalFilename(clave: string, artifactType: string): string {
     switch (artifactType) {
       case 'SIGNED_XML':
@@ -168,17 +212,84 @@ export class FiscalArtifactService {
     }
   }
 
-  /**
-   * Build a safe Content-Disposition header value.
-   * Prevents CRLF injection and path traversal.
-   */
   buildContentDisposition(externalFilename: string): string {
-    // Sanitize: remove CRLF injection, path separators, and path traversal sequences
     const safe = externalFilename
-      .replace(/[\r\n\x00]/g, '') // CRLF/null injection
-      .replace(/[\\/]/g, '_') // path separators
-      .replace(/\.\./g, '_') // path traversal (..)
-      .replace(/[^\w.\-_]/g, '_'); // any other unsafe chars
+      .replace(/[\r\n\x00]/g, '')
+      .replace(/[\\/]/g, '_')
+      .replace(/\.\./g, '_')
+      .replace(/[^\w.\-_]/g, '_');
     return `attachment; filename="${safe}"`;
+  }
+
+  private async assertCompanyAccess(
+    access: ArtifactAccessContext,
+    documentType: RequestedDocumentType,
+  ): Promise<void> {
+    const company = await this.prisma.company.findFirst({
+      where: { id: access.companyId, tenantId: access.tenantId },
+      select: { id: true },
+    });
+    if (!company) throw new ArtifactNotFoundException(access.companyId, 'company');
+
+    const binding = await this.prisma.apiKeyCompany.findUnique({
+      where: {
+        apiKeyId_companyId: {
+          apiKeyId: access.apiKeyId,
+          companyId: access.companyId,
+        },
+      },
+    });
+    if (!binding) throw new FiscalArtifactAccessDeniedException();
+
+    const requiredScope = documentType === 'INVOICE' ? 'invoices:read' : 'tickets:read';
+    if (!access.scopes.includes(requiredScope)) throw new FiscalArtifactAccessDeniedException();
+  }
+
+  private async resolveDocument(
+    access: ArtifactAccessContext,
+    request: ArtifactDocumentContext,
+  ): Promise<{ clave: string; consecutive: string; type: RequestedDocumentType }> {
+    const document = await this.prisma.fiscalDocument.findFirst({
+      where: {
+        id: request.fiscalDocumentId,
+        tenantId: access.tenantId,
+        companyId: access.companyId,
+        environment: request.environment,
+        type: request.documentType,
+      },
+      select: { clave: true, consecutive: true, type: true },
+    });
+    if (!document) throw new ArtifactNotFoundException(request.fiscalDocumentId, 'document');
+    return document as { clave: string; consecutive: string; type: RequestedDocumentType };
+  }
+
+  private assertArtifactMetadata(artifact: {
+    type: string;
+    contentType: string;
+    templateId: string | null;
+    rendererVersion: string | null;
+  }): void {
+    if (artifact.type === 'PDF') {
+      if (
+        artifact.contentType !== 'application/pdf' ||
+        !artifact.templateId ||
+        !artifact.rendererVersion
+      ) {
+        throw new ArtifactNotFoundException('', 'artifact');
+      }
+      return;
+    }
+    if (
+      (artifact.type !== 'SIGNED_XML' && artifact.type !== 'HACIENDA_RESPONSE_XML') ||
+      !['application/xml', 'text/xml'].includes(artifact.contentType) ||
+      artifact.templateId !== null ||
+      artifact.rendererVersion !== null
+    ) {
+      throw new ArtifactNotFoundException('', 'artifact');
+    }
+  }
+
+  private requireArtifactState(): FiscalPdfArtifactStateService {
+    return this.artifactState ?? new FiscalPdfArtifactStateService(this.storage, this.pdfVerifier);
   }
 }

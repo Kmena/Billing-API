@@ -1,0 +1,37 @@
+{
+  "name": "INV-966 historical fiscal evidence — sanitized",
+  "lookupScope": {
+    "companyId": "22222222-2222-4222-8222-222222222222",
+    "environment": "SANDBOX",
+    "operation": "fiscal-document.create.invoice"
+  },
+  "canonicalInput": {
+    "receiver": {
+      "email": "receiver@example.test",
+      "identificationNumber": "123456789",
+      "identificationType": "FISICA",
+      "name": "SANITIZED RECEIVER"
+    },
+    "currency": "CRC",
+    "exchangeRate": null,
+    "saleCondition": "01",
+    "creditTermDays": null,
+    "paymentMethod": "01",
+    "lines": [
+      {
+        "lineNumber": 1,
+        "cabysCode": "1234567890123",
+        "description": "Sanitized fiscal line",
+        "unitMeasure": "Unid",
+        "quantity": "1",
+        "unitPrice": "20000.0",
+        "discountAmount": "0",
+        "taxAmount": "2600",
+        "taxCode": "01",
+        "taxRateCode": "08",
+        "taxRate": "13"
+      }
+    ]
+  },
+  "expectedSha256": "184baa6665d19f0271fb385ce63bd4ff5632c9b39da052f5843825564cf23d5a"
+}

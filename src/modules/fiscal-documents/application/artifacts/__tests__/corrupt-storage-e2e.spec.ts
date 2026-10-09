@@ -6,18 +6,26 @@
  */
 import { createHash } from 'crypto';
 import { FiscalArtifactService } from '../fiscal-artifact.service';
+import { FiscalPdfArtifactStateService } from '../fiscal-pdf-artifact-state.service';
 import { FiscalEvidenceResolverService } from '../fiscal-evidence-resolver.service';
 import { DeliveryWorkerService } from '../../delivery/delivery-worker.service';
-import { StoragePort } from '../../../../../infrastructure/storage/ports/storage.port';
+import {
+  StoragePort,
+  StorageUploadRequest,
+} from '../../../../../infrastructure/storage/ports/storage.port';
 import { DocumentDeliveryStatus } from '../../../domain/delivery/document-delivery-status.enum';
 import { EventClass } from '../../../../audit/application/audit.service';
 
 class MutableMemoryStorage implements StoragePort {
   private readonly objects = new Map<string, Buffer>();
 
-  async upload(key: string, content: Buffer): Promise<string> {
-    this.objects.set(key, Buffer.from(content));
-    return key;
+  async ensureReady(): Promise<void> {
+    return;
+  }
+
+  async upload(request: StorageUploadRequest): Promise<string> {
+    this.objects.set(request.key, Buffer.from(request.bytes));
+    return request.key;
   }
 
   async download(key: string): Promise<Buffer> {
@@ -68,8 +76,16 @@ describe('F4 corrupt storage integrity flow', () => {
     auditRecords = [];
     emailSend = jest.fn();
 
-    await storage.upload(signedXmlKey, Buffer.from('<signed>ok</signed>'));
-    await storage.upload(pdfKey, Buffer.from('%PDF-expected-bytes'));
+    await storage.upload({
+      key: signedXmlKey,
+      bytes: Buffer.from('<signed>ok</signed>'),
+      contentType: 'application/xml',
+    });
+    await storage.upload({
+      key: pdfKey,
+      bytes: Buffer.from('%PDF-expected-bytes'),
+      contentType: 'application/pdf',
+    });
     storage.corrupt(pdfKey, Buffer.from('%PDF-corrupted-bytes'));
   });
 
@@ -78,6 +94,19 @@ describe('F4 corrupt storage integrity flow', () => {
     const pdfExpectedBytes = Buffer.from('%PDF-expected-bytes');
 
     return {
+      company: {
+        findFirst: jest.fn().mockResolvedValue({ id: companyId }),
+      },
+      apiKeyCompany: {
+        findUnique: jest.fn().mockResolvedValue({ apiKeyId: 'api-key-corrupt', companyId }),
+      },
+      fiscalDocument: {
+        findFirst: jest.fn().mockResolvedValue({
+          clave,
+          consecutive: '00100001010000000001',
+          type: 'INVOICE',
+        }),
+      },
       fiscalArtifact: {
         findFirst: jest
           .fn()
@@ -150,16 +179,34 @@ describe('F4 corrupt storage integrity flow', () => {
       prisma as unknown as EvidenceResolverDeps[0],
       storage,
     );
+    const artifactState = new FiscalPdfArtifactStateService(storage, {
+      verify: jest.fn(),
+    } as never);
     const artifactService = new FiscalArtifactService(
       prisma as unknown as ArtifactServiceDeps[0],
       storage,
       evidenceResolver,
+      { verify: jest.fn() } as ArtifactServiceDeps[3],
+      artifactState,
     );
 
     await expect(
-      artifactService.downloadArtifact(tenantId, companyId, artifactId),
+      artifactService.downloadArtifact(
+        {
+          tenantId,
+          companyId,
+          apiKeyId: 'api-key-corrupt',
+          scopes: ['invoices:read'],
+        },
+        {
+          fiscalDocumentId,
+          environment: 'SANDBOX',
+          documentType: 'INVOICE',
+          artifactId,
+        },
+      ),
     ).rejects.toMatchObject({
-      code: 'ARTIFACT_INTEGRITY_FAILURE',
+      code: 'ARTIFACT_HASH_MISMATCH',
     });
 
     const worker = new DeliveryWorkerService(
@@ -179,12 +226,13 @@ describe('F4 corrupt storage integrity flow', () => {
           auditRecords.push(event);
         },
       } as DeliveryWorkerDeps[6],
+      artifactState,
     );
 
     await worker.processDelivery({ deliveryId });
 
     expect(emailSend).not.toHaveBeenCalled();
-    expect(deliveryStatus).toBe(DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED);
+    expect(deliveryStatus).toBe(DocumentDeliveryStatus.FAILED);
     expect(auditRecords).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

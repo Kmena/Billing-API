@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { StoragePort } from '../ports/storage.port';
+import { StoragePort, StorageUploadRequest } from '../ports/storage.port';
+import {
+  assertRealHaciendaDisabledInTests,
+  assertSafeTestLocalStorage,
+} from '../test-storage-safety';
 
 /**
  * LocalStorageAdapter — Filesystem-based storage for development without LocalStack.
@@ -14,15 +18,23 @@ export class LocalStorageAdapter implements StoragePort {
   private readonly signingSecret: string;
 
   constructor(storagePath?: string, signingSecret?: string) {
-    this.storagePath = storagePath ?? './storage';
+    const configuredPath = storagePath ?? './storage';
+    assertRealHaciendaDisabledInTests();
+    this.storagePath =
+      process.env.NODE_ENV === 'test' ? assertSafeTestLocalStorage(configuredPath) : configuredPath;
     this.signingSecret = signingSecret ?? 'local-signing-secret-dev-only';
   }
 
-  async upload(key: string, content: Buffer, _metadata?: Record<string, string>): Promise<string> {
-    const filePath = this.resolveKey(key);
+  async ensureReady(): Promise<void> {
+    await fs.mkdir(this.storagePath, { recursive: true });
+    await fs.access(this.storagePath);
+  }
+
+  async upload(request: StorageUploadRequest): Promise<string> {
+    const filePath = this.resolveKey(request.key);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, content);
-    return key;
+    await fs.writeFile(filePath, request.bytes);
+    return request.key;
   }
 
   async download(key: string): Promise<Buffer> {

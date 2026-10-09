@@ -138,6 +138,15 @@ export const validationSchema = Joi.object({
   // F4: Delivery retry horizon
   DELIVERY_MAX_RETRIES: Joi.number().integer().positive().default(8),
 
+  // Historical recovery is disabled unless an operator explicitly enables a bounded window.
+  // New terminal-result delivery and ordinary retries are intentionally unaffected.
+  FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false),
+  FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: Joi.string().isoDate().empty('').optional(),
+  FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: Joi.string().isoDate().empty('').optional(),
+
   // Hacienda CE reception submission
   HACIENDA_RECEPCION_PRODUCTION_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
@@ -149,4 +158,23 @@ export const validationSchema = Joi.object({
   HACIENDA_SUBMISSION_CALLBACK_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-});
+})
+  .custom((value, helpers) => {
+    const enabled = value.FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED === true;
+    const startAt = value.FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT;
+    const endAt = value.FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT;
+
+    if (enabled && (!startAt || !endAt)) {
+      return helpers.error('any.invalid');
+    }
+    if ((startAt && !endAt) || (!startAt && endAt)) {
+      return helpers.error('any.invalid');
+    }
+    if (startAt && endAt && new Date(startAt).getTime() >= new Date(endAt).getTime()) {
+      return helpers.error('any.invalid');
+    }
+    return value;
+  })
+  .messages({
+    'any.invalid': 'Invalid fiscal delivery startup recovery configuration.',
+  });

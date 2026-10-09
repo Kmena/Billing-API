@@ -23,6 +23,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import localSecretEnv from './local-secret-env.cjs';
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import { PrismaClient } from '@prisma/client';
@@ -40,14 +41,15 @@ for (const line of envFile.split('\n')) {
   if (key && !process.env[key]) process.env[key] = val;
 }
 
+const { requireLocalAdminCredentials, requireLocalSecret } = localSecretEnv;
+const ADMIN = requireLocalAdminCredentials();
 const BASE_URL = `http://localhost:${process.env.PORT ?? 3000}/api/v1`;
 const CERT_PATH = process.env.F4S_SANDBOX_CERT_PATH ?? '.secrets/hacienda-sandbox.p12';
 const CERT_PIN  = process.env.F4S_SANDBOX_CERT_PIN  ?? '';
 const HACIENDA_USER = process.env.F4S_SANDBOX_USERNAME ?? '';
 const HACIENDA_PASS = process.env.F4S_SANDBOX_PASSWORD ?? '';
 
-const ADMIN_EMAIL    = 'admin@inventori-sandbox.billing';
-const ADMIN_PASSWORD = 'Admin@Billing2026!';
+
 const TENANT_NAME    = 'Inventori SANDBOX';
 const TENANT_SLUG    = 'inventori-sandbox';
 const COMPANY_LEGAL  = 'PERSONA FISICA SANDBOX';
@@ -168,14 +170,14 @@ try {
   results.tenantId = tenantId;
 
   // User
-  const existingUser = await prisma.user.findFirst({ where: { tenantId, email: ADMIN_EMAIL } });
+  const existingUser = await prisma.user.findFirst({ where: { tenantId, email: ADMIN.email } });
   if (!existingUser) {
-    const passwordHash = await argon2.hash(ADMIN_PASSWORD, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(ADMIN.password, { type: argon2.argon2id });
     await prisma.user.create({
       data: {
         id: randomUUID(),
         tenantId,
-        email: ADMIN_EMAIL,
+        email: ADMIN.email,
         passwordHash,
         role: 'TENANT_ADMIN',
         status: 'ACTIVE',
@@ -192,8 +194,8 @@ try {
   log('STEP 2 — Authenticating...');
   const auth = await apiPost('/auth/login', {
     tenantId,
-    email: ADMIN_EMAIL,
-    password: ADMIN_PASSWORD,
+    email: ADMIN.email,
+    password: ADMIN.password,
   });
   const JWT = auth.accessToken;
   ok('JWT obtained. [secret redacted]');

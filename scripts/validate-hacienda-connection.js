@@ -1,44 +1,84 @@
 'use strict';
-const http = require('http');
 
-function httpReq(method, path, headers, body) {
+const http = require('http');
+const {
+  loadLocalSecretEnv,
+  requireLocalAdminCredentials,
+  requireLocalSecret,
+} = require('./local-secret-env.cjs');
+
+function localApiBaseUrl() {
+  const raw = process.env.BILLING_LOCAL_API_BASE_URL ?? `http://localhost:${process.env.PORT ?? '3000'}/api/v1`;
+  const url = new URL(raw);
+  if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error('BILLING_LOCAL_API_BASE_URL must target local Billing.');
+  }
+  return url;
+}
+
+function request(url, method, body, authorization) {
   return new Promise((resolve, reject) => {
-    const opts = { hostname: 'localhost', port: 3000, path, method, headers };
-    const req = http.request(opts, (res) => {
-      let d = '';
-      res.on('data', (c) => { d += c; });
-      res.on('end', () => resolve({ s: res.statusCode, b: d }));
-    });
-    req.on('error', reject);
-    if (body) req.write(body);
+    const payload = body ? Buffer.from(JSON.stringify(body), 'utf8') : undefined;
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 80,
+        path: url.pathname,
+        method,
+        headers: {
+          ...(payload ? { 'Content-Type': 'application/json', 'Content-Length': payload.length } : {}),
+          ...(authorization ? { Authorization: authorization } : {}),
+        },
+      },
+      (res) => {
+        let responseBody = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk) => { responseBody += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: responseBody }));
+      },
+    );
+    req.once('error', reject);
+    if (payload) req.write(payload);
     req.end();
   });
 }
 
 async function main() {
-  const lb = JSON.stringify({ tenantId: '25ae538c-b272-407b-83d0-ccc78be3c658', email: 'admin@inventori-sandbox.billing', password: 'Admin@Billing2026!' });
-  const lr = await httpReq('POST', '/api/v1/auth/login', { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(lb) }, lb);
-  process.stdout.write(`Login: ${lr.s}\n`);
-  const tk = JSON.parse(lr.b).accessToken;
+  loadLocalSecretEnv();
+  if (process.env.ALLOW_HACIENDA_SANDBOX_VALIDATION !== 'true') {
+    throw new Error('Set ALLOW_HACIENDA_SANDBOX_VALIDATION=true for an explicitly authorized validation.');
+  }
 
-  process.stdout.write('Validating Hacienda SANDBOX connection...\n');
-  const vr = await httpReq('POST',
-    '/api/v1/companies/dde91f44-6ceb-4eb7-b322-0139919cc34d/hacienda-connection/SANDBOX/validate',
-    { 'Authorization': `Bearer ${tk}` },
-    null);
-  process.stdout.write(`Validate HTTP: ${vr.s}\n${vr.b.slice(0, 1000)}\n`);
+  const admin = requireLocalAdminCredentials();
+  const companyId = requireLocalSecret('INVENTORI_SANDBOX_COMPANY_ID');
+  const baseUrl = localApiBaseUrl();
+  const login = await request(new URL('/api/v1/auth/login', baseUrl), 'POST', admin);
 
-  // Retry SUBMIT
-  process.stdout.write('\nRetrying SUBMIT...\n');
-  require('dotenv').config({ path: '../inventory-api/inventory-api/.env' });
-  const { createBillingCredentialResolver } = require('../inventory-api/inventory-api/src/services/billing-credential-resolver.service');
-  const resolver = createBillingCredentialResolver();
-  const key = resolver.resolveApiKey('env:BILLING_SANDBOX_M2M_API_KEY');
-  const sr = await httpReq('POST',
-    '/api/v1/companies/dde91f44-6ceb-4eb7-b322-0139919cc34d/fiscal-documents/SANDBOX/invoices/353a13aa-dd13-4382-8af3-9bb15280fff6/submit',
-    { 'X-API-Key': key, 'Content-Type': 'application/json' },
-    '{}');
-  process.stdout.write(`Submit HTTP: ${sr.s}\n${sr.b.slice(0, 1000)}\n`);
+  if (login.status !== 200 && login.status !== 201) {
+    throw new Error(`Local Billing administrator authentication failed (HTTP ${login.status}).`);
+  }
+
+  let accessToken;
+  try {
+    accessToken = JSON.parse(login.body).accessToken;
+  } catch {
+    throw new Error('Local Billing login response did not contain an access token.');
+  }
+  if (!accessToken || typeof accessToken !== 'string') {
+    throw new Error('Local Billing login response did not contain an access token.');
+  }
+
+  const validation = await request(
+    new URL(`/api/v1/companies/${companyId}/hacienda-connection/SANDBOX/validate`, baseUrl),
+    'POST',
+    undefined,
+    `Bearer ${accessToken}`,
+  );
+  process.stdout.write(`Hacienda SANDBOX validation HTTP: ${validation.status}\n`);
+  if (validation.status < 200 || validation.status >= 300) process.exitCode = 1;
 }
 
-main().catch((e) => { process.stderr.write(`ERROR: ${e.message}\n`); process.exit(1); });
+main().catch((error) => {
+  process.stderr.write(`[FAIL] ${error instanceof Error ? error.message : 'validation failed'}\n`);
+  process.exit(1);
+});

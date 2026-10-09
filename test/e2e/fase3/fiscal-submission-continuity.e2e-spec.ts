@@ -210,16 +210,16 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
     process.env.USE_REAL_HACIENDA = 'false';
     context = await createFiscalE2eApp();
     hacienda = context.app.get(MockHaciendaSubmissionAdapter);
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
   });
 
   beforeEach(async () => {
     hacienda.clearScenarios();
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
   });
 
   afterAll(async () => {
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
     await context?.prisma.$disconnect();
     await context?.app.close();
   });

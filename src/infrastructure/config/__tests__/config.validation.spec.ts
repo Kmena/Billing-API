@@ -278,3 +278,47 @@ describe('configuration validation schema', () => {
     expect(result.error?.message).toContain('HACIENDA_CB_OUTBOUND_RATE_PER_SECOND');
   });
 });
+
+describe('fiscal delivery startup recovery configuration', () => {
+  const base = { NODE_ENV: 'test', DATABASE_URL: 'postgresql://test' };
+
+  it('fails closed by default when the switch is absent', () => {
+    const result = validationSchema.validate(base);
+    expect(result.error).toBeUndefined();
+    expect(result.value.FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED).toBe(false);
+  });
+
+  it('rejects enabled recovery without both bounds', () => {
+    const result = validationSchema.validate({
+      ...base,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: true,
+    });
+    expect(result.error).toBeDefined();
+  });
+
+  it('rejects partial and invalid recovery windows', () => {
+    const partial = validationSchema.validate({
+      ...base,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: '2026-10-01T00:00:00.000Z',
+    });
+    const inverted = validationSchema.validate({
+      ...base,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: true,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: '2026-10-02T00:00:00.000Z',
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: '2026-10-01T00:00:00.000Z',
+    });
+    expect(partial.error).toBeDefined();
+    expect(inverted.error).toBeDefined();
+  });
+
+  it('accepts an enabled recovery only with an explicit valid bounded window', () => {
+    const result = validationSchema.validate({
+      ...base,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: true,
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: '2026-10-01T00:00:00.000Z',
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: '2026-10-02T00:00:00.000Z',
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.value.FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED).toBe(true);
+  });
+});

@@ -43,6 +43,7 @@ services:
       - '4566:4566'
     volumes:
       - localstack_data:/var/lib/localstack
+      - ./scripts/localstack/init/10-bootstrap-billing-bucket.sh:/etc/localstack/init/ready.d/10-bootstrap-billing-bucket.sh:ro
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
       interval: 10s
@@ -80,6 +81,9 @@ services:
       SECRET_PROVIDER: ssm
       SSM_PARAMETER_PREFIX: /billing/dev
       AWS_SSM_ENDPOINT: http://localstack:4566
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
       LOG_LEVEL: info
       # Hacienda resilience — defaults are production-safe
       HACIENDA_CB_FAILURE_THRESHOLD: ${HACIENDA_CB_FAILURE_THRESHOLD:-5}
@@ -113,6 +117,14 @@ services:
     container_name: billing-worker
     restart: unless-stopped
     command: ['node', 'dist/src/bootstrap/worker.main.js']
+    # The worker deliberately has no HTTP listener; the image's API healthcheck
+    # therefore cannot apply here. Verify that its main process remains alive.
+    healthcheck:
+      test: ['CMD-SHELL', 'kill -0 1']
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,6 +134,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-32chars}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       STORAGE_TYPE: s3
       AWS_S3_BUCKET: billing-documents
       AWS_S3_ENDPOINT: http://localstack:4566
@@ -131,7 +144,11 @@ services:
       SECRET_PROVIDER: ssm
       SSM_PARAMETER_PREFIX: /billing/dev
       AWS_SSM_ENDPOINT: http://localstack:4566
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
       LOG_LEVEL: info
+      HACIENDA_QR_URL_BASE: ${HACIENDA_QR_URL_BASE:-https://mock.hacienda.test/qr}
       HACIENDA_IDP_PRODUCTION_URL: ${HACIENDA_IDP_PRODUCTION_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token}
       HACIENDA_IDP_SANDBOX_URL: ${HACIENDA_IDP_SANDBOX_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token}
       HACIENDA_IDP_CLIENT_ID_PRODUCTION: ${HACIENDA_IDP_CLIENT_ID_PRODUCTION:-api-prod}

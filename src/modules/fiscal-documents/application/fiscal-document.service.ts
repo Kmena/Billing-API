@@ -26,6 +26,11 @@ import {
 import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../domain/fiscal-catalogs';
 import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
+import {
+  canonicalFiscalPayloadHash,
+  FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
+  fiscalPayloadInputFromCommand,
+} from './fiscal-payload-equivalence';
 
 export interface AuthenticatedUser {
   readonly userId: string;
@@ -65,6 +70,10 @@ export interface CreateFiscalDocumentCommand {
   readonly idempotencyKey?: string;
   readonly apiKeyId?: string;
   readonly actor?: string;
+  readonly fiscalPayloadEquivalence?: {
+    readonly contractVersion?: string;
+    readonly hash?: string;
+  };
 }
 
 @Injectable()
@@ -575,6 +584,7 @@ export class FiscalDocumentService {
     if (command.currency !== 'CRC' && !command.exchangeRate)
       throw new BadRequestException({ code: 'EXCHANGE_RATE_REQUIRED' });
     this.validateReceiver(command);
+    this.validateFiscalPayloadEquivalence(command);
     if (command.lines.length === 0)
       throw new BadRequestException({ code: 'FISCAL_DOCUMENT_LINES_REQUIRED' });
     for (const line of command.lines) {
@@ -602,6 +612,22 @@ export class FiscalDocumentService {
     }
   }
 
+  private validateFiscalPayloadEquivalence(command: CreateFiscalDocumentCommand): void {
+    const evidence = command.fiscalPayloadEquivalence;
+    if (!evidence) return;
+    if (!evidence.contractVersion || !evidence.hash) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_EQUIVALENCE_HEADERS_REQUIRED' });
+    }
+    if (evidence.contractVersion !== FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_CONTRACT_VERSION_UNSUPPORTED' });
+    }
+    if (!/^[a-fA-F0-9]{64}$/.test(evidence.hash)) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
+    }
+    if (canonicalFiscalPayloadHash(fiscalPayloadInputFromCommand(command)) !== evidence.hash.toLowerCase()) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
+    }
+  }
   private validateSalePaymentTerms(command: CreateFiscalDocumentCommand): void {
     if (command.saleCondition === '02') {
       const creditTermDays = command.creditTermDays;
@@ -750,6 +776,7 @@ export class FiscalDocumentService {
       actor: undefined,
       apiKeyId: undefined,
       idempotencyKey: undefined,
+      fiscalPayloadEquivalence: undefined,
     });
     return createHash('sha256').update(normalized).digest('hex');
   }

@@ -105,6 +105,7 @@ enum FiscalDocumentStatus {
   READY_TO_SUBMIT
   ACCEPTED
   REJECTED
+  SUPERSEDED
 }
 
 enum FiscalSubmissionStatus {
@@ -118,6 +119,7 @@ enum FiscalSubmissionStatus {
   REJECTED
   TECHNICAL_RETRY_PENDING
   MANUAL_REVIEW_REQUIRED
+  SUPERSEDED
 }
 
 enum FiscalXmlValidationStatus {
@@ -155,6 +157,7 @@ enum FiscalArtifactType {
 enum DocumentDeliveryKind {
   INITIAL_DOCUMENT
   HACIENDA_RESPONSE
+  ACCEPTED_FISCAL_PACKAGE
 }
 
 enum DocumentDeliveryChannel {
@@ -356,47 +359,54 @@ model FiscalSequence {
 }
 
 model FiscalDocument {
-  id                 String                 @id @db.Uuid
-  tenantId           String                 @map("tenant_id") @db.Uuid
-  companyId          String                 @map("company_id") @db.Uuid
-  environment        HaciendaEnvironment    @map("environment")
-  type               FiscalDocumentType     @map("type")
-  status             FiscalDocumentStatus   @default(READY_FOR_XML)
-  issuancePointId    String                 @map("issuance_point_id") @db.Uuid
-  branchCode         String                 @map("branch_code") @db.Char(3)
-  terminalCode       String                 @map("terminal_code") @db.Char(5)
-  sequenceValue      BigInt                 @map("sequence_value")
-  consecutive        String                 @db.Char(20)
-  clave              String                 @unique @db.Char(50)
-  securityCode       String                 @map("security_code") @db.Char(8)
-  situation          String                 @default("1") @db.Char(1)
-  issueDate          DateTime               @default(now()) @map("issue_date")
-  issuerSnapshot     Json                   @map("issuer_snapshot")
-  receiverSnapshot   Json?                  @map("receiver_snapshot")
-  currency           String                 @db.Char(3)
-  exchangeRate       Decimal?               @map("exchange_rate") @db.Decimal(18, 5)
-  saleCondition      String                 @map("sale_condition") @db.Char(2)
-  creditTermDays     Int?                   @map("credit_term_days")
-  paymentMethod      String?                @map("payment_method") @db.Char(2)
-  lines              Json
-  totals             Json
-  idempotencyKey     String?                @map("idempotency_key") @db.VarChar(255)
-  requestHash        String?                @map("request_hash") @db.Char(64)
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
-  tenant             Tenant                 @relation(fields: [tenantId], references: [id])
-  company            Company                @relation(fields: [companyId], references: [id])
-  issuancePoint      FiscalIssuancePoint    @relation(fields: [issuancePointId], references: [id])
-  idempotencyKeys    FiscalIdempotencyKey[]
-  xmlArtifacts       FiscalXmlArtifact[]
-  submission         FiscalSubmission?
-  fiscalArtifacts    FiscalArtifact[]
-  documentDeliveries DocumentDelivery[]
+  id                           String                 @id @db.Uuid
+  tenantId                     String                 @map("tenant_id") @db.Uuid
+  companyId                    String                 @map("company_id") @db.Uuid
+  environment                  HaciendaEnvironment    @map("environment")
+  type                         FiscalDocumentType     @map("type")
+  status                       FiscalDocumentStatus   @default(READY_FOR_XML)
+  issuancePointId              String                 @map("issuance_point_id") @db.Uuid
+  branchCode                   String                 @map("branch_code") @db.Char(3)
+  terminalCode                 String                 @map("terminal_code") @db.Char(5)
+  sequenceValue                BigInt                 @map("sequence_value")
+  consecutive                  String                 @db.Char(20)
+  clave                        String                 @unique @db.Char(50)
+  securityCode                 String                 @map("security_code") @db.Char(8)
+  situation                    String                 @default("1") @db.Char(1)
+  issueDate                    DateTime               @default(now()) @map("issue_date")
+  issuerSnapshot               Json                   @map("issuer_snapshot")
+  receiverSnapshot             Json?                  @map("receiver_snapshot")
+  currency                     String                 @db.Char(3)
+  exchangeRate                 Decimal?               @map("exchange_rate") @db.Decimal(18, 5)
+  saleCondition                String                 @map("sale_condition") @db.Char(2)
+  creditTermDays               Int?                   @map("credit_term_days")
+  paymentMethod                String?                @map("payment_method") @db.Char(2)
+  lines                        Json
+  totals                       Json
+  idempotencyKey               String?                @map("idempotency_key") @db.VarChar(255)
+  requestHash                  String?                @map("request_hash") @db.Char(64)
+  disposedAt                   DateTime?              @map("disposed_at")
+  disposedBy                   String?                @map("disposed_by") @db.VarChar(255)
+  dispositionReason            String?                @map("disposition_reason") @db.VarChar(500)
+  supersededByFiscalDocumentId String?                @map("superseded_by_fiscal_document_id") @db.Uuid
+  createdAt                    DateTime               @default(now()) @map("created_at")
+  updatedAt                    DateTime               @updatedAt @map("updated_at")
+  tenant                       Tenant                 @relation(fields: [tenantId], references: [id])
+  company                      Company                @relation(fields: [companyId], references: [id])
+  issuancePoint                FiscalIssuancePoint    @relation(fields: [issuancePointId], references: [id])
+  idempotencyKeys              FiscalIdempotencyKey[]
+  xmlArtifacts                 FiscalXmlArtifact[]
+  submission                   FiscalSubmission?
+  fiscalArtifacts              FiscalArtifact[]
+  documentDeliveries           DocumentDelivery[]
+  supersededByFiscalDocument   FiscalDocument?        @relation("FiscalDocumentSupersession", fields: [supersededByFiscalDocumentId], references: [id], onUpdate: Cascade, onDelete: SetNull, map: "fiscal_documents_superseded_by_fkey")
+  supersededDocuments          FiscalDocument[]       @relation("FiscalDocumentSupersession")
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
   @@index([tenantId, companyId, status])
   @@index([tenantId, companyId, idempotencyKey])
+  @@index([supersededByFiscalDocumentId], map: "fiscal_documents_superseded_by_idx")
   @@map("fiscal_documents")
 }
 

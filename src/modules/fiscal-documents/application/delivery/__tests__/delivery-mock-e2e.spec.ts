@@ -21,6 +21,7 @@ const createArtifactService = (): FiscalArtifactService =>
     {} as ArtifactServiceDeps[0],
     {} as ArtifactServiceDeps[1],
     {} as ArtifactServiceDeps[2],
+    {} as ArtifactServiceDeps[3],
   );
 
 // Official filename pattern tests (FR-027)

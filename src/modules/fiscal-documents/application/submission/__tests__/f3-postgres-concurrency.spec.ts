@@ -1,18 +1,29 @@
-// eslint-disable-next-line no-restricted-imports
-import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { installGuardedTestDatabaseEnvironment } from '../../../../../../test/helpers/test-database-safety';
+import { createGuardedTestPrisma } from '../../../../../../test/helpers/guarded-test-prisma';
+type GuardedPrismaClient = Awaited<ReturnType<typeof createGuardedTestPrisma>>['prisma'];
+import {
+  assertOwnedTestTenants,
+  registerOwnedTestTenant,
+  releaseOwnedTestTenants,
+} from '../../../../../../test/helpers/test-database-ownership';
 import { SubmitFiscalDocumentService } from '../submit-fiscal-document.service';
 import { FiscalSubmissionStateService } from '../fiscal-submission-state.service';
 
-const describeIfDatabase = process.env.DATABASE_URL ? describe : describe.skip;
+const runDatabaseTests = process.env.RUN_DB_TESTS === '1';
+if (runDatabaseTests) {
+  installGuardedTestDatabaseEnvironment();
+}
+const describeIfDatabase = runDatabaseTests ? describe : describe.skip;
 const clave = '50601012500310112345600100001010000000001100000001';
 
-async function seedReadyDocument(prisma: PrismaClient) {
+async function seedReadyDocument(prisma: GuardedPrismaClient) {
   const tenantId = randomUUID();
   const companyId = randomUUID();
   const pointId = randomUUID();
   const documentId = randomUUID();
   const apiKeyId = randomUUID();
+  await registerOwnedTestTenant(prisma, tenantId);
   await prisma.tenant.create({
     data: { id: tenantId, name: `Tenant ${tenantId}`, slug: `t-${tenantId}` },
   });
@@ -102,14 +113,13 @@ async function seedReadyDocument(prisma: PrismaClient) {
 }
 
 describeIfDatabase('F3 PostgreSQL concurrency', () => {
-  let prisma: PrismaClient;
+  let prisma: GuardedPrismaClient;
   // Track tenant IDs created by this suite so teardown is SCOPED — never deletes
   // data belonging to other tenants/bootstrap state in the shared dev DB.
   const testTenantIds: string[] = [];
 
   beforeAll(async () => {
-    prisma = new PrismaClient();
-    await prisma.$connect();
+    ({ prisma } = await createGuardedTestPrisma());
   });
 
   afterAll(async () => {
@@ -119,6 +129,7 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
     }
     // SCOPED cleanup — only deletes rows belonging to tenants created by this test.
     // This prevents wiping bootstrap/shared data from the dev DB.
+    await assertOwnedTestTenants(prisma, testTenantIds);
     const t = { tenantId: { in: testTenantIds } };
     // DeliveryAttempt has no tenantId — must be deleted via its documentDelivery FK
     await prisma.deliveryAttempt.deleteMany({
@@ -146,6 +157,7 @@ describeIfDatabase('F3 PostgreSQL concurrency', () => {
     await prisma.user.deleteMany({ where: t });
     await prisma.company.deleteMany({ where: t });
     await prisma.tenant.deleteMany({ where: { id: { in: testTenantIds } } });
+    await releaseOwnedTestTenants(prisma, testTenantIds);
     await prisma.$disconnect();
   });
 

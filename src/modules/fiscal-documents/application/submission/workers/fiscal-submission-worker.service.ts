@@ -24,7 +24,7 @@ import {
   HaciendaSubmissionResult,
 } from '../ports/hacienda-submission.port';
 import { FiscalSubmissionStateService } from '../fiscal-submission-state.service';
-import { FiscalSubmissionStatus } from '../../../domain/submission';
+import { FiscalSubmissionStateMachine, FiscalSubmissionStatus } from '../../../domain/submission';
 import {
   FiscalSubmissionJobPayload,
   RECONCILE_FISCAL_SUBMISSION_JOB,
@@ -146,11 +146,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
 
   async handleReconcileJob(payload: FiscalSubmissionJobPayload): Promise<void> {
     const context = await this.loadContext(payload.submissionId);
-    if (
-      !context ||
-      context.submission.status === 'ACCEPTED' ||
-      context.submission.status === 'REJECTED'
-    ) {
+    if (!context || FiscalSubmissionStateMachine.isTerminal(context.submission.status)) {
       return;
     }
 

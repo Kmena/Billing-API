@@ -65,6 +65,11 @@ export class CompanyPdfSettingsController {
     await this.pdfSettingsService.updateSettings({
       tenantId: request.user.tenantId,
       companyId,
+      authorization: {
+        kind: 'API_KEY',
+        apiKeyId: request.apiKey.id,
+        scopes: request.apiKey.scopes,
+      },
       primaryColor: body.primaryColor,
       secondaryColor: body.secondaryColor,
       footerText: body.footerText,
@@ -93,6 +98,11 @@ export class CompanyPdfSettingsController {
     await this.pdfSettingsService.uploadLogo({
       tenantId: request.user.tenantId,
       companyId,
+      authorization: {
+        kind: 'API_KEY',
+        apiKeyId: request.apiKey.id,
+        scopes: request.apiKey.scopes,
+      },
       logoBytes: file.buffer,
       declaredMimeType: file.mimetype,
     });

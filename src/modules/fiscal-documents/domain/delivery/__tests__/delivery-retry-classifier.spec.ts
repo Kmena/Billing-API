@@ -3,26 +3,26 @@ import { DocumentDeliveryStatus } from '../document-delivery-status.enum';
 
 describe('DeliveryRetryClassifier', () => {
   describe('ARTIFACT_HASH_MISMATCH', () => {
-    it('returns MANUAL_REVIEW_REQUIRED and emits security audit', () => {
+    it('returns FAILED and emits security audit', () => {
       const result = DeliveryRetryClassifier.classify({
         errorClass: 'ARTIFACT_HASH_MISMATCH',
         retryCount: 0,
         maxRetries: 5,
       });
-      expect(result.nextStatus).toBe(DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED);
+      expect(result.nextStatus).toBe(DocumentDeliveryStatus.FAILED);
       expect(result.emitSecurityAudit).toBe(true);
       expect(result.immediateRetry).toBe(false);
     });
   });
 
   describe('ARTIFACT_MISSING', () => {
-    it('returns MANUAL_REVIEW_REQUIRED without security audit', () => {
+    it('returns RETRY_PENDING without security audit below the retry limit', () => {
       const result = DeliveryRetryClassifier.classify({
         errorClass: 'ARTIFACT_MISSING',
         retryCount: 0,
         maxRetries: 5,
       });
-      expect(result.nextStatus).toBe(DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED);
+      expect(result.nextStatus).toBe(DocumentDeliveryStatus.RETRY_PENDING);
       expect(result.emitSecurityAudit).toBe(false);
     });
   });
@@ -106,13 +106,13 @@ describe('DeliveryRetryClassifier', () => {
       expect(result.retryDelaySeconds).toBe(30);
     });
 
-    it('returns MANUAL_REVIEW_REQUIRED when horizon exhausted', () => {
+    it('returns FAILED when horizon exhausted', () => {
       const result = DeliveryRetryClassifier.classify({
         errorClass: 'PDF_NOT_YET_GENERATED',
         retryCount: 5,
         maxRetries: 5,
       });
-      expect(result.nextStatus).toBe(DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED);
+      expect(result.nextStatus).toBe(DocumentDeliveryStatus.FAILED);
     });
   });
 

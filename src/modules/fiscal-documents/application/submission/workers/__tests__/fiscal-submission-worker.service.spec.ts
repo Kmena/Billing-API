@@ -191,6 +191,17 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(1);
   });
 
+  it('does not reconcile or resubmit a terminal SUPERSEDED submission', async () => {
+    const { worker, prisma, hacienda, state } = makeWorker();
+    prisma.fiscalSubmission.findUnique.mockResolvedValue({ ...submission, status: 'SUPERSEDED' });
+
+    await worker.handleReconcileJob({ submissionId: 'submission-id' });
+
+    expect(hacienda.queryStatusByClave).not.toHaveBeenCalled();
+    expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+    expect(state.applyProviderResult).not.toHaveBeenCalled();
+  });
+
   it('reconciles ambiguous POST outcome by GET status query instead of resubmitting', async () => {
     const { worker, hacienda } = makeWorker({
       kind: 'ACCEPTED',

@@ -1,6 +1,6 @@
 # ─── Stage 1: deps ────────────────────────────────────────────────────────────
 # Install ALL dependencies (including dev) for building
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 # Install build dependencies for native modules (argon2, etc.)
@@ -11,7 +11,7 @@ RUN npm ci --ignore-scripts
 
 # ─── Stage 2: builder ─────────────────────────────────────────────────────────
 # Build the TypeScript project and generate Prisma client
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
 RUN apk add --no-cache python3 py3-pip openssl
@@ -31,7 +31,7 @@ RUN npm prune --production
 
 # ─── Stage 3: runner ──────────────────────────────────────────────────────────
 # Minimal production image — non-root user
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production

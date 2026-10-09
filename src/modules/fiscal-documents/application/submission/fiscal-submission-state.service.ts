@@ -61,7 +61,7 @@ export class FiscalSubmissionStateService {
       const update = await tx.fiscalSubmission.updateMany({
         where: {
           id: submissionId,
-          status: { notIn: ['ACCEPTED', 'REJECTED'] },
+          status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
         },
         data: {
           status: nextStatus,
@@ -87,7 +87,10 @@ export class FiscalSubmissionStateService {
 
       if (terminal) {
         await tx.fiscalDocument.updateMany({
-          where: { id: submission.fiscalDocumentId, status: { notIn: ['ACCEPTED', 'REJECTED'] } },
+          where: {
+            id: submission.fiscalDocumentId,
+            status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+          },
           data: { status: nextStatus },
         });
       }
@@ -157,11 +160,15 @@ export class FiscalSubmissionStateService {
 
     const sha256 = createHash('sha256').update(result.responseArtifact.content).digest('hex');
     const storageKey = `fiscal-submissions/${submission.tenantId}/${submission.companyId}/${submission.environment}/${submission.clave}/hacienda-response.xml`;
-    await this.storage.upload(storageKey, result.responseArtifact.content, {
+    await this.storage.upload({
+      key: storageKey,
+      bytes: result.responseArtifact.content,
       contentType: result.responseArtifact.contentType,
-      sha256,
-      clave: submission.clave,
-      submissionId: submission.id,
+      metadata: {
+        sha256,
+        clave: submission.clave,
+        submissionId: submission.id,
+      },
     });
 
     return { storageKey, sha256, contentType: result.responseArtifact.contentType };

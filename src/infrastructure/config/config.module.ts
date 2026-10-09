@@ -16,6 +16,9 @@ export { validationSchema } from './config.validation-schema';
   imports: [
     NestConfigModule.forRoot({
       isGlobal: true,
+      // Automated tests receive an explicit guarded environment and must never
+      // inherit billing_dev or credentials from developer-local env files.
+      ignoreEnvFile: process.env.NODE_ENV === 'test',
       envFilePath: ['.env.local', '.env'],
       load: [
         appConfig,

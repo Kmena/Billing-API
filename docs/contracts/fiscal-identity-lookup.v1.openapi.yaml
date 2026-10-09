@@ -1,0 +1,126 @@
+openapi: 3.0.3
+info:
+  title: Billing Fiscal Identity Lookup API
+  version: 1.0.0
+  description: >-
+    Read-only discovery of a previously completed fiscal identity. This operation
+    never creates a document, allocates identifiers, prepares XML, submits to
+    Hacienda, or changes reservation state.
+paths:
+  /api/v1/companies/{companyId}/fiscal-documents/{environment}/identity-by-idempotency:
+    get:
+      operationId: getFiscalIdentityByIdempotencyV1
+      summary: Find a verified completed fiscal identity
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/Environment'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/Operation'
+        - $ref: '#/components/parameters/RequestHash'
+      responses:
+        '200':
+          description: Verified existing fiscal identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FiscalIdentityLookupResponse'
+        '400':
+          $ref: '#/components/responses/ValidationFailure'
+        '401':
+          $ref: '#/components/responses/AuthenticationFailure'
+        '403':
+          $ref: '#/components/responses/AuthorizationFailure'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdentityConflict'
+        '500':
+          $ref: '#/components/responses/TransientFailure'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    CompanyId:
+      name: companyId
+      in: path
+      required: true
+      schema: { type: string }
+    Environment:
+      name: environment
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [SANDBOX, PRODUCTION]
+    IdempotencyKey:
+      name: idempotencyKey
+      in: query
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 255 }
+    Operation:
+      name: operation
+      in: query
+      required: true
+      schema:
+        type: string
+        enum: [fiscal-document.create.invoice, fiscal-document.create.ticket]
+    RequestHash:
+      name: requestHash
+      in: query
+      required: true
+      description: Original fiscal-create request SHA-256, exactly 64 hexadecimal characters. Case is normalized to lowercase.
+      schema: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+  schemas:
+    FiscalIdentityLookupResponse:
+      type: object
+      additionalProperties: false
+      required: [fiscalDocumentId, companyId, environment, documentType, status, clave, consecutive, idempotencyKey, operation, reservationStatus, requestHashVerified]
+      properties:
+        fiscalDocumentId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        documentType: { type: string, enum: [INVOICE, TICKET] }
+        status: { type: string, description: Current Billing FiscalDocument status; this endpoint does not narrow the runtime status vocabulary. }
+        clave: { type: string }
+        consecutive: { type: string }
+        idempotencyKey: { type: string }
+        operation: { type: string, enum: [fiscal-document.create.invoice, fiscal-document.create.ticket] }
+        reservationStatus: { type: string, enum: [COMPLETED] }
+        requestHashVerified: { type: boolean, enum: [true] }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, timestamp]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            correlationId: { type: string, nullable: true }
+            timestamp: { type: string, format: date-time }
+            details: {}
+  responses:
+    ValidationFailure:
+      description: DTO or path validation failure. Runtime error code is `BAD_REQUEST` unless a framework validation response supplies another code.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    AuthenticationFailure:
+      description: Missing, invalid, expired, or revoked API key.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    AuthorizationFailure:
+      description: `INSUFFICIENT_SCOPE` or `API_KEY_COMPANY_NOT_AUTHORIZED`.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    NotFound:
+      description: `FISCAL_IDENTITY_NOT_FOUND`; returned for absent identity, request-hash mismatch, and tenant-isolated non-disclosure.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    IdentityConflict:
+      description: `FISCAL_IDENTITY_AMBIGUOUS` or `FISCAL_IDENTITY_INTEGRITY_ERROR`.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+    TransientFailure:
+      description: Unhandled infrastructure failure, represented by the global filter as `INTERNAL_SERVER_ERROR`.
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
