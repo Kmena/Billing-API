@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { Company, HaciendaVerificationStatus } from '../../../domain/entities/company.entity';
 import { ICompanyRepository, COMPANY_REPOSITORY } from '../../../domain/ports/company.repository';
@@ -11,6 +11,7 @@ import { HaciendaUnavailableException } from '../../../../../infrastructure/inte
 
 export interface CreateCompanyCommand {
   readonly tenantId: string;
+  readonly role: string;
   readonly legalName: string;
   readonly tradeName?: string;
   readonly identificationType: string;
@@ -43,6 +44,10 @@ export class CreateCompanyHandler {
   ) {}
 
   async execute(command: CreateCompanyCommand): Promise<CreateCompanyResult> {
+    if (command.role !== 'TENANT_ADMIN') {
+      throw new ForbiddenException({ code: 'TENANT_ADMIN_REQUIRED' });
+    }
+
     // Check uniqueness within tenant
     const existing = await this.companyRepository.findByIdentificationNumber(
       command.tenantId,

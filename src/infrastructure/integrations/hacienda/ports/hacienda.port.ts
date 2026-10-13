@@ -25,6 +25,9 @@ export interface TaxpayerResult {
   readonly identificationType?: string; // "01"=FISICA, "02"=JURIDICA, "03"=DIMEX, "04"=NITE
   readonly taxRegime?: string; // e.g. "Régimen general"
   readonly taxSituation?: string; // "Inscrito" | "Desinscrito"
+  // P0: DEC-003/DEC-004 — moroso/omiso are warnings, not issuance blockers in P0
+  readonly moroso?: boolean; // true when situacion.moroso === "SI"
+  readonly omiso?: boolean; // true when situacion.omiso === "SI"
   readonly economicActivities?: readonly TaxpayerActivity[];
 }
 

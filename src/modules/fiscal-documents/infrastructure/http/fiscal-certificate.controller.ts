@@ -31,6 +31,7 @@ import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagg
 import { SkipThrottle } from '@nestjs/throttler';
 import multer = require('multer');
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 import { UploadFiscalSigningCertificateService } from '../../application/fiscal-xml/upload-fiscal-signing-certificate.service';
 import { FiscalReadCertificateMetadataService } from '../../application/fiscal-xml/fiscal-read-certificate-metadata.service';
@@ -66,6 +67,7 @@ export class FiscalCertificateController {
    *   - pin (string): certificate PIN
    */
   @Post(':environment')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Upload or rotate signing certificate (TENANT_ADMIN)' })
   @ApiConsumes('multipart/form-data')
@@ -130,6 +132,7 @@ export class FiscalCertificateController {
    * Auth: JWT — TENANT_ADMIN only.
    */
   @Put(':environment')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Rotate signing certificate (TENANT_ADMIN)' })
   @ApiConsumes('multipart/form-data')

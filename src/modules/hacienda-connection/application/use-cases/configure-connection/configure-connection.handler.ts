@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { GetCompanyHandler } from '../../../../companies/application/use-cases/get-company/get-company.handler';
 import { AuditService, EventClass } from '../../../../audit/application/audit.service';
@@ -22,6 +27,11 @@ export interface ConfigureConnectionCommand {
   environment: HaciendaEnvironment;
   username?: string;
   password?: string;
+  /**
+   * Internal recovery path for re-storing a lost durable secret for an already
+   * validated connection. Public credential changes must not set this flag.
+   */
+  preserveConnectedStatusForSecretRestore?: boolean;
 }
 @Injectable()
 export class ConfigureConnectionHandler {
@@ -38,6 +48,9 @@ export class ConfigureConnectionHandler {
       command.companyId,
       command.environment,
     );
+    if (existing?.status === 'DISABLED') {
+      throw new UnprocessableEntityException({ code: 'HACIENDA_CONNECTION_DISABLED' });
+    }
     if (!command.username && !command.password)
       throw new UnprocessableEntityException({
         code: 'HACIENDA_CONNECTION_INSUFFICIENT_CREDENTIALS',
@@ -61,17 +74,16 @@ export class ConfigureConnectionHandler {
         });
       credentials = { username: command.username, password: command.password };
     }
-    const reference = `hacienda-conn/${command.companyId}/${command.environment}`;
+    // Credential rotations use immutable references. A losing concurrent write
+    // may leave an unreferenced secret, but can never replace the credential
+    // used by the canonical connection row.
+    const reference = `hacienda-conn/${command.companyId}/${command.environment}/${randomUUID()}`;
     await this.secrets.storeSecret(reference, JSON.stringify(credentials));
-    const connection = HaciendaConnection.configure(
-      existing?.id ?? randomUUID(),
-      command.tenantId,
-      command.companyId,
-      command.environment,
-      reference,
-      Boolean(existing),
-    );
-    await this.repo.save(connection);
+    const connection = this.buildConnection(command, existing, reference);
+    const saved = await this.repo.save(connection, existing?.updatedAt);
+    if (!saved) {
+      throw new ConflictException({ code: 'HACIENDA_CONNECTION_CONCURRENT_CONFLICT' });
+    }
     this.cache.invalidate(command.companyId, command.environment);
     this.audit.record({
       tenantId: command.tenantId,
@@ -83,5 +95,42 @@ export class ConfigureConnectionHandler {
       metadata: { environment: command.environment },
     });
     return connection;
+  }
+
+  private buildConnection(
+    command: ConfigureConnectionCommand,
+    existing: HaciendaConnection | null,
+    reference: string,
+  ): HaciendaConnection {
+    const shouldPreserveConnectedStatus =
+      command.preserveConnectedStatusForSecretRestore === true &&
+      existing?.status === 'CONNECTED' &&
+      Boolean(command.username) &&
+      Boolean(command.password);
+
+    if (shouldPreserveConnectedStatus) {
+      return HaciendaConnection.reconstruct({
+        id: existing.id,
+        tenantId: existing.tenantId,
+        companyId: existing.companyId,
+        environment: existing.environment,
+        status: existing.status,
+        secretReference: reference,
+        lastValidatedAt: existing.lastValidatedAt,
+        lastSuccessfulAuthAt: existing.lastSuccessfulAuthAt,
+        lastValidationErrorCode: existing.lastValidationErrorCode,
+        createdAt: existing.createdAt,
+        updatedAt: new Date(),
+      });
+    }
+
+    return HaciendaConnection.configure(
+      existing?.id ?? randomUUID(),
+      command.tenantId,
+      command.companyId,
+      command.environment,
+      reference,
+      Boolean(existing),
+    );
   }
 }

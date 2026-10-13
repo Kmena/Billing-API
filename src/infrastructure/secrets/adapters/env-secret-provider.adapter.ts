@@ -3,6 +3,9 @@ import { SecretProvider } from '../ports/secret-provider.port';
 
 @Injectable()
 export class EnvSecretProvider implements SecretProvider {
+  readonly isDurable = false;
+  readonly providerId = 'environment-ephemeral';
+
   private readonly inMemoryStore = new Map<string, string>();
 
   async getSecret(key: string): Promise<string> {

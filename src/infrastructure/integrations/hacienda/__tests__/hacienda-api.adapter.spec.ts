@@ -1,3 +1,5 @@
+jest.mock('@nestjs/cache-manager', () => ({ CACHE_MANAGER: 'CACHE_MANAGER' }));
+
 import { of, throwError } from 'rxjs';
 import { HaciendaApiAdapter } from '../adapters/hacienda-api.adapter';
 import { HaciendaUnavailableException } from '../exceptions/hacienda-unavailable.exception';

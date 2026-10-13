@@ -18,10 +18,12 @@
  */
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { JOB_QUEUE, JobQueuePort } from '../../../../infrastructure/queue/ports/job-queue.port';
 import { DELIVERY_JOB_NAME } from './delivery.constants';
+import { resolveDeliveryRecipient } from './delivery-recipient.resolver';
 
 export interface EnsureHaciendaResponseCommand {
   readonly tenantId: string;
@@ -31,6 +33,13 @@ export interface EnsureHaciendaResponseCommand {
   readonly responseKind: 'ACCEPTED' | 'REJECTED';
 }
 
+export interface StartupRecoveryWindow {
+  readonly startAt: Date;
+  readonly endAt: Date;
+}
+
+const STARTUP_RECOVERY_BATCH_SIZE = 100;
+
 @Injectable()
 export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
   private readonly logger = new Logger(EnsureHaciendaResponseDeliveryService.name);
@@ -38,6 +47,7 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(JOB_QUEUE) private readonly jobQueue: JobQueuePort,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -46,9 +56,15 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
    * Recovery is idempotent — existing deliveries are not duplicated.
    */
   async onModuleInit(): Promise<void> {
+    const window = this.getStartupRecoveryWindow();
+    if (!window) {
+      this.logger.log({ msg: 'EnsureHaciendaResponseDelivery: startup recovery disabled' });
+      return;
+    }
+
     setImmediate(async () => {
       try {
-        await this.recoverMissedDeliveries();
+        await this.recoverMissedDeliveries(window);
       } catch (err: unknown) {
         this.logger.warn({
           msg: 'EnsureHaciendaResponseDelivery: startup recovery scan failed',
@@ -100,15 +116,17 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
       return;
     }
 
-    const recipient = this.extractRecipientEmail(doc.receiverSnapshot);
-    if (!recipient) {
-      this.logger.log({
-        msg: 'EnsureHaciendaResponseDelivery: no recipient email — no delivery (expected for TE)',
+    const recipientResolution = resolveDeliveryRecipient(doc.receiverSnapshot);
+    if (recipientResolution.kind !== 'RESOLVED') {
+      this.logger.warn({
+        msg: 'EnsureHaciendaResponseDelivery: delivery recipient unavailable — no delivery',
         fiscalDocumentId,
         documentType: doc.type,
+        recipientResolution: recipientResolution.code,
       });
       return;
     }
+    const recipient = recipientResolution.recipient;
 
     const deliveryId = await this.findOrCreateDelivery({
       tenantId,
@@ -121,7 +139,31 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
 
     if (!deliveryId) return;
 
-    await this.jobQueue.publish(DELIVERY_JOB_NAME, { deliveryId }, { retryLimit: 3 });
+    try {
+      await this.jobQueue.publish(
+        DELIVERY_JOB_NAME,
+        { deliveryId },
+        {
+          retryLimit: 3,
+          retryDelay: 60,
+          singletonKey: `fiscal-delivery:${deliveryId}`,
+          singletonSeconds: 15 * 60,
+        },
+      );
+    } catch (error: unknown) {
+      await this.prisma.documentDelivery.updateMany({
+        where: { id: deliveryId, status: 'QUEUED' },
+        data: {
+          lastErrorCode: 'QUEUE_PUBLICATION_FAILED',
+          lastSanitizedError: String(error).substring(0, 500),
+          updatedAt: new Date(),
+        },
+      });
+      this.logger.warn({
+        msg: 'EnsureHaciendaResponseDelivery: queue publication deferred to recovery',
+        deliveryId,
+      });
+    }
 
     this.logger.log({
       msg: 'EnsureHaciendaResponseDelivery: delivery queued',
@@ -135,51 +177,95 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
    * Startup recovery scan: find terminal fiscal documents without HACIENDA_RESPONSE delivery.
    * Ensures no delivery obligation is permanently lost due to missed hook.
    */
-  async recoverMissedDeliveries(): Promise<void> {
-    // Find ACCEPTED/REJECTED documents with Hacienda response artifact
-    // but without a HACIENDA_RESPONSE delivery row
-    const orphanedSubmissions = await this.prisma.fiscalSubmission.findMany({
-      where: {
-        status: { in: ['ACCEPTED', 'REJECTED'] },
-        responseStorageKey: { not: null },
-        responseSha256: { not: null },
-      },
-      include: {
-        fiscalDocument: {
-          select: {
-            id: true,
-            tenantId: true,
-            companyId: true,
-            type: true,
-            receiverSnapshot: true,
-            documentDeliveries: {
-              where: { kind: 'HACIENDA_RESPONSE' },
-              select: { id: true },
+  async recoverMissedDeliveries(window: StartupRecoveryWindow): Promise<void> {
+    // The window prevents compatibility changes from replaying all historical documents.
+    // Ordering by the unique submission id and cursor pagination avoid a silent 100-row cap.
+    let cursor: string | undefined;
+
+    do {
+      const orphanedSubmissions = await this.prisma.fiscalSubmission.findMany({
+        where: {
+          responseStorageKey: { not: null },
+          responseSha256: { not: null },
+          OR: [
+            {
+              status: 'ACCEPTED',
+              acceptedAt: { gte: window.startAt, lt: window.endAt },
+            },
+            {
+              status: 'REJECTED',
+              rejectedAt: { gte: window.startAt, lt: window.endAt },
+            },
+          ],
+        },
+        include: {
+          fiscalDocument: {
+            select: {
+              id: true,
+              tenantId: true,
+              companyId: true,
+              type: true,
+              receiverSnapshot: true,
+              documentDeliveries: {
+                where: { kind: 'HACIENDA_RESPONSE' },
+                select: { id: true },
+              },
             },
           },
         },
-      },
-      take: 100, // Process in batches
-    });
-
-    for (const submission of orphanedSubmissions) {
-      const doc = submission.fiscalDocument;
-      if (doc.documentDeliveries.length > 0) continue; // Already has delivery
-
-      const responseKind = submission.status === 'ACCEPTED' ? 'ACCEPTED' : 'REJECTED';
-      this.logger.log({
-        msg: 'EnsureHaciendaResponseDelivery: recovering missed delivery',
-        fiscalDocumentId: doc.id,
-        responseKind,
+        orderBy: { id: 'asc' },
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        take: STARTUP_RECOVERY_BATCH_SIZE,
       });
 
-      await this.ensure({
-        tenantId: doc.tenantId,
-        companyId: doc.companyId,
-        fiscalDocumentId: doc.id,
-        responseKind: responseKind as 'ACCEPTED' | 'REJECTED',
-      });
+      for (const submission of orphanedSubmissions) {
+        const doc = submission.fiscalDocument;
+        if (doc.documentDeliveries.length > 0) continue; // Already has delivery
+
+        const responseKind = submission.status === 'ACCEPTED' ? 'ACCEPTED' : 'REJECTED';
+        this.logger.log({
+          msg: 'EnsureHaciendaResponseDelivery: recovering missed delivery',
+          fiscalDocumentId: doc.id,
+          responseKind,
+        });
+
+        await this.ensure({
+          tenantId: doc.tenantId,
+          companyId: doc.companyId,
+          fiscalDocumentId: doc.id,
+          responseKind: responseKind as 'ACCEPTED' | 'REJECTED',
+        });
+      }
+
+      cursor = orphanedSubmissions.at(-1)?.id;
+      if (orphanedSubmissions.length < STARTUP_RECOVERY_BATCH_SIZE) break;
+    } while (cursor);
+  }
+
+  private getStartupRecoveryWindow(): StartupRecoveryWindow | null {
+    if (this.configService.get<boolean>('FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED') !== true) {
+      return null;
     }
+
+    const configuredStartAt = this.configService.get<string>(
+      'FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT',
+    );
+    const configuredEndAt = this.configService.get<string>(
+      'FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT',
+    );
+    if (!configuredStartAt || !configuredEndAt) {
+      throw new Error(
+        'FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED=true requires an explicit bounded recovery window.',
+      );
+    }
+
+    const startAt = new Date(configuredStartAt);
+    const endAt = new Date(configuredEndAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt >= endAt) {
+      throw new Error('Fiscal delivery startup recovery window is invalid.');
+    }
+
+    return { startAt, endAt };
   }
 
   private async findOrCreateDelivery(params: {
@@ -251,15 +337,5 @@ export class EnsureHaciendaResponseDeliveryService implements OnModuleInit {
       });
       return winner?.id ?? null;
     }
-  }
-
-  private extractRecipientEmail(receiverSnapshot: unknown): string | null {
-    if (!receiverSnapshot || typeof receiverSnapshot !== 'object') return null;
-    const snap = receiverSnapshot as Record<string, unknown>;
-    const email = snap['correoElectronico'];
-    if (typeof email === 'string' && email.trim().length > 0) {
-      return email.trim();
-    }
-    return null;
   }
 }

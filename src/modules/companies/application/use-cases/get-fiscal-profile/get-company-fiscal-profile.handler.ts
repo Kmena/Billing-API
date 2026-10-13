@@ -13,7 +13,7 @@ export class GetCompanyFiscalProfileHandler {
   constructor(private readonly prisma: PrismaService) {}
 
   async execute(command: GetCompanyFiscalProfileCommand): Promise<CompanyFiscalProfileResult> {
-    if (command.role !== 'TENANT_ADMIN') {
+    if (!['TENANT_ADMIN', 'M2M_FISCAL_PROFILE'].includes(command.role)) {
       throw new ForbiddenException({ code: 'ADMIN_ROLE_REQUIRED' });
     }
 

@@ -34,9 +34,20 @@ export class FiscalDocumentsController {
     @Param('companyId') companyId: string,
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-fiscal-payload-contract-version') fiscalPayloadContractVersion: string | undefined,
+    @Headers('x-fiscal-payload-hash') fiscalPayloadHash: string | undefined,
     @Body() body: CreateFiscalDocumentDto,
   ) {
-    return this.createDocument(request, companyId, environment, 'INVOICE', body, idempotencyKey);
+    return this.createDocument(
+      request,
+      companyId,
+      environment,
+      'INVOICE',
+      body,
+      idempotencyKey,
+      fiscalPayloadContractVersion,
+      fiscalPayloadHash,
+    );
   }
 
   @Post('tickets')
@@ -46,9 +57,20 @@ export class FiscalDocumentsController {
     @Param('companyId') companyId: string,
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
     @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Headers('x-fiscal-payload-contract-version') fiscalPayloadContractVersion: string | undefined,
+    @Headers('x-fiscal-payload-hash') fiscalPayloadHash: string | undefined,
     @Body() body: CreateFiscalDocumentDto,
   ) {
-    return this.createDocument(request, companyId, environment, 'TICKET', body, idempotencyKey);
+    return this.createDocument(
+      request,
+      companyId,
+      environment,
+      'TICKET',
+      body,
+      idempotencyKey,
+      fiscalPayloadContractVersion,
+      fiscalPayloadHash,
+    );
   }
 
   private async createDocument(
@@ -58,6 +80,8 @@ export class FiscalDocumentsController {
     type: FiscalDocumentType,
     body: CreateFiscalDocumentDto,
     idempotencyKey?: string,
+    fiscalPayloadContractVersion?: string,
+    fiscalPayloadHash?: string,
   ) {
     return this.fiscalDocumentService.createDocument({
       tenantId: request.user.tenantId,
@@ -68,11 +92,16 @@ export class FiscalDocumentsController {
       currency: body.currency,
       exchangeRate: body.exchangeRate,
       saleCondition: body.saleCondition,
+      creditTermDays: body.creditTermDays,
       paymentMethod: body.paymentMethod,
       lines: body.lines,
       idempotencyKey,
       apiKeyId: request.apiKey.id,
       actor: `apiKey:${request.apiKey.keyPrefix}`,
+      fiscalPayloadEquivalence:
+        fiscalPayloadContractVersion || fiscalPayloadHash
+          ? { contractVersion: fiscalPayloadContractVersion, hash: fiscalPayloadHash }
+          : undefined,
     });
   }
 }

@@ -109,16 +109,36 @@ function makePrismaMock(certs: (typeof CERT_A)[]) {
         .fn()
         .mockImplementation((args: { where: { id?: string; tenantId?: string } }) => {
           if (args.where.id === COMPANY_A && args.where.tenantId === TENANT_A) {
-            return Promise.resolve({ identificationNumber: '3102123456' });
+            return Promise.resolve({
+              identificationNumber: '3102123456',
+              identificationType: 'FISICA',
+              haciendaVerificationStatus: null, // not yet verified — P0 checks will show blockers
+              haciendaVerifiedAt: null,
+              haciendaTaxSituation: null,
+              haciendaMoroso: null,
+              haciendaOmiso: null,
+            });
           }
           if (args.where.id === COMPANY_B && args.where.tenantId === TENANT_B) {
-            return Promise.resolve({ identificationNumber: '3001234567' });
+            return Promise.resolve({
+              identificationNumber: '3001234567',
+              identificationType: 'FISICA',
+              haciendaVerificationStatus: null,
+              haciendaVerifiedAt: null,
+              haciendaTaxSituation: null,
+              haciendaMoroso: null,
+              haciendaOmiso: null,
+            });
           }
           return Promise.resolve(null);
         }),
     },
     fiscalIssuancePoint: {
       findFirst: jest.fn().mockResolvedValue(null),
+    },
+    // P0: companyEconomicActivity required by updated FiscalReadinessService
+    companyEconomicActivity: {
+      findMany: jest.fn().mockResolvedValue([]),
     },
   };
 }
@@ -190,11 +210,18 @@ describe('FiscalReadCertificateMetadataService — cross-tenant isolation (AC-01
 // ── FiscalReadinessService cross-tenant tests ─────────────────────────────────
 
 describe('FiscalReadinessService — cross-tenant isolation (AC-013, FR-024)', () => {
+  const secrets = {
+    isDurable: true,
+    getSecret: jest.fn().mockResolvedValue('sentinel-secret-value'),
+    storeSecret: jest.fn(),
+    deleteSecret: jest.fn(),
+  };
+
   it('returns readyToIssue: false with ACTIVE_CERTIFICATE_MISSING when User from Tenant A requests Company B readiness', async () => {
     // User from Tenant A cannot see Tenant B's certificate — the readiness check
     // behaves as if no certificate exists for the requested scope.
     const prisma = makePrismaMock([CERT_B]);
-    const service = new FiscalReadinessService(prisma as never);
+    const service = new FiscalReadinessService(prisma as never, secrets as never);
 
     const result = await service.evaluate({
       tenantId: TENANT_A,
@@ -210,7 +237,7 @@ describe('FiscalReadinessService — cross-tenant isolation (AC-013, FR-024)', (
 
   it('returns certificate metadata when tenant scoping matches own company', async () => {
     const prisma = makePrismaMock([CERT_A, CERT_B]);
-    const service = new FiscalReadinessService(prisma as never);
+    const service = new FiscalReadinessService(prisma as never, secrets as never);
 
     const result = await service.evaluate({
       tenantId: TENANT_A,
@@ -230,7 +257,7 @@ describe('FiscalReadinessService — cross-tenant isolation (AC-013, FR-024)', (
 
   it('readiness response never exposes secret fields regardless of tenant', async () => {
     const prisma = makePrismaMock([CERT_A]);
-    const service = new FiscalReadinessService(prisma as never);
+    const service = new FiscalReadinessService(prisma as never, secrets as never);
 
     const result = await service.evaluate({
       tenantId: TENANT_A,

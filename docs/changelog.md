@@ -1,5 +1,127 @@
 # Changelog — Billing API
 
+## [rfr-wave8-codigo-actividad-receptor] — 2026-10-01
+
+**Agent:** code-puppy-a44c29
+**Scope:** Wave 8 — RFR-TASK-801 · CodigoActividadReceptor XML support in FacturaElectronica v4.4.
+Zero Hacienda requests. Zero fiscal documents created. Zero consecutives consumed.
+
+### Summary
+Billing's Hacienda v4.4 XML serializer now emits `<CodigoActividadReceptor>` at the root
+level of `FacturaElectronica` when `receiver.economicActivity` is supplied and valid.
+
+### XSD contract (official `FacturaElectronica.xsd` v4.4)
+- `CodigoActividadReceptor` — `minOccurs=0`, `xs:restriction base=xs:string`, `minLength=6`,
+  `maxLength=6`. **No `xs:pattern`** — no numeric-only requirement proven from XSD.
+- Position: `CodigoActividadEmisor` → `CodigoActividadReceptor?` → `NumeroConsecutivo`.
+- `TiqueteElectronico.xsd` does NOT define this element — TICKET type is unaffected.
+
+### Serialization behavior
+- `receiver.economicActivity` = 6-char string → `<CodigoActividadReceptor>{value}</CodigoActividadReceptor>` emitted at root level.
+- `null` / `undefined` / absent / empty string → element omitted (XSD optional, minOccurs=0).
+- Non-empty string with length ≠ 6 → throws `FISCAL_XML_INVALID_RECEIVER_ACTIVITY` before signing.
+- No truncation. No padding. No coercion. No silent omission of invalid supplied values.
+
+### Mapping chain confirmed intact
+`receiver.economicActivity` (API DTO) → `receiverSnapshot.economicActivity` (DB JSON) →
+`document.receiverSnapshot['economicActivity']` (serializer) → `<CodigoActividadReceptor>` (XML)
+
+### Files changed
+- `src/modules/fiscal-documents/domain/fiscal-xml/fiscal-xml.errors.ts` — added `invalidReceiverActivity: 'FISCAL_XML_INVALID_RECEIVER_ACTIVITY'`.
+- `src/modules/fiscal-documents/infrastructure/xml/hacienda-v44-xml-serializer.adapter.ts` — imports `FISCAL_XML_ERROR`; added `extractReceiverActivityCode()` private method; emits `CodigoActividadReceptor` in XSD-correct position.
+
+### Tests added
+- `src/modules/fiscal-documents/infrastructure/xml/__tests__/hacienda-v44-receiver-activity.spec.ts` — 27 tests covering all 15 required spec cases plus extras: XSD validation (with and without field), Inventori round-trip, ordering guarantee, TiqueteElectronico guard, whitespace trimming, parametrized valid codes.
+
+### Quality gates
+- lint: 0 errors, 0 warnings
+- typecheck: PASS (0 errors)
+- Prisma validate: PASS
+- build: PASS
+- Targeted serializer tests: **84 passed, 0 failed** (5 suites, serial)
+- New Wave 8 tests: **27 passed, 0 failed**
+- XSD validation with CodigoActividadReceptor: PASS (Python xmlschema engine)
+- XSD validation without CodigoActividadReceptor: PASS (backward compatibility)
+- Existing FacturaElectronica regression: PASS
+- Hacienda requests: 0
+- Fiscal documents created: 0
+- Consecutives consumed: 0
+- Real certificates changed: 0
+
+---
+
+## [inventori-sandbox-bootstrap-taxpayer-verification] — 2026-09-25
+
+**Agent:** sdd-implementation-agent
+**Scope:** Inventori SANDBOX Billing bootstrap + P0 taxpayer verification. Zero fiscal documents. Zero Hacienda OAuth. One Hacienda public /fe/ae GET.
+
+### Summary
+Full bootstrap of the Inventori SANDBOX Billing Company completed:
+- Tenant: `25ae538c-b272-407b-83d0-ccc78be3c658`
+- Company: `dde91f44-6ceb-4eb7-b322-0139919cc34d` (FISICA/207530251)
+- Taxpayer verified: KAREN VANESSA CASTRO GOMEZ / Inscrito / moroso=false / omiso=false
+- Economic activity from Hacienda: `9609.0` (principal) — replaces placeholder `960900`
+- Certificate: ACTIVE, CPF-02-0753-0251 → canonical 207530251 (FISICA)
+- All three identity invariants: Company ↔ Certificate ↔ Taxpayer = MATCH
+- FiscalReadiness: `readyToIssue = true` / reasonCodes=[] / warnings=[]
+- M2M key: `c255f9ff` (prefix: `8c3323eb`) with all required scopes including fiscal-onboarding
+- Hacienda /fe/ae requests: 1 | OAuth: 0 | POST: 0 | Documents: 0 | Consecutives: 0
+
+### GO/NO-GO: GO — Inventori TASK-016 may be prepared (not yet authorized to execute)
+
+---
+
+## [p0-hacienda-taxpayer-and-economic-activity-validation] — 2026-09-25
+
+**Agent:** sdd-implementation-agent
+**Canonical spec:** `specs/hacienda-taxpayer-and-economic-activity-validation/`
+**Scope:** P0 taxpayer verification + economic activity persistence + fiscal readiness extension.
+Zero Hacienda network requests. Zero fiscal documents created. Zero consecutives consumed.
+
+### Summary
+All 10 TASK items from the P0 spec are COMPLETE. Billing now requires Hacienda taxpayer
+verification before a company is considered `readyToIssue`. Economic activities from
+Hacienda /fe/ae are persisted, validated, and managed per company.
+
+### Database changes (migration `20260925000000_p0_economic_activities`)
+- `companies`: added `hacienda_tax_situation`, `hacienda_moroso`, `hacienda_omiso`.
+- `company_fiscal_profiles`: widened `economic_activity_code VARCHAR(6) → VARCHAR(20)`;
+  added `default_economic_activity_id FK`.
+- NEW table `company_economic_activities`: verified activities from Hacienda /fe/ae.
+
+### New application use-cases
+- `VerifyCompanyTaxpayerHandler` — calls Hacienda /fe/ae, validates identity, persists activities.
+- `GetTaxpayerVerificationStatusHandler` — read-only status.
+- `ListEconomicActivitiesHandler` — list persisted activities.
+- `SetActivityBillingEnabledHandler` — company-controlled billing flag.
+- `SetDefaultEconomicActivityHandler` — set/validate default activity (DEC-006 sync).
+
+### FiscalReadinessService extended
+New hard-blocker codes: `TAXPAYER_VALIDATION_MISSING`, `TAXPAYER_NOT_ACTIVE`,
+`ECONOMIC_ACTIVITY_MISSING`, `DEFAULT_ECONOMIC_ACTIVITY_MISSING`,
+`DEFAULT_ECONOMIC_ACTIVITY_INVALID`.
+New warning-only codes: `TAXPAYER_MOROSO`, `TAXPAYER_OMISO`,
+`ECONOMIC_ACTIVITY_VERIFICATION_STALE`.
+New field: `warnings: string[]` in `FiscalReadinessResult`.
+
+### API endpoints added
+- `POST/GET /companies/:id/taxpayer-verification` (Tenant Admin + M2M)
+- `GET/PATCH /companies/:id/economic-activities[/:code]` (Tenant Admin + M2M)
+- `PUT /companies/:id/fiscal-profile/default-activity` (Tenant Admin + M2M)
+- M2M scopes: `fiscal-onboarding:read`, `fiscal-onboarding:write` (DEC-007)
+
+### Quality gates
+- lint: 0 errors (16 warnings — `any` in test helpers, expected)
+- typecheck: PASS
+- prisma validate: PASS
+- build: PASS
+- tests: 980 passed, 0 failed
+- Hacienda requests: 0
+- Fiscal documents: 0
+- Consecutives consumed: 0
+
+---
+
 ## [fase-4-s-hacienda-sandbox-validation-closed] — 2026-09-22
 
 **Agent:** sdd-implementation-agent-86ebff

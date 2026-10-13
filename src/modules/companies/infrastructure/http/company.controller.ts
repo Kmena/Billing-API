@@ -8,7 +8,6 @@ import {
   Post,
   Put,
   Request,
-  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -21,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import { CreateCompanyHandler } from '../../application/use-cases/create-company/create-company.handler';
 import { GetCompanyHandler } from '../../application/use-cases/get-company/get-company.handler';
 import { GetCompanyFiscalProfileHandler } from '../../application/use-cases/get-fiscal-profile/get-company-fiscal-profile.handler';
@@ -50,6 +50,7 @@ export class CompanyController {
   ) {}
 
   @Post()
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create a new company for the authenticated tenant' })
   @ApiCreatedResponse({ type: CompanyResponseDto })
@@ -59,6 +60,7 @@ export class CompanyController {
   ): Promise<CompanyResponseDto> {
     const result = await this.createCompanyHandler.execute({
       tenantId: req.user.tenantId,
+      role: req.user.role,
       legalName: dto.legalName,
       tradeName: dto.tradeName,
       identificationType: dto.identificationType,
@@ -81,6 +83,7 @@ export class CompanyController {
   }
 
   @Put(':id')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
@@ -91,15 +94,9 @@ export class CompanyController {
     @Param('id') id: string,
     @Body() dto: UpdateCompanyRequestDto,
   ) {
-    // AUD-API-003: Company updates require TENANT_ADMIN role
-    if (req.user.role !== 'TENANT_ADMIN') {
-      throw new UnauthorizedException({
-        code: 'TENANT_ADMIN_REQUIRED',
-        message: 'Company updates require TENANT_ADMIN role.',
-      });
-    }
     return this.updateCompanyHandler.execute({
       tenantId: req.user.tenantId,
+      role: req.user.role,
       companyId: id,
       actorUserId: req.user.userId,
       legalName: dto.legalName,
@@ -110,6 +107,7 @@ export class CompanyController {
   }
 
   @Put(':id/fiscal-profile')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Create or update company fiscal issuer profile (tenant admin only)' })
   @ApiOkResponse({ type: CompanyFiscalProfileResponseDto })

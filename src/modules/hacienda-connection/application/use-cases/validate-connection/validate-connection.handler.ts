@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -33,6 +34,7 @@ export class ValidateConnectionHandler {
     if (!c) throw new NotFoundException({ code: 'HACIENDA_CONNECTION_NOT_FOUND' });
     if (c.status === 'DISABLED')
       throw new UnprocessableEntityException({ code: 'HACIENDA_CONNECTION_DISABLED' });
+    const expectedUpdatedAt = c.updatedAt;
     const result = await this.auth.validateConnection(
       JSON.parse(await this.secrets.getSecret(c.secretReference)),
       environment,
@@ -44,7 +46,9 @@ export class ValidateConnectionHandler {
     } else if (result.errorCode === 'INVALID_CREDENTIALS')
       c.markInvalidCredentials('INVALID_CREDENTIALS', now);
     else c.markUnavailable(result.errorCode ?? 'IDP_UNAVAILABLE', now);
-    await this.repo.save(c);
+    if (!(await this.repo.save(c, expectedUpdatedAt))) {
+      throw new ConflictException({ code: 'HACIENDA_CONNECTION_CONCURRENT_CONFLICT' });
+    }
     this.audit.record({
       tenantId,
       companyId,

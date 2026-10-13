@@ -1,6 +1,6 @@
 # ─── Stage 1: deps ────────────────────────────────────────────────────────────
 # Install ALL dependencies (including dev) for building
-FROM node:20-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 
 # Install build dependencies for native modules (argon2, etc.)
@@ -11,10 +11,10 @@ RUN npm ci --ignore-scripts
 
 # ─── Stage 2: builder ─────────────────────────────────────────────────────────
 # Build the TypeScript project and generate Prisma client
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 WORKDIR /app
 
-RUN apk add --no-cache python3 py3-pip
+RUN apk add --no-cache python3 py3-pip openssl
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -31,8 +31,22 @@ RUN npm prune --production
 
 # ─── Stage 3: runner ──────────────────────────────────────────────────────────
 # Minimal production image — non-root user
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 WORKDIR /app
+
+ARG OCI_IMAGE_REVISION=unknown
+ARG OCI_IMAGE_SOURCE=unknown
+ARG OCI_IMAGE_CREATED=unknown
+ARG OCI_IMAGE_VERSION=unknown
+ARG OCI_SOURCE_CONTENT_SHA256=unknown
+ARG OCI_SOURCE_STATE=unknown
+
+LABEL org.opencontainers.image.revision=$OCI_IMAGE_REVISION \
+      org.opencontainers.image.source=$OCI_IMAGE_SOURCE \
+      org.opencontainers.image.created=$OCI_IMAGE_CREATED \
+      org.opencontainers.image.version=$OCI_IMAGE_VERSION \
+      io.inventori.billing.source-content-sha256=$OCI_SOURCE_CONTENT_SHA256 \
+      io.inventori.billing.source-state=$OCI_SOURCE_STATE
 
 ENV NODE_ENV=production
 ENV PORT=3000
@@ -40,7 +54,7 @@ ENV PORT=3000
 ENV PYTHONPATH=/app/python-packages
 
 # Create non-root user — NFR security
-RUN apk add --no-cache python3 && \
+RUN apk add --no-cache python3 openssl && \
     addgroup --system --gid 1001 billing && \
     adduser --system --uid 1001 --ingroup billing billing
 
@@ -60,4 +74,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- http://localhost:3000/health || exit 1
 
-CMD ["node", "dist/bootstrap/api.main.js"]
+CMD ["node", "dist/src/bootstrap/api.main.js"]

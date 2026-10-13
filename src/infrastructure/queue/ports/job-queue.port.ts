@@ -3,6 +3,12 @@ export interface JobPublishOptions {
   readonly retryDelay?: number; // seconds
   readonly expireInSeconds?: number;
   readonly startAfterSeconds?: number;
+  /**
+   * Stable idempotency key for queue publication.
+   * Implementations should treat duplicate active work for the same key as success.
+   */
+  readonly singletonKey?: string;
+  readonly singletonSeconds?: number;
 }
 
 export interface JobQueuePort {

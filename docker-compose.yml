@@ -1,7 +1,29 @@
 version: '3.9'
 
+# Local development fiscal evidence is deliberately filesystem-backed. Keep the
+# provider, root and mount declaration shared so the API and worker cannot drift
+# in the supported Compose path. Production deployment configuration is not
+# defined by this development-only Compose file.
+x-local-fiscal-storage-environment: &local-fiscal-storage-environment
+  STORAGE_TYPE: local
+  LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
+  LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+  LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
+
+x-local-fiscal-storage-mount: &local-fiscal-storage-mount
+  ./storage:/var/lib/billing-artifacts
+
+# Fiscal credentials and PKCS#12 material use a separate encrypted filesystem
+# store. The key is supplied from an operator-managed host file and never lives
+# in the data volume or image. Both processes share the exact same mounts.
+x-local-secret-store-environment: &local-secret-store-environment
+  SECRET_PROVIDER: local-encrypted
+  LOCAL_SECRET_STORE_PATH: /var/lib/billing-secrets
+  LOCAL_SECRET_STORE_MASTER_KEY_PATH: /run/secrets/billing-local-secret-store.key
+  LOCAL_SECRET_STORE_REQUIRED_MARKER: .billing-secret-store-root
+
 # ─── Billing Development Stack ─────────────────────────────────────────────────
-# Services: billing-api + billing-worker + postgres + localstack
+# Services: billing-api + billing-worker + postgres + optional localstack
 # ADR-003: No Redis. Queue via pg-boss on the same PostgreSQL instance.
 
 services:
@@ -24,19 +46,24 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── LocalStack (S3 mock for dev) ──────────────────────────────────────────────
+  # ── Optional LocalStack mocks for legacy/dev-only exercises ───────────────────
+  # Billing API/worker do not depend on this service for artifacts or secrets.
   localstack:
     image: localstack/localstack:3
     container_name: billing-localstack
     restart: unless-stopped
     environment:
-      SERVICES: s3
+      SERVICES: s3,ssm
       DEFAULT_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
+      # PERSISTENCE=1 is Pro-only in LocalStack Community 3.x. Fiscal secret
+      # durability must never rely on this setting or this service.
+      PERSISTENCE: 1
     ports:
       - '4566:4566'
     volumes:
       - localstack_data:/var/lib/localstack
+      - ./scripts/localstack/init/10-bootstrap-billing-bucket.sh:/etc/localstack/init/ready.d/10-bootstrap-billing-bucket.sh:ro
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
       interval: 10s
@@ -55,6 +82,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      <<: [*local-fiscal-storage-environment, *local-secret-store-environment]
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
@@ -63,19 +91,19 @@ services:
       JWT_REFRESH_EXPIRES_IN: 7d
       # CORS — must be an explicit origin in production; never use * here
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      STORAGE_TYPE: s3
-      AWS_S3_BUCKET: billing-documents
-      AWS_S3_ENDPOINT: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: env
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
       LOG_LEVEL: info
       # Hacienda resilience — defaults are production-safe
       HACIENDA_CB_FAILURE_THRESHOLD: ${HACIENDA_CB_FAILURE_THRESHOLD:-5}
       HACIENDA_CB_RESET_TIMEOUT_MS: ${HACIENDA_CB_RESET_TIMEOUT_MS:-30000}
       HACIENDA_CB_OUTBOUND_RATE_PER_SECOND: ${HACIENDA_CB_OUTBOUND_RATE_PER_SECOND:-8}
       USE_REAL_HACIENDA: ${USE_REAL_HACIENDA:-false}
+      HACIENDA_QR_URL_BASE: ${HACIENDA_QR_URL_BASE:-https://mock.hacienda.test/qr}
       HACIENDA_IDP_PRODUCTION_URL: ${HACIENDA_IDP_PRODUCTION_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token}
       HACIENDA_IDP_SANDBOX_URL: ${HACIENDA_IDP_SANDBOX_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token}
       HACIENDA_IDP_CLIENT_ID_PRODUCTION: ${HACIENDA_IDP_CLIENT_ID_PRODUCTION:-api-prod}
@@ -86,6 +114,10 @@ services:
       HACIENDA_AUTH_RETRY_5XX_DELAY_MS: ${HACIENDA_AUTH_RETRY_5XX_DELAY_MS:-2000}
     ports:
       - '3000:3000'
+    volumes:
+      - *local-fiscal-storage-mount
+      - ./secrets-storage:/var/lib/billing-secrets
+      - ${LOCAL_SECRET_STORE_MASTER_KEY_FILE:?LOCAL_SECRET_STORE_MASTER_KEY_FILE must point to the operator-managed key}:/run/secrets/billing-local-secret-store.key:ro
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
       interval: 30s
@@ -101,22 +133,32 @@ services:
       target: runner
     container_name: billing-worker
     restart: unless-stopped
-    command: ['node', 'dist/bootstrap/worker.main.js']
+    command: ['node', 'dist/src/bootstrap/worker.main.js']
+    # The worker deliberately has no HTTP listener; the image's API healthcheck
+    # therefore cannot apply here. Verify that its main process remains alive.
+    healthcheck:
+      test: ['CMD-SHELL', 'kill -0 1']
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      <<: [*local-fiscal-storage-environment, *local-secret-store-environment]
       NODE_ENV: production
       DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-32chars}
-      STORAGE_TYPE: s3
-      AWS_S3_BUCKET: billing-documents
-      AWS_S3_ENDPOINT: http://localstack:4566
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: env
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
+      FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
       LOG_LEVEL: info
+      HACIENDA_QR_URL_BASE: ${HACIENDA_QR_URL_BASE:-https://mock.hacienda.test/qr}
       HACIENDA_IDP_PRODUCTION_URL: ${HACIENDA_IDP_PRODUCTION_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token}
       HACIENDA_IDP_SANDBOX_URL: ${HACIENDA_IDP_SANDBOX_URL:-https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token}
       HACIENDA_IDP_CLIENT_ID_PRODUCTION: ${HACIENDA_IDP_CLIENT_ID_PRODUCTION:-api-prod}
@@ -125,6 +167,10 @@ services:
       HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS: ${HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS:-30000}
       HACIENDA_AUTH_RETRY_5XX_COUNT: ${HACIENDA_AUTH_RETRY_5XX_COUNT:-1}
       HACIENDA_AUTH_RETRY_5XX_DELAY_MS: ${HACIENDA_AUTH_RETRY_5XX_DELAY_MS:-2000}
+    volumes:
+      - *local-fiscal-storage-mount
+      - ./secrets-storage:/var/lib/billing-secrets
+      - ${LOCAL_SECRET_STORE_MASTER_KEY_FILE:?LOCAL_SECRET_STORE_MASTER_KEY_FILE must point to the operator-managed key}:/run/secrets/billing-local-secret-store.key:ro
 
 volumes:
   postgres_data:

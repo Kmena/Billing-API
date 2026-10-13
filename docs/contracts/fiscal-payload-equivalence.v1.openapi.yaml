@@ -1,0 +1,36 @@
+openapi: 3.0.3
+info:
+  title: Billing Fiscal Payload Equivalence Contract
+  version: 1.0.0
+  description: >-
+    Versioned canonical fiscal-payload SHA-256 contract for optional validation
+    of future Billing fiscal-create requests. It does not replace Billing's
+    internal idempotency request hash.
+components:
+  parameters:
+    FiscalPayloadContractVersion:
+      name: X-Fiscal-Payload-Contract-Version
+      in: header
+      required: false
+      schema: { type: string, enum: [fiscal-payload-equivalence.v1] }
+      description: Must be paired with X-Fiscal-Payload-Hash when supplied.
+    FiscalPayloadHash:
+      name: X-Fiscal-Payload-Hash
+      in: header
+      required: false
+      schema: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+      description: SHA-256 of canonical UTF-8 fiscal payload JSON. Must be paired with the version header.
+  schemas:
+    CanonicalFiscalPayloadV1:
+      type: object
+      additionalProperties: false
+      required: [contractVersion, fiscalPayload]
+      properties:
+        contractVersion: { type: string, enum: [fiscal-payload-equivalence.v1] }
+        fiscalPayload:
+          type: object
+          description: >-
+            receiver, currency, exchangeRate, saleCondition, creditTermDays,
+            paymentMethod, and ordered lines. Object keys are sorted recursively;
+            decimal fields are normalized to five fractional digits.
+          additionalProperties: true

@@ -4,10 +4,12 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ConfigService } from '@nestjs/config';
-import { StoragePort } from '../ports/storage.port';
+import { StoragePort, StorageUploadRequest } from '../ports/storage.port';
+import { assertRealHaciendaDisabledInTests, assertSafeTestS3Storage } from '../test-storage-safety';
 
 /**
  * S3StorageAdapter — AWS S3 storage adapter.
@@ -23,6 +25,10 @@ export class S3StorageAdapter implements StoragePort {
     const region = configService.get<string>('storage.awsRegion') ?? 'us-east-1';
     const endpoint = configService.get<string>('storage.s3Endpoint');
     this.bucket = configService.get<string>('storage.s3Bucket') ?? 'billing-documents';
+    assertRealHaciendaDisabledInTests();
+    if (process.env.NODE_ENV === 'test') {
+      assertSafeTestS3Storage(endpoint, this.bucket);
+    }
 
     this.client = new S3Client({
       region,
@@ -30,17 +36,22 @@ export class S3StorageAdapter implements StoragePort {
     });
   }
 
-  async upload(key: string, content: Buffer, metadata?: Record<string, string>): Promise<string> {
+  async ensureReady(): Promise<void> {
+    await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }));
+  }
+
+  async upload(request: StorageUploadRequest): Promise<string> {
     await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
-        Key: key,
-        Body: content,
-        Metadata: metadata,
+        Key: request.key,
+        Body: request.bytes,
+        ContentType: request.contentType,
+        Metadata: request.metadata,
         // All objects are private by default — NFR-009
       }),
     );
-    return key;
+    return request.key;
   }
 
   async download(key: string): Promise<Buffer> {

@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/api/v1/companies/22222222-2222-4222-8222-222222222222/fiscal-documents/SANDBOX/identity-by-idempotency",
+    "query": {
+      "idempotencyKey": "inventori:1:invoice:1890",
+      "operation": "fiscal-document.create.invoice",
+      "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "fiscalDocumentId": "44444444-4444-4444-8444-444444444444",
+      "companyId": "22222222-2222-4222-8222-222222222222",
+      "environment": "SANDBOX",
+      "documentType": "INVOICE",
+      "status": "ACCEPTED",
+      "clave": "50601012600020753025100100001010000000006181741622",
+      "consecutive": "00100001010000000006",
+      "idempotencyKey": "inventori:1:invoice:1890",
+      "operation": "fiscal-document.create.invoice",
+      "reservationStatus": "COMPLETED",
+      "requestHashVerified": true
+    }
+  }
+}

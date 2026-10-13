@@ -1,6 +1,7 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { resetFiscalE2eData } from '../../helpers/fiscal-e2e-helpers';
+import { resetFiscalE2eData, type FiscalE2eCleanupContext } from '../../helpers/fiscal-e2e-helpers';
+import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
 import { createTestCompany, createTestTenant } from '../../helpers/test-factories';
 
 async function createReadyForXmlDocument(
@@ -70,20 +71,23 @@ async function createReadyForXmlDocument(
 }
 
 describe('Fiscal XML persistence metadata (E2E, PostgreSQL)', () => {
-  const prisma = new PrismaClient();
+  let prisma: PrismaClient;
+  let cleanupContext: FiscalE2eCleanupContext;
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
-    await resetFiscalE2eData(prisma);
+    ({ prisma } = await createGuardedTestPrisma());
+    cleanupContext = { prisma, ownedTenantIds: new Set<string>() };
   });
 
   afterAll(async () => {
-    await resetFiscalE2eData(prisma);
+    await resetFiscalE2eData(cleanupContext);
     await prisma.$disconnect();
   });
 
   it('persists F2.3 lifecycle states, artifact metadata and certificate references without plaintext secrets', async () => {
     const tenant = await createTestTenant(prisma);
+    cleanupContext.ownedTenantIds.add(tenant.id);
     const company = await createTestCompany(prisma, tenant.id);
     const document = await createReadyForXmlDocument(prisma, {
       tenantId: tenant.id,
@@ -172,6 +176,7 @@ describe('Fiscal XML persistence metadata (E2E, PostgreSQL)', () => {
 
   it('enforces company/tenant ownership for certificate metadata through foreign keys and scoped reads', async () => {
     const tenant = await createTestTenant(prisma);
+    cleanupContext.ownedTenantIds.add(tenant.id);
     const company = await createTestCompany(prisma, tenant.id);
     const otherCompany = await createTestCompany(prisma, tenant.id);
 

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { HaciendaConnection as PrismaHaciendaConnection } from '@prisma/client';
+import { Prisma, type HaciendaConnection as PrismaHaciendaConnection } from '@prisma/client';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { TenantAwarePrismaRepository } from '../../../../infrastructure/database/tenant-aware-prisma.repository';
 import { HaciendaConnection } from '../../domain/entities/hacienda-connection.entity';
@@ -25,36 +25,51 @@ export class PrismaHaciendaConnectionRepository
     return record ? this.toDomain(record) : null;
   }
 
-  async save(connection: HaciendaConnection): Promise<void> {
-    await this.prisma.haciendaConnection.upsert({
-      where: {
-        companyId_environment: {
+  async save(connection: HaciendaConnection, expectedUpdatedAt?: Date): Promise<boolean> {
+    const data = {
+      status: connection.status,
+      secretReference: connection.secretReference,
+      lastValidatedAt: connection.lastValidatedAt,
+      lastSuccessfulAuthAt: connection.lastSuccessfulAuthAt,
+      lastValidationErrorCode: connection.lastValidationErrorCode,
+      updatedAt: connection.updatedAt,
+    };
+
+    if (expectedUpdatedAt) {
+      const result = await this.prisma.haciendaConnection.updateMany({
+        where: this.applyTenantFilter({
           companyId: connection.companyId,
           environment: connection.environment,
+          updatedAt: expectedUpdatedAt,
+        }),
+        data,
+      });
+      return result.count === 1;
+    }
+
+    try {
+      await this.prisma.haciendaConnection.create({
+        data: {
+          id: connection.id,
+          tenantId: connection.tenantId,
+          companyId: connection.companyId,
+          environment: connection.environment,
+          status: connection.status,
+          secretReference: connection.secretReference,
+          lastValidatedAt: connection.lastValidatedAt,
+          lastSuccessfulAuthAt: connection.lastSuccessfulAuthAt,
+          lastValidationErrorCode: connection.lastValidationErrorCode,
+          createdAt: connection.createdAt,
+          updatedAt: connection.updatedAt,
         },
-      },
-      create: {
-        id: connection.id,
-        tenantId: connection.tenantId,
-        companyId: connection.companyId,
-        environment: connection.environment,
-        status: connection.status,
-        secretReference: connection.secretReference,
-        lastValidatedAt: connection.lastValidatedAt,
-        lastSuccessfulAuthAt: connection.lastSuccessfulAuthAt,
-        lastValidationErrorCode: connection.lastValidationErrorCode,
-        createdAt: connection.createdAt,
-        updatedAt: connection.updatedAt,
-      },
-      update: {
-        status: connection.status,
-        secretReference: connection.secretReference,
-        lastValidatedAt: connection.lastValidatedAt,
-        lastSuccessfulAuthAt: connection.lastSuccessfulAuthAt,
-        lastValidationErrorCode: connection.lastValidationErrorCode,
-        updatedAt: connection.updatedAt,
-      },
-    });
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return false;
+      }
+      throw error;
+    }
   }
 
   private toDomain(record: PrismaHaciendaConnection): HaciendaConnection {

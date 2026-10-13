@@ -47,14 +47,41 @@ export const validationSchema = Joi.object({
   // Storage
   STORAGE_TYPE: Joi.string().valid('local', 's3').default('local'),
   LOCAL_STORAGE_PATH: Joi.string().default('./storage'),
-  LOCAL_STORAGE_SECRET: Joi.string().default('local-signing-secret-dev-only'),
+  LOCAL_STORAGE_REQUIRED_MARKER: Joi.string()
+    .pattern(/^[A-Za-z0-9._-]+$/)
+    .optional(),
+  LOCAL_STORAGE_SECRET: Joi.when('NODE_ENV', {
+    is: productionOrStaging,
+    then: Joi.string().min(32).invalid('local-signing-secret-dev-only').required(),
+    otherwise: Joi.string().default('local-signing-secret-dev-only'),
+  }),
   AWS_S3_BUCKET: Joi.string().optional(),
   AWS_S3_ENDPOINT: Joi.string().optional(),
   AWS_REGION: Joi.string().default('us-east-1'),
 
   // Secrets
-  SECRET_PROVIDER: Joi.string().valid('env', 'ssm').default('env'),
+  // Default to durable SSM. For local dev, point AWS_SSM_ENDPOINT at LocalStack.
+  // EnvSecretProvider remains for tests/bootstrap only and is not durable.
+  SECRET_PROVIDER: Joi.when('NODE_ENV', {
+    is: productionOrStaging,
+    then: Joi.string().valid('ssm', 'local-encrypted').required(),
+    otherwise: Joi.string().valid('env', 'ssm', 'local-encrypted').default('ssm'),
+  }),
   SSM_PARAMETER_PREFIX: Joi.string().default('/billing'),
+  AWS_SSM_ENDPOINT: Joi.string().uri().optional(),
+  LOCAL_SECRET_STORE_PATH: Joi.when('SECRET_PROVIDER', {
+    is: 'local-encrypted',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().optional(),
+  }),
+  LOCAL_SECRET_STORE_MASTER_KEY_PATH: Joi.when('SECRET_PROVIDER', {
+    is: 'local-encrypted',
+    then: Joi.string().trim().min(1).required(),
+    otherwise: Joi.string().optional(),
+  }),
+  LOCAL_SECRET_STORE_REQUIRED_MARKER: Joi.string()
+    .pattern(/^[A-Za-z0-9._-]+$/)
+    .default('.billing-secret-store-root'),
 
   // CORS
   CORS_ALLOWED_ORIGINS: Joi.when('NODE_ENV', {
@@ -135,6 +162,23 @@ export const validationSchema = Joi.object({
   // F4: Delivery retry horizon
   DELIVERY_MAX_RETRIES: Joi.number().integer().positive().default(8),
 
+  // Durable recovery scans only post-activation work. It is disabled by default
+  // so deployment cannot replay historical delivery rows accidentally.
+  FISCAL_DELIVERY_RECOVERY_ENABLED: Joi.boolean().truthy('true').falsy('false').default(false),
+  FISCAL_DELIVERY_RECOVERY_START_AT: Joi.string().isoDate().empty('').optional(),
+  FISCAL_DELIVERY_RECOVERY_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
+  FISCAL_DELIVERY_RECOVERY_LEASE_SECONDS: Joi.number().integer().min(30).default(300),
+  FISCAL_DELIVERY_RECOVERY_MAX_BATCH: Joi.number().integer().min(1).max(1000).default(100),
+  FISCAL_DELIVERY_RECOVERY_MAX_AGE_HOURS: Joi.number().integer().min(1).max(720).default(72),
+  // Historical recovery is disabled unless an operator explicitly enables a bounded window.
+  // New terminal-result delivery and ordinary retries are intentionally unaffected.
+  FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: Joi.boolean()
+    .truthy('true')
+    .falsy('false')
+    .default(false),
+  FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: Joi.string().isoDate().empty('').optional(),
+  FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: Joi.string().isoDate().empty('').optional(),
+
   // Hacienda CE reception submission
   HACIENDA_RECEPCION_PRODUCTION_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
@@ -146,4 +190,29 @@ export const validationSchema = Joi.object({
   HACIENDA_SUBMISSION_CALLBACK_URL: Joi.string()
     .uri({ scheme: ['https'] })
     .optional(),
-});
+})
+  .custom((value, helpers) => {
+    const durableRecoveryEnabled = value.FISCAL_DELIVERY_RECOVERY_ENABLED === true;
+    const durableRecoveryStartAt = value.FISCAL_DELIVERY_RECOVERY_START_AT;
+    if (durableRecoveryEnabled && !durableRecoveryStartAt) {
+      return helpers.error('any.invalid');
+    }
+
+    const enabled = value.FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED === true;
+    const startAt = value.FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT;
+    const endAt = value.FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT;
+
+    if (enabled && (!startAt || !endAt)) {
+      return helpers.error('any.invalid');
+    }
+    if ((startAt && !endAt) || (!startAt && endAt)) {
+      return helpers.error('any.invalid');
+    }
+    if (startAt && endAt && new Date(startAt).getTime() >= new Date(endAt).getTime()) {
+      return helpers.error('any.invalid');
+    }
+    return value;
+  })
+  .messages({
+    'any.invalid': 'Invalid fiscal delivery startup recovery configuration.',
+  });

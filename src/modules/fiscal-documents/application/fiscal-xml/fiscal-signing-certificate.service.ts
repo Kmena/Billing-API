@@ -80,11 +80,13 @@ export class FiscalSigningCertificateService {
 
     const company = await this.prisma.company.findFirst({
       where: { id: input.companyId, tenantId: input.tenantId },
-      select: { identificationNumber: true },
+      select: { identificationNumber: true, identificationType: true },
     });
     const certId = certificate.extractedIdentityNumber.trim().toLowerCase();
     const companyId = (company?.identificationNumber ?? '').trim().toLowerCase();
-    if (certId !== companyId) {
+    const certType = this.certTypeCodeToCompanyType(certificate.extractedIdentityType);
+    const typeMismatch = certType !== null && certType !== company?.identificationType;
+    if (certId !== companyId || typeMismatch) {
       this.logger.warn(
         {
           companyId: input.companyId,
@@ -120,6 +122,14 @@ export class FiscalSigningCertificateService {
     } catch {
       throw new BadRequestException({ code: FISCAL_XML_ERROR.certificateInvalidSecret });
     }
+  }
+
+  private certTypeCodeToCompanyType(code: string | null): string | null {
+    if (code === '01') return 'FISICA';
+    if (code === '02') return 'JURIDICA';
+    if (code === '03') return 'DIMEX';
+    if (code === '04') return 'NITE';
+    return null;
   }
 
   private parseCertificateSecret(certificateSecret: string, passphrase: string) {

@@ -1,0 +1,108 @@
+openapi: 3.0.3
+info:
+  title: Billing Fiscal Identity Evidence Lookup API
+  version: 2.0.0
+  description: >-
+    Read-only historical fiscal identity recovery using a versioned canonical fiscal
+    payload proof. It does not change Billing idempotency hashes or fiscal state.
+paths:
+  /api/v1/companies/{companyId}/fiscal-documents/{environment}/identity-by-fiscal-evidence:
+    post:
+      operationId: findFiscalIdentityByEvidenceV2
+      summary: Find a completed fiscal identity using independent fiscal evidence
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/Environment'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FiscalIdentityEvidenceLookupRequest'
+      responses:
+        '200':
+          description: Verified existing fiscal identity.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FiscalIdentityEvidenceLookupResponse'
+        '400': { $ref: '#/components/responses/ValidationFailure' }
+        '401': { $ref: '#/components/responses/AuthenticationFailure' }
+        '403': { $ref: '#/components/responses/AuthorizationFailure' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdentityConflict' }
+components:
+  securitySchemes:
+    ApiKeyAuth: { type: apiKey, in: header, name: X-API-Key }
+  parameters:
+    CompanyId: { name: companyId, in: path, required: true, schema: { type: string, format: uuid } }
+    Environment: { name: environment, in: path, required: true, schema: { type: string, enum: [SANDBOX, PRODUCTION] } }
+  schemas:
+    FiscalIdentityEvidenceLookupRequest:
+      type: object
+      additionalProperties: false
+      required: [idempotencyKey, operation, equivalenceContractVersion, fiscalPayload]
+      properties:
+        idempotencyKey: { type: string, minLength: 1, maxLength: 255 }
+        operation: { type: string, enum: [fiscal-document.create.invoice, fiscal-document.create.ticket] }
+        equivalenceContractVersion: { type: string, enum: [fiscal-payload-equivalence.v1] }
+        fiscalPayload: { $ref: '#/components/schemas/FiscalPayload' }
+    FiscalPayload:
+      type: object
+      additionalProperties: false
+      required: [currency, saleCondition, lines]
+      properties:
+        receiver: { type: object, nullable: true, additionalProperties: true }
+        currency: { type: string, enum: [CRC, USD] }
+        exchangeRate: { type: string, nullable: true, pattern: '^\\d+(\\.\\d{1,5})?$' }
+        saleCondition: { type: string, pattern: '^\\d{2}$' }
+        creditTermDays: { type: integer, minimum: 1, maximum: 99999, nullable: true }
+        paymentMethod: { type: string, pattern: '^\\d{2}$', nullable: true }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FiscalLine' }
+    FiscalLine:
+      type: object
+      additionalProperties: false
+      required: [lineNumber, cabysCode, description, unitMeasure, quantity, unitPrice]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        cabysCode: { type: string, pattern: '^\\d{13}$' }
+        description: { type: string, minLength: 1 }
+        unitMeasure: { type: string, minLength: 1 }
+        quantity: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$' }
+        unitPrice: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$' }
+        discountAmount: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$', nullable: true }
+        discountCode: { type: string, pattern: '^\\d{2}$', nullable: true }
+        discountNature: { type: string, nullable: true }
+        discountOther: { type: string, nullable: true }
+        taxAmount: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$', nullable: true }
+        taxCode: { type: string, pattern: '^\\d{2}$', nullable: true }
+        taxRateCode: { type: string, pattern: '^\\d{2}$', nullable: true }
+        taxRate: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$', nullable: true }
+    FiscalIdentityEvidenceLookupResponse:
+      type: object
+      additionalProperties: false
+      required: [fiscalDocumentId, companyId, environment, documentType, status, clave, consecutive, idempotencyKey, operation, reservationStatus, equivalenceContractVersion, fiscalPayloadEquivalent]
+      properties:
+        fiscalDocumentId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        documentType: { type: string, enum: [INVOICE, TICKET] }
+        status: { type: string }
+        clave: { type: string }
+        consecutive: { type: string }
+        idempotencyKey: { type: string }
+        operation: { type: string, enum: [fiscal-document.create.invoice, fiscal-document.create.ticket] }
+        reservationStatus: { type: string, enum: [COMPLETED] }
+        equivalenceContractVersion: { type: string, enum: [fiscal-payload-equivalence.v1] }
+        fiscalPayloadEquivalent: { type: boolean, enum: [true] }
+  responses:
+    ValidationFailure: { description: Invalid or non-canonical payload evidence. }
+    AuthenticationFailure: { description: Missing, invalid, expired, or revoked API key. }
+    AuthorizationFailure: { description: Missing read scope or company binding. }
+    NotFound: { description: FISCAL_IDENTITY_NOT_FOUND; safe non-disclosure, including mismatched payload evidence. }
+    IdentityConflict: { description: Ambiguous or internally inconsistent historical evidence; operator review required. }

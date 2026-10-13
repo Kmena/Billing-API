@@ -49,10 +49,18 @@ export class FiscalArtifactsController {
   async listInvoiceArtifacts(
     @Request() request: ApiKeyRequest,
     @Param('companyId') companyId: string,
-    @Param('environment', new ParseEnumPipe(environments)) _environment: HaciendaEnvironment,
+    @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
     @Param('id') id: string,
   ) {
-    return this.fiscalArtifactService.listArtifacts(request.user.tenantId, companyId, id);
+    return this.fiscalArtifactService.listArtifacts(
+      {
+        tenantId: request.user.tenantId,
+        companyId,
+        apiKeyId: request.apiKey.id,
+        scopes: request.apiKey.scopes,
+      },
+      { fiscalDocumentId: id, environment, documentType: 'INVOICE' },
+    );
   }
 
   /**
@@ -64,10 +72,18 @@ export class FiscalArtifactsController {
   async listTicketArtifacts(
     @Request() request: ApiKeyRequest,
     @Param('companyId') companyId: string,
-    @Param('environment', new ParseEnumPipe(environments)) _environment: HaciendaEnvironment,
+    @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
     @Param('id') id: string,
   ) {
-    return this.fiscalArtifactService.listArtifacts(request.user.tenantId, companyId, id);
+    return this.fiscalArtifactService.listArtifacts(
+      {
+        tenantId: request.user.tenantId,
+        companyId,
+        apiKeyId: request.apiKey.id,
+        scopes: request.apiKey.scopes,
+      },
+      { fiscalDocumentId: id, environment, documentType: 'TICKET' },
+    );
   }
 
   /**
@@ -82,12 +98,12 @@ export class FiscalArtifactsController {
   async downloadInvoiceArtifact(
     @Request() request: ApiKeyRequest,
     @Param('companyId') companyId: string,
-    @Param('environment', new ParseEnumPipe(environments)) _environment: HaciendaEnvironment,
-    @Param('id') _id: string,
+    @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
+    @Param('id') id: string,
     @Param('artifactId') artifactId: string,
     @Response() res: ExpressResponse,
   ) {
-    return this.streamArtifact(request, companyId, artifactId, res);
+    return this.streamArtifact(request, companyId, id, environment, 'INVOICE', artifactId, res);
   }
 
   /**
@@ -98,24 +114,31 @@ export class FiscalArtifactsController {
   async downloadTicketArtifact(
     @Request() request: ApiKeyRequest,
     @Param('companyId') companyId: string,
-    @Param('environment', new ParseEnumPipe(environments)) _environment: HaciendaEnvironment,
-    @Param('id') _id: string,
+    @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
+    @Param('id') id: string,
     @Param('artifactId') artifactId: string,
     @Response() res: ExpressResponse,
   ) {
-    return this.streamArtifact(request, companyId, artifactId, res);
+    return this.streamArtifact(request, companyId, id, environment, 'TICKET', artifactId, res);
   }
 
   private async streamArtifact(
     request: ApiKeyRequest,
     companyId: string,
+    fiscalDocumentId: string,
+    environment: HaciendaEnvironment,
+    documentType: 'INVOICE' | 'TICKET',
     artifactId: string,
     res: ExpressResponse,
   ): Promise<void> {
     const download = await this.fiscalArtifactService.downloadArtifact(
-      request.user.tenantId,
-      companyId,
-      artifactId,
+      {
+        tenantId: request.user.tenantId,
+        companyId,
+        apiKeyId: request.apiKey.id,
+        scopes: request.apiKey.scopes,
+      },
+      { fiscalDocumentId, environment, documentType, artifactId },
     );
 
     const contentDisposition = this.fiscalArtifactService.buildContentDisposition(

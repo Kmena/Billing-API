@@ -1,0 +1,12 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testMatch": ["<rootDir>/test/wave7/**/*.spec.ts"],
+  "transform": { "^.+\\.(t|j)s$": "ts-jest" },
+  "transformIgnorePatterns": [
+    "node_modules/(?!(@nestjs/cache-manager|cache-manager|@nestjs/axios)/)"
+  ],
+  "maxWorkers": 1,
+  "testTimeout": 120000
+}

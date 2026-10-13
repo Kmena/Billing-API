@@ -19,7 +19,10 @@ import { DomainException } from '../../../shared/domain/domain-exception';
 export class ArtifactNotFoundException extends DomainException {
   readonly code = 'ARTIFACT_NOT_FOUND';
   readonly httpStatus = 404;
-  constructor(documentId: string, artifactType: string) {
+  constructor(
+    readonly documentId: string,
+    readonly artifactType: string,
+  ) {
     super(`Artifact of type '${artifactType}' not found for fiscal document '${documentId}'.`);
   }
 }

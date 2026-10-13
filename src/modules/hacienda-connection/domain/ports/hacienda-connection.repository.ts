@@ -6,6 +6,11 @@ export interface IHaciendaConnectionRepository {
     companyId: string,
     environment: HaciendaEnvironment,
   ): Promise<HaciendaConnection | null>;
-  save(connection: HaciendaConnection): Promise<void>;
+  /**
+   * Persists a connection and returns false when an existing row changed after
+   * it was read. Callers use this optimistic guard to avoid configuration,
+   * validation and disable operations silently overwriting one another.
+   */
+  save(connection: HaciendaConnection, expectedUpdatedAt?: Date): Promise<boolean>;
 }
 export const HACIENDA_CONNECTION_REPOSITORY = Symbol('HaciendaConnectionRepository');

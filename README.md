@@ -49,8 +49,34 @@ Minimum required variables:
 
 ```bash
 # Start only postgres and localstack (not the app — you'll run it locally)
+# LocalStack provides S3 + SSM; certificate secrets must use durable SSM, not in-memory env.
 docker-compose up postgres localstack -d
 ```
+
+### 3b. Seed LocalStack SSM (required on first start or after LocalStack restart)
+
+Billing reads `JWT_SECRET` and fiscal certificate secrets from SSM at runtime.
+LocalStack Community Edition does NOT persist SSM state between container restarts.
+After every fresh LocalStack start, seed the application secrets:
+
+```bash
+# Seeds JWT_SECRET into LocalStack SSM (/billing/dev/JWT_SECRET)
+# Required before starting Billing with SECRET_PROVIDER=ssm
+npm run dev:seed-ssm
+```
+
+After seeding, start Billing and re-upload the fiscal certificate if needed:
+
+```bash
+# Re-upload the certificate to restore fiscal readiness after LocalStack restart:
+# POST /api/v1/companies/:companyId/fiscal-certificates/SANDBOX  (multipart/form-data)
+# OR run the Inventori restore bootstrap (if all DB state was wiped):
+# node scripts/inventori-restore-bootstrap.mjs
+```
+
+> **LocalStack Pro note:** If you have a LocalStack Pro license, set `LOCALSTACK_AUTH_TOKEN`
+> in your environment. The `PERSISTENCE=1` flag in `docker-compose.yml` will then
+> automatically persist all SSM state across container restarts — no manual re-seeding needed.
 
 ### 4. Run database migrations
 
@@ -81,8 +107,11 @@ npm run start:dev
 | Command | Description |
 |---|---|
 | `npm run start:dev` | Start API in watch mode |
+| `npm run dev:seed-ssm` | Seed app secrets (JWT_SECRET) into LocalStack SSM — run after every fresh LocalStack start |
 | `npm run start:dev:worker` | Start Worker in watch mode |
 | `npm run build` | Compile TypeScript to dist/ |
+| `npm run start:api` | Start the compiled API after `npm run build` |
+| `npm run start:worker` | Start the compiled worker after `npm run build` |
 | `npm run typecheck` | Type check without compiling |
 | `npm run lint` | Run ESLint with auto-fix |
 | `npm run lint:check` | Run ESLint without auto-fix |
@@ -113,8 +142,9 @@ npm run start:dev
 | `AWS_S3_BUCKET` | S3 only | — | S3 bucket name |
 | `AWS_S3_ENDPOINT` | S3 + LocalStack | — | S3 endpoint (for LocalStack: `http://localhost:4566`) |
 | `AWS_REGION` | — | `us-east-1` | AWS region |
-| `SECRET_PROVIDER` | — | `env` | `env` (dev) or `ssm` (prod) |
+| `SECRET_PROVIDER` | — | `ssm` | Use durable SSM/LocalStack SSM for fiscal certificate uploads. `env` is test/bootstrap-only and not durable. |
 | `SSM_PARAMETER_PREFIX` | SSM only | `/billing` | Parameter Store path prefix |
+| `AWS_SSM_ENDPOINT` | LocalStack only | — | SSM endpoint for local/dev, e.g. `http://localstack:4566` in Docker or `http://localhost:4566` locally |
 | `SEED_ADMIN_EMAIL` | — | `admin@billing.local` | Seed admin email |
 | `SEED_ADMIN_PASSWORD` | — | `ChangeMe123!` | Seed admin password |
 
@@ -196,6 +226,10 @@ X-API-Key: bk_live_a1b2c3d4_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```bash
 # Full stack (api + worker + postgres + localstack)
 docker-compose up
+
+# Local compiled API runtime contract
+npm run build
+npm run start:api
 
 # Check health
 curl http://localhost:3000/health

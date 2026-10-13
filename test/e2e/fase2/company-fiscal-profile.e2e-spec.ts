@@ -29,7 +29,7 @@ describe('Company Fiscal Profile (E2E)', () => {
   });
 
   beforeEach(async () => {
-    await resetFiscalE2eData(context.prisma);
+    await resetFiscalE2eData(context);
   });
 
   afterAll(async () => {

@@ -10,6 +10,7 @@ interface ApiKeyProps {
   keyPrefix: string; // 8-char prefix stored in plaintext for lookup
   keyHash: string; // argon2id hash of the secret — NEVER expose
   scopes: string[];
+  integrationProfile?: string;
   status: ApiKeyStatus;
   expiresAt?: Date;
   lastUsedAt?: Date;
@@ -25,6 +26,7 @@ export interface ApiKeyReconstructProps {
   keyPrefix: string;
   keyHash: string;
   scopes: string[];
+  integrationProfile?: string | null;
   status: ApiKeyStatus;
   expiresAt?: Date | null;
   lastUsedAt?: Date | null;
@@ -41,6 +43,7 @@ export class ApiKey extends AggregateRoot<string> {
   private readonly _keyPrefix: string;
   private readonly _keyHash: string; // BR-001: argon2id one-way hash
   private readonly _scopes: string[];
+  private readonly _integrationProfile?: string;
   private _status: ApiKeyStatus;
   private readonly _expiresAt?: Date;
   private _lastUsedAt?: Date;
@@ -55,6 +58,7 @@ export class ApiKey extends AggregateRoot<string> {
     this._keyPrefix = props.keyPrefix;
     this._keyHash = props.keyHash;
     this._scopes = [...props.scopes];
+    this._integrationProfile = props.integrationProfile;
     this._status = props.status;
     this._expiresAt = props.expiresAt;
     this._lastUsedAt = props.lastUsedAt;
@@ -85,6 +89,10 @@ export class ApiKey extends AggregateRoot<string> {
 
   get scopes(): string[] {
     return [...this._scopes];
+  }
+
+  get integrationProfile(): string | undefined {
+    return this._integrationProfile;
   }
 
   get status(): ApiKeyStatus {
@@ -147,6 +155,7 @@ export class ApiKey extends AggregateRoot<string> {
     keyHash: string,
     scopes: string[],
     expiresAt?: Date,
+    integrationProfile?: string,
   ): ApiKey {
     return new ApiKey(id, {
       tenantId,
@@ -155,6 +164,7 @@ export class ApiKey extends AggregateRoot<string> {
       keyPrefix,
       keyHash,
       scopes,
+      integrationProfile,
       status: 'ACTIVE',
       expiresAt,
     });
@@ -170,6 +180,7 @@ export class ApiKey extends AggregateRoot<string> {
         keyPrefix: props.keyPrefix,
         keyHash: props.keyHash,
         scopes: props.scopes,
+        integrationProfile: props.integrationProfile ?? undefined,
         status: props.status,
         expiresAt: props.expiresAt ?? undefined,
         lastUsedAt: props.lastUsedAt ?? undefined,

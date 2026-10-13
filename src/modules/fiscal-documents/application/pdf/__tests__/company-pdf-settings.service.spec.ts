@@ -4,16 +4,27 @@
  */
 import { CompanyPdfSettingsService } from '../company-pdf-settings.service';
 import { UnsafeLogoException } from '../company-pdf-settings.service';
+import { createCanvas } from '@napi-rs/canvas';
 
 type PdfSettingsDeps = ConstructorParameters<typeof CompanyPdfSettingsService>;
 
 const createService = (prisma: unknown = {}, storage: unknown = {}): CompanyPdfSettingsService =>
-  new CompanyPdfSettingsService(prisma as PdfSettingsDeps[0], storage as PdfSettingsDeps[1]);
+  new CompanyPdfSettingsService(
+    {
+      company: { findFirst: jest.fn().mockResolvedValue({ id: 'company-1' }) },
+      apiKeyCompany: { findUnique: jest.fn().mockResolvedValue({}) },
+      ...(prisma as object),
+    } as unknown as PdfSettingsDeps[0],
+    storage as PdfSettingsDeps[1],
+  );
 
-// PNG magic bytes: 89 50 4E 47 0D 0A 1A 0A
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-// JPEG magic bytes: FF D8 FF
-const JPEG_MAGIC = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+const validImage = (mime: 'image/png' | 'image/jpeg'): Buffer => {
+  const canvas = createCanvas(2, 2);
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#123456';
+  context.fillRect(0, 0, 2, 2);
+  return mime === 'image/png' ? canvas.toBuffer('image/png' as never) : canvas.toBuffer(mime);
+};
 // SVG fake file
 const SVG_CONTENT = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
 // Too-large logo (2 MB + 1 byte)
@@ -27,12 +38,12 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         companyPdfSettings: { upsert: jest.fn().mockResolvedValue({}) },
       };
       const svc = createService(mockPrisma, mockStorage);
-      // Build a fake PNG (magic + padding)
-      const pngBuffer = Buffer.concat([PNG_MAGIC, Buffer.alloc(100, 0)]);
+      const pngBuffer = validImage('image/png');
       await expect(
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: pngBuffer,
           declaredMimeType: 'image/png',
         }),
@@ -45,11 +56,12 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         companyPdfSettings: { upsert: jest.fn().mockResolvedValue({}) },
       };
       const svc = createService(mockPrisma, mockStorage);
-      const jpegBuffer = Buffer.concat([JPEG_MAGIC, Buffer.alloc(100, 0)]);
+      const jpegBuffer = validImage('image/jpeg');
       await expect(
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: jpegBuffer,
           declaredMimeType: 'image/jpeg',
         }),
@@ -62,6 +74,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: SVG_CONTENT,
           declaredMimeType: 'image/svg+xml',
         }),
@@ -74,6 +87,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: TOO_LARGE,
           declaredMimeType: 'image/png',
         }),
@@ -86,6 +100,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: Buffer.alloc(0),
           declaredMimeType: 'image/png',
         }),
@@ -99,6 +114,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: randomBytes,
           declaredMimeType: 'image/png',
         }),
@@ -112,6 +128,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.uploadLogo({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           logoBytes: SVG_CONTENT,
           declaredMimeType: 'image/jpeg', // Lies about type
         }),
@@ -129,6 +146,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.updateSettings({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           primaryColor: '#1a56db',
         }),
       ).resolves.not.toThrow();
@@ -140,6 +158,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.updateSettings({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           primaryColor: 'red', // Not a hex color
         }),
       ).rejects.toThrow(UnsafeLogoException);
@@ -151,6 +170,7 @@ describe('CompanyPdfSettingsService — logo security (FR-009)', () => {
         svc.updateSettings({
           tenantId: 'tenant-1',
           companyId: 'company-1',
+          authorization: CompanyPdfSettingsService.systemAuthorization(),
           footerText: 'A'.repeat(501),
         }),
       ).rejects.toThrow(UnsafeLogoException);

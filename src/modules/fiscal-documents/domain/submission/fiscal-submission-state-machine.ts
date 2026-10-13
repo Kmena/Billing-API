@@ -9,6 +9,7 @@ export const FISCAL_SUBMISSION_STATUSES = [
   'REJECTED',
   'TECHNICAL_RETRY_PENDING',
   'MANUAL_REVIEW_REQUIRED',
+  'SUPERSEDED',
 ] as const;
 
 export type FiscalSubmissionStatus = (typeof FISCAL_SUBMISSION_STATUSES)[number];
@@ -22,7 +23,7 @@ export interface FiscalSubmissionTransitionResult {
   readonly reason: string;
 }
 
-const TERMINAL_STATUSES = new Set<FiscalSubmissionStatus>(['ACCEPTED', 'REJECTED']);
+const TERMINAL_STATUSES = new Set<FiscalSubmissionStatus>(['ACCEPTED', 'REJECTED', 'SUPERSEDED']);
 
 const ALLOWED_TRANSITIONS: ReadonlyMap<
   FiscalSubmissionStatus,
@@ -51,6 +52,7 @@ const ALLOWED_TRANSITIONS: ReadonlyMap<
   ['MANUAL_REVIEW_REQUIRED', new Set(['QUEUED', 'POST_OUTCOME_UNKNOWN'])],
   ['ACCEPTED', new Set()],
   ['REJECTED', new Set()],
+  ['SUPERSEDED', new Set()],
 ]);
 
 export class FiscalSubmissionStateMachine {

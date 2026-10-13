@@ -2,6 +2,7 @@ import { Body, Controller, Param, ParseEnumPipe, Put, Request, UseGuards } from 
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 import { FiscalDocumentService } from '../../application/fiscal-document.service';
 import { FiscalDocumentType, HaciendaEnvironment } from '../../domain/fiscal.constants';
@@ -16,7 +17,7 @@ const documentTypes = { INVOICE: 'INVOICE', TICKET: 'TICKET' } as const;
 @ApiTags('Fiscal Configuration')
 @SkipThrottle()
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantAdminGuard)
 @Controller('companies/:companyId/fiscal/:environment')
 export class FiscalManagementController {
   constructor(private readonly fiscalDocumentService: FiscalDocumentService) {}

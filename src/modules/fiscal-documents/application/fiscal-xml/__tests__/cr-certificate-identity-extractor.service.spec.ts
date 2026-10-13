@@ -17,6 +17,21 @@ describe('CrCertificateIdentityExtractorService', () => {
 
   // ── Happy path tests ─────────────────────────────────────────────────────────
 
+  it('extracts and normalizes CPF fiscal identity (FISICA) without blindly stripping digits', () => {
+    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('CPF-02-0753-0251');
+    const result = service.extractAndValidate(pkcs12Bytes, passphrase);
+
+    expect(result.rawIdentity).toBe('CPF-02-0753-0251');
+    expect(result.extractedIdentityNumber).toBe('207530251');
+    expect(result.extractedIdentityNumber).not.toBe('0207530251');
+    expect(result.extractedIdentityType).toBe('01');
+    expect(result.canonicalIdentity).toEqual({
+      rawIdentity: 'CPF-02-0753-0251',
+      identityType: 'FISICA',
+      normalizedIdentificationNumber: '207530251',
+    });
+  });
+
   it('extracts and normalizes CPJ- fiscal identity', () => {
     const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('CPJ-3102123456');
     const result = service.extractAndValidate(pkcs12Bytes, passphrase);
@@ -40,10 +55,10 @@ describe('CrCertificateIdentityExtractorService', () => {
   });
 
   it('extracts and normalizes DIMEX- fiscal identity', () => {
-    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('DIMEX-800123456');
+    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('DIMEX-80012345678');
     const result = service.extractAndValidate(pkcs12Bytes, passphrase);
 
-    expect(result.extractedIdentityNumber).toBe('800123456');
+    expect(result.extractedIdentityNumber).toBe('80012345678');
     expect(result.extractedIdentityType).toBe('03');
   });
 
@@ -55,12 +70,20 @@ describe('CrCertificateIdentityExtractorService', () => {
     expect(result.extractedIdentityType).toBeNull();
   });
 
-  it('extracts PE- prefixed identity — type is null', () => {
-    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('PE-12345678');
-    const result = service.extractAndValidate(pkcs12Bytes, passphrase);
+  it('rejects malformed CPF structure', () => {
+    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('CPF-02-0753-025');
 
-    expect(result.extractedIdentityNumber).toBe('12345678');
-    expect(result.extractedIdentityType).toBeNull();
+    expect(() => service.extractAndValidate(pkcs12Bytes, passphrase)).toThrow(
+      FiscalCertificateIdentityUnreadableException,
+    );
+  });
+
+  it('fails closed for unknown certificate identity prefix', () => {
+    const { pkcs12Bytes, passphrase } = createTestSigningMaterialWithFiscalId('ABC-123456789');
+
+    expect(() => service.extractAndValidate(pkcs12Bytes, passphrase)).toThrow(
+      FiscalCertificateIdentityUnreadableException,
+    );
   });
 
   // ── Error cases ──────────────────────────────────────────────────────────────

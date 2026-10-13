@@ -10,9 +10,18 @@ import {
   FiscalXmlDocumentSnapshot,
   FiscalXmlGenerationResult,
 } from '../../domain/fiscal-xml/fiscal-xml.types';
+import { FISCAL_XML_ERROR } from '../../domain/fiscal-xml/fiscal-xml.errors';
 import { mapIdentificationTypeToXmlCode } from '../../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../../domain/scaled-decimal';
+import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../../domain/fiscal-catalogs';
 import { classifyCabys } from '../../domain/fiscal-cabys-classifier';
+
+/**
+ * Length required by the Hacienda v4.4 FacturaElectronica XSD for
+ * CodigoActividadReceptor: xs:restriction minLength=6, maxLength=6.
+ * TiqueteElectronico does not define this element.
+ */
+const RECEIVER_ACTIVITY_CODE_LENGTH = 6;
 
 /**
  * Tax codes for which CodigoTarifaIVA is required at both line level and
@@ -53,6 +62,9 @@ interface FiscalXmlLineSnapshot {
   readonly quantity: string;
   readonly unitPrice: string;
   readonly discountAmount?: string;
+  readonly discountCode?: string;
+  readonly discountNature?: string;
+  readonly discountOther?: string;
   readonly taxAmount?: string;
   readonly taxCode?: string;
   readonly taxRateCode?: string;
@@ -118,16 +130,18 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       '15',
       '99',
     ]);
-    this.assertSupportedCatalog('paymentMethod', document.paymentMethod, [
-      '01',
-      '02',
-      '03',
-      '04',
-      '05',
-      '06',
-      '07',
-      '99',
-    ]);
+    if (document.paymentMethod) {
+      this.assertSupportedCatalog('paymentMethod', document.paymentMethod, [
+        '01',
+        '02',
+        '03',
+        '04',
+        '05',
+        '06',
+        '07',
+        '99',
+      ]);
+    }
 
     const lines = this.requireLines(document.lines);
     const issuer = this.requireParty(document.issuerSnapshot, true);
@@ -143,21 +157,39 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       'xmlns:ds': 'http://www.w3.org/2000/09/xmldsig#',
     });
 
+    // Validate and resolve CodigoActividadReceptor before beginning XML emission so that
+    // an invalid receiver activity fails fast — before any elements are written.
+    // Only FacturaElectronica (INVOICE) supports this field; TiqueteElectronico does not.
+    const receiverActivityCode = this.extractReceiverActivityCode(
+      document.receiverSnapshot,
+      document.type,
+    );
+
     root.ele('Clave').txt(document.clave).up();
     root.ele('ProveedorSistemas').txt(issuer.proveedorSistemas).up();
+    // XSD xs:sequence: CodigoActividadEmisor → CodigoActividadReceptor? → NumeroConsecutivo
     root.ele('CodigoActividadEmisor').txt(issuer.codigoActividad).up();
+    if (receiverActivityCode !== null) {
+      root.ele('CodigoActividadReceptor').txt(receiverActivityCode).up();
+    }
     root.ele('NumeroConsecutivo').txt(document.consecutive).up();
     root.ele('FechaEmision').txt(this.formatDate(document.issueDate)).up();
     this.appendParty(root, 'Emisor', issuer, true);
     if (receiver) this.appendParty(root, 'Receptor', receiver, false);
     root.ele('CondicionVenta').txt(document.saleCondition).up();
-    const creditTerm = this.optionalText(document.issuerSnapshot.plazoCredito, '');
-    if (document.saleCondition === '02' && creditTerm)
+    const creditTerm = this.optionalText(document.creditTermDays, '');
+    if (document.saleCondition === '02') {
+      if (!/^\d{1,5}$/.test(creditTerm)) throw new Error('FISCAL_XML_CREDIT_TERM_REQUIRED');
       root.ele('PlazoCredito').txt(creditTerm).up();
+    } else if (creditTerm) {
+      throw new Error('FISCAL_XML_CREDIT_TERM_NOT_ALLOWED');
+    }
 
     const detail = root.ele('DetalleServicio');
     for (const line of lines) {
-      this.assertSupportedCatalog('unitMeasure', line.unitMeasure, ['Sp', 'Unid']);
+      if (!isCanonicalHaciendaUnit(line.unitMeasure)) {
+        throw new Error('FISCAL_XML_UNSUPPORTED_CATALOG:unitMeasure');
+      }
       this.appendLine(detail, line);
     }
     detail.up();
@@ -205,6 +237,9 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     }
 
     summary.ele('TotalVenta').txt(this.decimal(summaryData.totalVenta.toString())).up();
+    if (!summaryData.totalDescuentos.isZero()) {
+      summary.ele('TotalDescuentos').txt(this.decimal(summaryData.totalDescuentos.toString())).up();
+    }
     summary.ele('TotalVentaNeta').txt(this.decimal(summaryData.totalVentaNeta.toString())).up();
 
     // TotalDesgloseImpuesto — one element per tax group.
@@ -227,10 +262,12 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       summary.ele('TotalImpuesto').txt(this.decimal(summaryData.totalImpuesto.toString())).up();
     }
 
-    const payment = summary.ele('MedioPago');
-    payment.ele('TipoMedioPago').txt(document.paymentMethod).up();
-    payment.ele('TotalMedioPago').txt(this.decimal(summaryData.totalComprobante.toString())).up();
-    payment.up();
+    if (document.paymentMethod) {
+      const payment = summary.ele('MedioPago');
+      payment.ele('TipoMedioPago').txt(document.paymentMethod).up();
+      payment.ele('TotalMedioPago').txt(this.decimal(summaryData.totalComprobante.toString())).up();
+      payment.up();
+    }
 
     summary.ele('TotalComprobante').txt(this.decimal(summaryData.totalComprobante.toString())).up();
     summary.up();
@@ -268,7 +305,6 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
       const discount = ScaledDecimal.from(line.discountAmount ?? '0');
       const tax = ScaledDecimal.from(line.taxAmount ?? '0');
-      const subtotal = gross.subtract(discount);
 
       totalDescuentos = totalDescuentos.add(discount);
 
@@ -277,9 +313,9 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
 
       if (hasTax) {
         if (category === 'SERVICE') {
-          servGravados = servGravados.add(subtotal);
+          servGravados = servGravados.add(gross);
         } else {
-          mercGravadas = mercGravadas.add(subtotal);
+          mercGravadas = mercGravadas.add(gross);
         }
         totalImpuesto = totalImpuesto.add(tax);
 
@@ -315,9 +351,9 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
         }
       } else {
         if (category === 'SERVICE') {
-          servExentos = servExentos.add(subtotal);
+          servExentos = servExentos.add(gross);
         } else {
-          mercExentas = mercExentas.add(subtotal);
+          mercExentas = mercExentas.add(gross);
         }
       }
     }
@@ -394,7 +430,7 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     node.ele('PrecioUnitario').txt(this.decimal(line.unitPrice)).up();
     node.ele('MontoTotal').txt(this.decimal(gross.toString())).up();
     if (!discount.isZero()) {
-      throw new Error('FISCAL_XML_UNSUPPORTED_CONDITIONAL:discount');
+      this.appendDiscount(node, line, discount, gross);
     }
     node.ele('SubTotal').txt(this.decimal(subtotal.toString())).up();
     if (!tax.isZero()) {
@@ -427,6 +463,41 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     }
     node.ele('MontoTotalLinea').txt(this.decimal(total.toString())).up();
     node.up();
+  }
+
+  private appendDiscount(
+    parent: XMLBuilderNode,
+    line: FiscalXmlLineSnapshot,
+    discount: ScaledDecimal,
+    gross: ScaledDecimal,
+  ): void {
+    if (discount.isNegative() || gross.subtract(discount).isNegative()) {
+      throw new Error('FISCAL_XML_INVALID_DISCOUNT_AMOUNT');
+    }
+    if (!line.discountCode || !line.discountNature) {
+      throw new Error('FISCAL_XML_DISCOUNT_METADATA_REQUIRED');
+    }
+    if (!isHaciendaDiscountCode(line.discountCode)) {
+      throw new Error('FISCAL_XML_INVALID_DISCOUNT_CODE');
+    }
+    const nature = line.discountNature.trim();
+    if (nature.length < 3 || nature.length > 80) {
+      throw new Error('FISCAL_XML_INVALID_DISCOUNT_NATURE');
+    }
+    const discountNode = parent.ele('Descuento');
+    discountNode.ele('MontoDescuento').txt(this.decimal(discount.toString())).up();
+    discountNode.ele('CodigoDescuento').txt(line.discountCode).up();
+    if (line.discountCode === '99') {
+      const other = line.discountOther?.trim() ?? '';
+      if (other.length < 5 || other.length > 100) {
+        throw new Error('FISCAL_XML_DISCOUNT_OTHER_REQUIRED');
+      }
+      discountNode.ele('CodigoDescuentoOTRO').txt(other).up();
+    } else if (line.discountOther) {
+      throw new Error('FISCAL_XML_DISCOUNT_OTHER_NOT_ALLOWED');
+    }
+    discountNode.ele('NaturalezaDescuento').txt(nature).up();
+    discountNode.up();
   }
 
   private requireLines(lines: unknown): FiscalXmlLineSnapshot[] {
@@ -488,6 +559,44 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     if (!supportedValues.includes(value)) {
       throw new Error(`FISCAL_XML_UNSUPPORTED_CATALOG:${field}`);
     }
+  }
+
+  /**
+   * Extracts and validates the receiver economic activity code for CodigoActividadReceptor.
+   *
+   * Rules (Hacienda v4.4 XSD — FacturaElectronica only):
+   *   - TiqueteElectronico XSD does not define this element → always returns null for TICKET.
+   *   - null / undefined / absent → return null (element omitted per XSD minOccurs=0).
+   *   - empty string → return null (semantically absent; no XSD violation).
+   *   - non-empty but length ≠ 6 → throw FISCAL_XML_INVALID_RECEIVER_ACTIVITY (fail before signing).
+   *   - exactly 6 characters → return the trimmed string (element emitted).
+   *
+   * No truncation, padding, or coercion is performed on a supplied non-empty value.
+   */
+  private extractReceiverActivityCode(
+    receiverSnapshot: Record<string, unknown> | null | undefined,
+    documentType: string,
+  ): string | null {
+    // TiqueteElectronico does not define CodigoActividadReceptor in the v4.4 XSD.
+    if (documentType !== 'INVOICE') return null;
+    if (!receiverSnapshot) return null;
+
+    const raw = receiverSnapshot['economicActivity'];
+
+    // Absent, null, or undefined → element is omitted (XSD optional)
+    if (raw === null || raw === undefined) return null;
+
+    const value = typeof raw === 'string' ? raw.trim() : String(raw).trim();
+
+    // Empty string is treated as absent → element omitted
+    if (value.length === 0) return null;
+
+    // Supplied but violates XSD length contract → fail before signing; never silently omit
+    if (value.length !== RECEIVER_ACTIVITY_CODE_LENGTH) {
+      throw new Error(FISCAL_XML_ERROR.invalidReceiverActivity);
+    }
+
+    return value;
   }
 
   private formatDate(value: Date): string {

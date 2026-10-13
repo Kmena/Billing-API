@@ -15,6 +15,16 @@ describe('MockHaciendaAdapter', () => {
       expect(result.name).toBeDefined();
     });
 
+    it('supports the canonical Inventori Demo identity in the isolated onboarding harness', async () => {
+      const result = await adapter.getTaxpayer('3101000000');
+      expect(result).toMatchObject({
+        found: true,
+        identification: '3101000000',
+        name: 'Inventori Demo',
+        economicActivities: [{ code: '620210', status: 'A', type: 'P' }],
+      });
+    });
+
     it('returns found=false for an unknown identification', async () => {
       const result = await adapter.getTaxpayer('9999999999');
       expect(result.found).toBe(false);

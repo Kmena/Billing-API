@@ -74,6 +74,8 @@ describe('FiscalSubmissionStateMachine', () => {
     ['ACCEPTED', 'REJECTED'],
     ['REJECTED', 'PROCESSING'],
     ['REJECTED', 'ACCEPTED'],
+    ['SUPERSEDED', 'PROCESSING'],
+    ['SUPERSEDED', 'ACCEPTED'],
   ] satisfies Array<[FiscalSubmissionStatus, FiscalSubmissionStatus]>)(
     'ignores stale terminal %s -> %s',
     (from, to) => {

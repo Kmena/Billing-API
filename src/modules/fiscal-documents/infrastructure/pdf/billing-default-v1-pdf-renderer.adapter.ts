@@ -24,13 +24,28 @@ import { createHash } from 'crypto';
 import * as PDFDocument from 'pdfkit';
 import * as QRCode from 'qrcode';
 import {
+  CompanyBrandingView,
+  FiscalRepresentationPdfRendererPort,
+  FiscalRepresentationRenderOptions,
   PdfRendererPort,
   PdfRendererInput,
   PdfRendererOutput,
 } from '../../application/pdf/pdf-renderer.port';
+import {
+  FiscalDecimal,
+  FiscalLineView,
+  FiscalPartyView,
+  FiscalRepresentationView,
+} from '../../application/fiscal-representation/read-only-fiscal-xml-parser';
+import {
+  CURRENT_FISCAL_PDF_RENDERER_VERSION,
+  CURRENT_FISCAL_PDF_TEMPLATE_ID,
+} from '../../application/pdf/fiscal-pdf-version-policy';
 
-export const BILLING_DEFAULT_V1_TEMPLATE_ID = 'BILLING_DEFAULT_V1';
+export const BILLING_DEFAULT_V1_TEMPLATE_ID = CURRENT_FISCAL_PDF_TEMPLATE_ID;
 export const BILLING_DEFAULT_V1_RENDERER_VERSION = '1.0.0';
+export const BILLING_DEFAULT_V1_FISCAL_REPRESENTATION_RENDERER_VERSION =
+  CURRENT_FISCAL_PDF_RENDERER_VERSION;
 
 // PDF page dimensions (A4 in points at 72dpi: 595 × 842)
 const PAGE_WIDTH = 595;
@@ -55,7 +70,9 @@ const TEXT_GRAY = '#6b7280';
 const BORDER_LIGHT = '#e5e7eb';
 
 @Injectable()
-export class BillingDefaultV1PdfRendererAdapter implements PdfRendererPort {
+export class BillingDefaultV1PdfRendererAdapter
+  implements PdfRendererPort, FiscalRepresentationPdfRendererPort
+{
   private readonly logger = new Logger(BillingDefaultV1PdfRendererAdapter.name);
 
   async render(input: PdfRendererInput): Promise<PdfRendererOutput> {
@@ -96,6 +113,476 @@ export class BillingDefaultV1PdfRendererAdapter implements PdfRendererPort {
     } finally {
       if (timeout) clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Wave 2 renderer component. It intentionally has no runtime caller yet.
+   * The only fiscal source is the immutable, typed representation built from
+   * signed XML in Wave 1; layout is the sole responsibility of this method.
+   */
+  async renderRepresentation(
+    view: FiscalRepresentationView,
+    options: FiscalRepresentationRenderOptions = {},
+  ): Promise<PdfRendererOutput> {
+    const startedAt = Date.now();
+    const bytes = await this.doRenderRepresentation(view, options);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    this.logger.log({
+      msg: 'Fiscal representation PDF component rendered',
+      templateId: BILLING_DEFAULT_V1_TEMPLATE_ID,
+      rendererVersion: BILLING_DEFAULT_V1_FISCAL_REPRESENTATION_RENDERER_VERSION,
+      sizeBytes: bytes.length,
+      durationMs: Date.now() - startedAt,
+      documentType: view.document.type,
+    });
+    return {
+      bytes,
+      contentType: 'application/pdf',
+      sha256,
+      sizeBytes: bytes.length,
+      templateId: BILLING_DEFAULT_V1_TEMPLATE_ID,
+      rendererVersion: BILLING_DEFAULT_V1_FISCAL_REPRESENTATION_RENDERER_VERSION,
+    };
+  }
+
+  private async doRenderRepresentation(
+    view: FiscalRepresentationView,
+    options: FiscalRepresentationRenderOptions,
+  ): Promise<Buffer> {
+    if (options.signal?.aborted) {
+      throw options.signal.reason instanceof Error
+        ? options.signal.reason
+        : new Error('PDF render attempt was aborted.');
+    }
+    const branding = options.branding;
+    const primaryColor = this.safeColor(branding?.primaryColor) ?? PRIMARY_DEFAULT;
+    const qrPayload = this.validatedOptionalQr(options);
+    const documentLabel =
+      view.document.type === 'INVOICE' ? 'Factura Electrónica' : 'Tiquete Electrónico';
+
+    return new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let settled = false;
+      const doc = new PDFDocument({
+        size: [PAGE_WIDTH, PAGE_HEIGHT],
+        margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
+        bufferPages: true,
+        autoFirstPage: false,
+      });
+      const cleanup = (): void => options.signal?.removeEventListener('abort', abort);
+      const resolveOnce = (): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(Buffer.concat(chunks));
+      };
+      const rejectOnce = (error: unknown): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const abort = (): void => {
+        const reason =
+          options.signal?.reason instanceof Error
+            ? options.signal.reason
+            : new Error('PDF render attempt was aborted.');
+        rejectOnce(reason);
+        doc.destroy(reason);
+      };
+      doc.on('data', (chunk: Buffer) => {
+        if (!settled) chunks.push(chunk);
+      });
+      doc.once('end', resolveOnce);
+      doc.once('error', rejectOnce);
+      options.signal?.addEventListener('abort', abort, { once: true });
+
+      const contentBottom = PAGE_HEIGHT - MARGIN - 26;
+      let y = MARGIN;
+      const newPage = (continuation = false): void => {
+        doc.addPage();
+        y = MARGIN;
+        doc.rect(MARGIN, y, CONTENT_WIDTH, 3).fill(primaryColor);
+        y += 9;
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(12)
+          .fillColor(primaryColor)
+          .text(documentLabel, MARGIN, y);
+        doc
+          .font('Helvetica')
+          .fontSize(7)
+          .fillColor(TEXT_GRAY)
+          .text(
+            `${view.document.clave}  |  ${view.document.consecutive}${continuation ? '  |  Continuación' : ''}`,
+            MARGIN,
+            y + 15,
+            { width: CONTENT_WIDTH },
+          );
+        y += 30;
+      };
+      const ensure = (height: number, continuation = true): void => {
+        if (y + height > contentBottom) newPage(continuation);
+      };
+      const heading = (label: string): void => {
+        ensure(22);
+        doc
+          .font('Helvetica-Bold')
+          .fontSize(9)
+          .fillColor(primaryColor)
+          .text(label, MARGIN, y, { width: CONTENT_WIDTH });
+        y += 13;
+        doc
+          .moveTo(MARGIN, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .strokeColor(BORDER_LIGHT)
+          .stroke();
+        y += 6;
+      };
+      const text = (label: string, value?: string): void => {
+        if (!value) return;
+        const rendered = `${label}: ${this.safeText(value)}`;
+        doc.font('Helvetica').fontSize(8).fillColor(TEXT_DARK);
+        const height = Math.max(11, doc.heightOfString(rendered, { width: CONTENT_WIDTH }));
+        ensure(height + 3);
+        doc.text(rendered, MARGIN, y, { width: CONTENT_WIDTH });
+        y += height + 3;
+      };
+      const amount = (label: string, value?: FiscalDecimal): void => {
+        if (!value) return;
+        text(label, `${view.currency.code} ${value.canonical}`);
+      };
+      const party = (label: string, person?: FiscalPartyView): void => {
+        if (!person) return;
+        heading(label);
+        text('Nombre', person.legalName);
+        text('Nombre comercial', person.commercialName);
+        if (person.identification)
+          text(
+            'Identificación',
+            [person.identification.type, person.identification.number].filter(Boolean).join(' '),
+          );
+        text('Identificación extranjera', person.foreignIdentification);
+        text('Registro fiscal 8707', person.fiscalRegistry8707);
+        if (person.location) {
+          text(
+            'Ubicación',
+            [
+              person.location.province,
+              person.location.canton,
+              person.location.district,
+              person.location.neighborhood,
+              person.location.otherSigns,
+              person.location.foreignOtherSigns,
+            ]
+              .filter(Boolean)
+              .join(' · '),
+          );
+        }
+        if (person.phone) text('Teléfono', `${person.phone.countryCode} ${person.phone.number}`);
+        text('Correo electrónico', person.email);
+        text('Actividad económica', person.economicActivity);
+      };
+      const tableHeader = (): void => {
+        ensure(19);
+        doc.rect(MARGIN, y, CONTENT_WIDTH, 16).fill(primaryColor);
+        doc.font('Helvetica-Bold').fontSize(6).fillColor('#ffffff');
+        const columns = [
+          ['#', 18],
+          ['CABYS', 60],
+          ['Descripción / detalle fiscal', 190],
+          ['Cant.', 40],
+          ['Unidad', 40],
+          ['P. unit.', 50],
+          ['Total línea', 62],
+        ] as const;
+        let x = MARGIN;
+        for (const [label, width] of columns) {
+          doc.text(label, x + 2, y + 4, { width: width - 4, lineBreak: false });
+          x += width;
+        }
+        y += 19;
+      };
+      const line = (item: FiscalLineView, index: number): void => {
+        const details = [
+          item.detail,
+          item.commercialCodes.length
+            ? `Códigos: ${item.commercialCodes.map((code) => `${code.type}/${code.code}`).join(', ')}`
+            : undefined,
+          item.commercialUnit ? `Unidad comercial: ${item.commercialUnit}` : undefined,
+          item.transactionType ? `Tipo transacción: ${item.transactionType}` : undefined,
+          item.vinOrSerialNumbers.length
+            ? `VIN/Serie: ${item.vinOrSerialNumbers.join(', ')}`
+            : undefined,
+          item.medicationRegistration
+            ? `Registro medicamento: ${item.medicationRegistration}`
+            : undefined,
+          item.pharmaceuticalForm ? `Forma farmacéutica: ${item.pharmaceuticalForm}` : undefined,
+        ]
+          .filter((value): value is string => Boolean(value))
+          .map((value) => this.safeText(value))
+          .join('\n');
+        const row = [
+          item.number,
+          item.cabys,
+          details,
+          item.quantity.canonical,
+          item.unit,
+          item.unitPrice.canonical,
+          item.lineTotal.canonical,
+        ];
+        const widths = [18, 60, 190, 40, 40, 50, 62];
+        doc.font('Helvetica').fontSize(6.5);
+        const height =
+          Math.max(
+            20,
+            ...row.map((value, column) =>
+              doc.heightOfString(this.safeText(value), { width: widths[column] - 4 }),
+            ),
+          ) + 7;
+        if (y + height > contentBottom) {
+          newPage(true);
+          tableHeader();
+        }
+        if (index % 2 === 0) doc.rect(MARGIN, y, CONTENT_WIDTH, height).fill('#f9fafb');
+        let x = MARGIN;
+        doc.font('Helvetica').fontSize(6.5).fillColor(TEXT_DARK);
+        row.forEach((value, column) => {
+          doc.text(this.safeText(value), x + 2, y + 3, {
+            width: widths[column] - 4,
+            height: height - 5,
+          });
+          x += widths[column];
+        });
+        doc.rect(MARGIN, y, CONTENT_WIDTH, height).strokeColor(BORDER_LIGHT).stroke();
+        y += height + 2;
+        const detailRows = [
+          ['Monto bruto', item.total],
+          ['Descuentos', item.discounts.length ? undefined : undefined],
+          ['Subtotal', item.subtotal],
+          ['Base imponible', item.taxableBase],
+          ['IVA cobrado fábrica', item.vatCollectedAtFactory ? undefined : undefined],
+          ['Impuesto asumido emisor fábrica', item.issuerAssumedFactoryTax],
+          ['Impuesto neto', item.taxNet],
+        ] as const;
+        detailRows.forEach(([label, value]) => amount(label, value));
+        if (item.vatCollectedAtFactory) text('IVA cobrado fábrica', item.vatCollectedAtFactory);
+        item.discounts.forEach((discount) => {
+          amount(
+            `Descuento ${discount.code}${discount.otherCode ? `/${discount.otherCode}` : ''}`,
+            discount.amount,
+          );
+          text('Naturaleza descuento', discount.nature);
+        });
+        item.taxes.forEach((tax) => {
+          text('Impuesto', [tax.code, tax.otherCode, tax.tariffCode].filter(Boolean).join(' / '));
+          if (tax.rate) text('Tarifa impuesto', `${tax.rate.canonical}%`);
+          if (tax.vatCalculationFactor)
+            text('Factor cálculo IVA', tax.vatCalculationFactor.canonical);
+          amount('Monto impuesto', tax.amount);
+          if (tax.specificTax) {
+            text(
+              'Impuesto específico',
+              `Cantidad ${tax.specificTax.quantityUnit.canonical}; unidad ${tax.specificTax.taxPerUnit.canonical}`,
+            );
+            if (tax.specificTax.percentage)
+              text('Porcentaje específico', `${tax.specificTax.percentage.canonical}%`);
+            if (tax.specificTax.proportion)
+              text('Proporción específica', tax.specificTax.proportion.canonical);
+            if (tax.specificTax.consumptionUnitVolume)
+              text('Volumen unidad consumo', tax.specificTax.consumptionUnitVolume.canonical);
+          }
+          if (tax.exemption) {
+            text('Exoneración', `${tax.exemption.documentType} ${tax.exemption.documentNumber}`);
+            amount('Monto exoneración', tax.exemption.exemptAmount);
+            text('Tarifa exonerada', `${tax.exemption.exemptRate.canonical}%`);
+          }
+        });
+        item.bundleFields.forEach((field) => text(`Surtido ${field.elementName}`, field.value));
+      };
+
+      newPage();
+      if (branding?.logoBytes?.length) {
+        try {
+          doc.image(branding.logoBytes, PAGE_WIDTH - MARGIN - 72, MARGIN + 10, {
+            width: 64,
+            height: 32,
+          });
+        } catch {
+          this.logger.warn({ msg: 'Wave 2 branding image omitted after PDFKit decode failure' });
+        }
+      }
+      heading('Identificación del comprobante');
+      text('Tipo de comprobante', documentLabel);
+      text('Clave', view.document.clave);
+      text('Consecutivo', view.document.consecutive);
+      text('Fecha de emisión', view.document.issueDate);
+      text('Proveedor de sistemas', view.document.systemProviderId);
+      text('Actividad económica emisor', view.document.issuerActivityCode);
+      text('Actividad económica receptor', view.document.receiverActivityCode);
+      party('Emisor', view.issuer);
+      party('Receptor', view.receiver);
+      heading('Venta y moneda');
+      text(
+        'Condición de venta',
+        [view.sale.condition, view.sale.otherCondition].filter(Boolean).join(' · '),
+      );
+      text('Plazo de crédito', view.sale.creditTerm);
+      text('Moneda', view.currency.code);
+      text('Tipo de cambio', view.currency.exchangeRate.canonical);
+      view.payments.forEach((payment) =>
+        amount(
+          `Medio de pago ${[payment.type, payment.otherType].filter(Boolean).join(' / ')}`,
+          payment.total,
+        ),
+      );
+      heading('Detalle de líneas');
+      tableHeader();
+      view.lines.forEach(line);
+      heading('Resumen fiscal');
+      amount('Monto bruto / Total venta', view.summary.gross);
+      amount('Total descuentos', view.summary.discounts);
+      amount('Venta neta', view.summary.net);
+      amount('Total impuesto', view.summary.tax);
+      view.summary.taxBreakdown.forEach((tax) =>
+        amount(
+          `Desglose impuesto ${[tax.code, tax.tariffCode].filter(Boolean).join(' / ')}`,
+          tax.amount,
+        ),
+      );
+      Object.entries(view.summary.values).forEach(([label, value]) => amount(label, value));
+      amount('Total comprobante', view.summary.total);
+      if (view.otherCharges.length) {
+        heading('Otros cargos');
+        view.otherCharges.forEach((charge) => {
+          text('Cargo', `${charge.documentType} · ${charge.detail}`);
+          text('Tercero', [charge.thirdPartyId, charge.thirdPartyName].filter(Boolean).join(' · '));
+          if (charge.percentage) text('Porcentaje cargo', `${charge.percentage.canonical}%`);
+          amount('Monto cargo', charge.amount);
+        });
+      }
+      if (view.references.length) {
+        heading('Referencias');
+        view.references.forEach((reference) =>
+          text(
+            'Referencia',
+            `${reference.documentType} ${reference.number} · ${reference.issuedAt} · ${reference.code} · ${reference.reason}`,
+          ),
+        );
+      }
+      if (view.otherInformation.length) {
+        heading('Otra información');
+        view.otherInformation.forEach((value) => text('Información', value));
+      }
+      const represented = new Set([
+        'Clave',
+        'NumeroConsecutivo',
+        'FechaEmision',
+        'ProveedorSistemas',
+        'CodigoActividadEmisor',
+        'CodigoActividadReceptor',
+        'Nombre',
+        'Numero',
+        'CodigoMoneda',
+        'TipoCambio',
+        'NumeroLinea',
+        'CodigoCABYS',
+        'Cantidad',
+        'UnidadMedida',
+        'Detalle',
+        'PrecioUnitario',
+        'MontoTotal',
+        'SubTotal',
+        'MontoTotalLinea',
+        'TotalComprobante',
+      ]);
+      const remaining = view.projectedFields.filter(
+        (field) => !represented.has(field.elementName) && !field.path.includes('Signature'),
+      );
+      if (remaining.length) {
+        heading('Datos fiscales adicionales');
+        remaining.forEach((field) => text(field.elementName, field.value));
+      }
+      if (qrPayload) {
+        ensure(QR_SIZE_PT + 20);
+        QRCode.toBuffer(qrPayload, {
+          type: 'png',
+          width: 150,
+          margin: 1,
+          errorCorrectionLevel: 'M',
+        })
+          .then((buffer) => {
+            if (settled || options.signal?.aborted) return;
+            doc.image(buffer, PAGE_WIDTH - MARGIN - QR_SIZE_PT, y, {
+              width: QR_SIZE_PT,
+              height: QR_SIZE_PT,
+            });
+            doc
+              .font('Helvetica')
+              .fontSize(6)
+              .fillColor(TEXT_GRAY)
+              .text('QR configurado', PAGE_WIDTH - MARGIN - QR_SIZE_PT, y - 9, {
+                width: QR_SIZE_PT,
+                align: 'center',
+              });
+            this.finishRepresentationPdf(doc, branding, primaryColor, view.document.clave);
+          })
+          .catch(reject);
+      } else {
+        this.finishRepresentationPdf(doc, branding, primaryColor, view.document.clave);
+      }
+    });
+  }
+
+  private finishRepresentationPdf(
+    doc: PDFKit.PDFDocument,
+    branding: CompanyBrandingView | undefined,
+    primaryColor: string,
+    _clave: string,
+  ): void {
+    const pageCount = doc.bufferedPageRange().count;
+    for (let index = 0; index < pageCount; index += 1) {
+      doc.switchToPage(index);
+      doc.rect(MARGIN, PAGE_HEIGHT - MARGIN - 3, CONTENT_WIDTH, 3).fill(primaryColor);
+      doc
+        .font('Helvetica')
+        .fontSize(7)
+        .fillColor(TEXT_GRAY)
+        .text(
+          branding?.footerText ?? 'Representación gráfica generada desde XML firmado.',
+          MARGIN,
+          PAGE_HEIGHT - 58,
+          { width: CONTENT_WIDTH - 90, height: 12, ellipsis: true },
+        );
+      doc.text(
+        `BILLING_DEFAULT_V1@${BILLING_DEFAULT_V1_FISCAL_REPRESENTATION_RENDERER_VERSION} · Página ${index + 1} de ${pageCount}`,
+        PAGE_WIDTH - MARGIN - 180,
+        PAGE_HEIGHT - 58,
+        { width: 180, align: 'right', lineBreak: false },
+      );
+    }
+    doc.end();
+  }
+
+  private safeColor(value: string | undefined): string | undefined {
+    return value && /^#[0-9a-f]{6}$/i.test(value) ? value : undefined;
+  }
+
+  private safeText(value: string): string {
+    return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ');
+  }
+
+  private validatedOptionalQr(options: FiscalRepresentationRenderOptions): string | undefined {
+    if (!options.qr?.enabled) return undefined;
+    if (!options.qr.payload) throw new Error('Enabled QR requires an explicit HTTPS payload.');
+    let parsed: URL;
+    try {
+      parsed = new URL(options.qr.payload);
+    } catch {
+      throw new Error('Enabled QR payload must be a valid HTTPS URL.');
+    }
+    if (parsed.protocol !== 'https:') throw new Error('Enabled QR payload must use HTTPS.');
+    return options.qr.payload;
   }
 
   private async doRender(input: PdfRendererInput): Promise<Buffer> {
@@ -312,8 +799,9 @@ export class BillingDefaultV1PdfRendererAdapter implements PdfRendererPort {
       }
     }
 
+    const paymentLabel = document.paymentMethod ?? 'N/A';
     doc.text(
-      `Condición venta: ${document.saleCondition}  |  Medio pago: ${document.paymentMethod}  |  Moneda: ${document.currency}`,
+      `Condición venta: ${document.saleCondition}  |  Medio pago: ${paymentLabel}  |  Moneda: ${document.currency}`,
       MARGIN,
       y,
       {

@@ -102,6 +102,7 @@ export class UploadFiscalSigningCertificateService {
         id: true,
         tenantId: true,
         identificationNumber: true,
+        identificationType: true,
       },
     });
     if (!company) {
@@ -114,10 +115,14 @@ export class UploadFiscalSigningCertificateService {
     // Steps 3-7: Extract and validate the PKCS#12 (sanitized errors propagate up)
     const extracted = this.extractor.extractAndValidate(command.pkcs12Bytes, command.pin);
 
-    // Step 8: Compare extracted identity with Company identity
+    // Step 8: Compare canonical certificate fiscal identity with Company identity.
+    // The raw OID value may be formatted (e.g. CPF-02-0753-0251), while Company
+    // stores the canonical fiscal identification used in XML (207530251).
     const certId = extracted.extractedIdentityNumber.trim().toLowerCase();
     const companyId = company.identificationNumber.trim().toLowerCase();
-    if (certId !== companyId) {
+    const certType = this.certTypeCodeToCompanyType(extracted.extractedIdentityType);
+    const typeMismatch = certType !== null && certType !== company.identificationType;
+    if (certId !== companyId || typeMismatch) {
       this.audit.record({
         tenantId: command.tenantId,
         companyId: command.companyId,
@@ -144,6 +149,14 @@ export class UploadFiscalSigningCertificateService {
     // Step 10: Build secret reference keys (deterministic, non-guessable)
     const certRef = `fiscal-certs/${command.companyId}/${command.environment.toLowerCase()}/cert-${extracted.fingerprintSha256}`;
     const pinRef = `fiscal-certs/${command.companyId}/${command.environment.toLowerCase()}/pin-${extracted.fingerprintSha256}`;
+
+    if (!this.secrets.isDurable) {
+      this.logger.error(
+        { companyId: command.companyId, environment: command.environment },
+        'Fiscal certificate upload requires a durable SecretProvider. EnvSecretProvider is not durable.',
+      );
+      throw new FiscalCertificateStorageFailedException();
+    }
 
     // Step 11-12: Store secrets via SecretProvider
     try {
@@ -184,11 +197,11 @@ export class UploadFiscalSigningCertificateService {
         if (existingActive) {
           await tx.fiscalSigningCertificate.update({
             where: { id: existingActive.id },
-            data: { status: 'REPLACED', replacedById: newId },
+            data: { status: 'REPLACED' },
           });
         }
 
-        return tx.fiscalSigningCertificate.create({
+        const created = await tx.fiscalSigningCertificate.create({
           data: {
             id: newId,
             tenantId: command.tenantId,
@@ -209,6 +222,15 @@ export class UploadFiscalSigningCertificateService {
             activeFrom: now2,
           },
         });
+
+        if (existingActive) {
+          await tx.fiscalSigningCertificate.update({
+            where: { id: existingActive.id },
+            data: { replacedById: newId },
+          });
+        }
+
+        return created;
       });
     } catch (err) {
       // DB-002: Map partial unique index violation to a safe domain error.
@@ -271,6 +293,14 @@ export class UploadFiscalSigningCertificateService {
       createdAt: newCertRecord.createdAt,
       updatedAt: newCertRecord.updatedAt,
     };
+  }
+
+  private certTypeCodeToCompanyType(code: string | null): string | null {
+    if (code === '01') return 'FISICA';
+    if (code === '02') return 'JURIDICA';
+    if (code === '03') return 'DIMEX';
+    if (code === '04') return 'NITE';
+    return null;
   }
 
   private async attemptCleanupSecret(key: string): Promise<void> {

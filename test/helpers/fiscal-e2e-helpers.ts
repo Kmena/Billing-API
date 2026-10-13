@@ -1,6 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomBytes, randomUUID } from 'crypto';
 import * as request from 'supertest';
@@ -9,10 +9,20 @@ import { GlobalExceptionFilter } from '../../src/api/filters/global-exception.fi
 import { CorrelationIdInterceptor } from '../../src/api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../../src/api/interceptors/tenant-context.interceptor';
 import { createTestCompany, createTestTenant, createTestUser } from './test-factories';
+import { createGuardedTestPrisma } from './guarded-test-prisma';
+import {
+  assertSafeTestDatabase,
+  installGuardedTestDatabaseEnvironment,
+} from './test-database-safety';
+import { assertOwnedTestTenants, releaseOwnedTestTenants } from './test-database-ownership';
 
-export interface FiscalE2eContext {
-  readonly app: INestApplication;
+export interface FiscalE2eCleanupContext {
   readonly prisma: PrismaClient;
+  readonly ownedTenantIds: Set<string>;
+}
+
+export interface FiscalE2eContext extends FiscalE2eCleanupContext {
+  readonly app: INestApplication;
 }
 
 export interface FiscalTenantFixture {
@@ -23,6 +33,8 @@ export interface FiscalTenantFixture {
   readonly companyIdentification: string;
 }
 
+const FISCAL_E2E_HACIENDA_SECRET_REFERENCE = 'FISCAL_E2E_HACIENDA_SECRET';
+
 export interface FiscalApiKeyFixture {
   readonly id: string;
   readonly secret: string;
@@ -30,6 +42,10 @@ export interface FiscalApiKeyFixture {
 }
 
 export async function createFiscalE2eApp(): Promise<FiscalE2eContext> {
+  // A disposable sentinel exists only for eligibility checks; no real credential is used.
+  process.env[FISCAL_E2E_HACIENDA_SECRET_REFERENCE] ??= 'disposable-test-sentinel';
+  installGuardedTestDatabaseEnvironment();
+  const { prisma } = await createGuardedTestPrisma();
   const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = module.createNestApplication();
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'health/live'] });
@@ -40,49 +56,73 @@ export async function createFiscalE2eApp(): Promise<FiscalE2eContext> {
   app.useGlobalInterceptors(app.get(CorrelationIdInterceptor), app.get(TenantContextInterceptor));
   await app.init();
 
-  return { app, prisma: new PrismaClient() };
+  return { app, prisma, ownedTenantIds: new Set<string>() };
 }
 
-export function assertSafeTestDatabaseUrl(databaseUrl = process.env.DATABASE_URL): string {
-  if (!databaseUrl) throw new Error('DATABASE_URL is required for fiscal E2E tests.');
-  const parsed = new URL(databaseUrl);
-  const databaseName = parsed.pathname.replace(/^\//, '').toLowerCase();
-  const isSafeDatabase = databaseName.includes('test') || databaseName.includes('e2e');
-  const nodeEnv = process.env.NODE_ENV;
-
-  if (nodeEnv !== 'test' || !isSafeDatabase) {
-    throw new Error(
-      `Refusing to reset non-test database. NODE_ENV=${nodeEnv}; database=${databaseName}`,
-    );
-  }
-
-  return databaseName;
+export function assertSafeTestDatabaseUrl(): string {
+  return assertSafeTestDatabase().databaseName;
 }
 
-export async function resetFiscalE2eData(prisma: PrismaClient): Promise<void> {
+export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Promise<void> {
   assertSafeTestDatabaseUrl();
-  await prisma.fiscalSubmission.deleteMany();
-  await prisma.fiscalXmlArtifact.deleteMany();
-  await prisma.fiscalSigningCertificate.deleteMany();
-  await prisma.companyFiscalProfile.deleteMany();
-  await prisma.fiscalIdempotencyKey.deleteMany();
-  await prisma.fiscalDocument.deleteMany();
-  await prisma.fiscalSequence.deleteMany();
-  await prisma.fiscalIssuancePoint.deleteMany();
-  await prisma.haciendaConnection.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.apiKeyCompany.deleteMany();
-  await prisma.apiKey.deleteMany();
-  await prisma.refreshToken.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.company.deleteMany();
-  await prisma.tenant.deleteMany();
+  const tenantIds = [...context.ownedTenantIds];
+  if (tenantIds.length === 0) return;
+
+  const prisma = context.prisma;
+  const ownedTenantIds = await assertOwnedTestTenants(prisma, tenantIds);
+  const tenantScope = { tenantId: { in: [...ownedTenantIds] } };
+
+  // READY_TO_SUBMIT intentionally launches INITIAL_DOCUMENT preparation in a
+  // setImmediate hook. Under a loaded parallel E2E run that hook can commit a
+  // dependent artifact/delivery between the first child cleanup and the parent
+  // document delete. Retry only that FK window; once the parent is gone, the
+  // production hook fails closed and cannot recreate fiscal state.
+  let fiscalDocumentsDeleted = false;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await prisma.deliveryAttempt.deleteMany({ where: { delivery: tenantScope } });
+    await prisma.documentDelivery.deleteMany({ where: tenantScope });
+    await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
+    await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
+    await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
+    await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
+    try {
+      await prisma.fiscalDocument.deleteMany({ where: tenantScope });
+      fiscalDocumentsDeleted = true;
+      break;
+    } catch (error: unknown) {
+      const isForeignKeyRace =
+        typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2003';
+      if (!isForeignKeyRace || attempt === 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  if (!fiscalDocumentsDeleted) throw new Error('Fiscal E2E document cleanup did not converge');
+  await prisma.fiscalSigningCertificate.deleteMany({ where: tenantScope });
+  await prisma.companyFiscalProfile.deleteMany({ where: tenantScope });
+  await prisma.companyEconomicActivity.deleteMany({ where: tenantScope });
+  await prisma.companyPdfSettings.deleteMany({ where: tenantScope });
+  await prisma.fiscalSequence.deleteMany({ where: tenantScope });
+  await prisma.fiscalIssuancePoint.deleteMany({ where: tenantScope });
+  await prisma.fiscalTerminal.deleteMany({ where: tenantScope });
+  await prisma.fiscalBranch.deleteMany({ where: tenantScope });
+  await prisma.fiscalIntegrationAssociation.deleteMany({ where: tenantScope });
+  await prisma.haciendaConnection.deleteMany({ where: tenantScope });
+  await prisma.auditLog.deleteMany({ where: tenantScope });
+  await prisma.apiKeyCompany.deleteMany({ where: { apiKey: tenantScope } });
+  await prisma.apiKey.deleteMany({ where: tenantScope });
+  await prisma.refreshToken.deleteMany({ where: tenantScope });
+  await prisma.user.deleteMany({ where: tenantScope });
+  await prisma.company.deleteMany({ where: tenantScope });
+  await prisma.tenant.deleteMany({ where: { id: { in: [...ownedTenantIds] } } });
+  await releaseOwnedTestTenants(prisma, ownedTenantIds);
+  context.ownedTenantIds.clear();
 }
 
 export async function createFiscalTenantFixture(
   context: FiscalE2eContext,
 ): Promise<FiscalTenantFixture> {
   const tenant = await createTestTenant(context.prisma);
+  context.ownedTenantIds.add(tenant.id);
   const user = await createTestUser(context.prisma, tenant.id, {
     email: `fiscal-${randomUUID()}@example.com`,
     password: 'SecurePass123!',
@@ -107,9 +147,11 @@ export async function createFiscalApiKey(
   tenantId: string,
   scopes: string[],
   status: 'ACTIVE' | 'REVOKED' = 'ACTIVE',
+  environment: 'TEST' | 'LIVE' = 'TEST',
+  integrationProfile?: string,
 ): Promise<FiscalApiKeyFixture> {
   const keyPrefix = randomBytes(4).toString('hex');
-  const secret = `bk_test_${keyPrefix}_${randomBytes(16).toString('hex')}`;
+  const secret = `bk_${environment.toLowerCase()}_${keyPrefix}_${randomBytes(16).toString('hex')}`;
   const keyHash = await argon2.hash(secret, { type: argon2.argon2id });
   const id = randomUUID();
 
@@ -118,10 +160,11 @@ export async function createFiscalApiKey(
       id,
       tenantId,
       name: `Fiscal E2E ${keyPrefix}`,
-      environment: 'TEST',
+      environment,
       keyPrefix,
       keyHash,
       scopes,
+      integrationProfile,
       status,
       revokedAt: status === 'REVOKED' ? new Date() : undefined,
     },
@@ -152,7 +195,7 @@ export async function createEnabledHaciendaConnection(
       companyId,
       environment,
       status,
-      secretReference: `test-secret-${randomUUID()}`,
+      secretReference: FISCAL_E2E_HACIENDA_SECRET_REFERENCE,
     },
   });
 }
@@ -161,11 +204,41 @@ export async function configureValidCompanyFiscalProfile(
   context: FiscalE2eContext,
   fixture: FiscalTenantFixture,
 ): Promise<void> {
+  const payload = validCompanyFiscalProfilePayload();
   await request(context.app.getHttpServer())
     .put(`/api/v1/companies/${fixture.companyId}/fiscal-profile`)
     .set('Authorization', `Bearer ${fixture.jwtToken}`)
-    .send(validCompanyFiscalProfilePayload())
+    .send(payload)
     .expect(200);
+
+  const verifiedAt = new Date();
+  await context.prisma.companyEconomicActivity.upsert({
+    where: {
+      companyId_code: {
+        companyId: fixture.companyId,
+        code: payload.economicActivityCode,
+      },
+    },
+    create: {
+      id: randomUUID(),
+      tenantId: fixture.tenantId,
+      companyId: fixture.companyId,
+      code: payload.economicActivityCode,
+      description: 'Fiscal E2E verified activity',
+      haciendaStatus: 'A',
+      haciendaKind: 'P',
+      billingEnabled: true,
+      verifiedAt,
+      lastSeenAt: verifiedAt,
+      verificationSource: 'HACIENDA_FE_AE',
+    },
+    update: {
+      haciendaStatus: 'A',
+      billingEnabled: true,
+      verifiedAt,
+      lastSeenAt: verifiedAt,
+    },
+  });
 }
 
 export function validCompanyFiscalProfilePayload() {

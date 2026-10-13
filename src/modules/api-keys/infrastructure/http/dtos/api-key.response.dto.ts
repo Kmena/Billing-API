@@ -27,6 +27,9 @@ export class CreateApiKeyResponseDto {
   @ApiProperty({ type: [String] })
   scopes!: string[];
 
+  @ApiPropertyOptional({ enum: ['inventori-fiscal-v1', 'inventori-bootstrap-v1'] })
+  integrationProfile?: string;
+
   @ApiProperty()
   status!: string;
 
@@ -55,6 +58,9 @@ export class ApiKeyListItemDto {
 
   @ApiProperty({ type: [String] })
   scopes!: string[];
+
+  @ApiPropertyOptional({ enum: ['inventori-fiscal-v1', 'inventori-bootstrap-v1'] })
+  integrationProfile?: string;
 
   @ApiProperty({ enum: ['ACTIVE', 'REVOKED', 'EXPIRED'] })
   status!: string;

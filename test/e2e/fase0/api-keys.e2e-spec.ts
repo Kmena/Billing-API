@@ -5,12 +5,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { AppModule } from '../../../src/app.module';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../../../src/api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../../../src/api/interceptors/tenant-context.interceptor';
 import { createTestTenant, createTestUser } from '../../helpers/test-factories';
+import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
 
 describe('API Keys (E2E)', () => {
   let app: INestApplication;
@@ -19,6 +20,7 @@ describe('API Keys (E2E)', () => {
   let tenantId: string;
 
   beforeAll(async () => {
+    ({ prisma } = await createGuardedTestPrisma());
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -32,7 +34,6 @@ describe('API Keys (E2E)', () => {
     app.useGlobalInterceptors(app.get(CorrelationIdInterceptor), app.get(TenantContextInterceptor));
 
     await app.init();
-    prisma = new PrismaClient();
 
     // Set up tenant and user
     const tenant = await createTestTenant(prisma, { slug: 'apikey-e2e-tenant' });

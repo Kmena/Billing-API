@@ -23,8 +23,15 @@ import {
   buildFiscalKey,
   generateSecurityCode,
 } from '../domain/fiscal-key.generator';
+import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../domain/fiscal-catalogs';
 import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
+import {
+  canonicalFiscalPayloadHash,
+  FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
+  fiscalPayloadInputFromCommand,
+} from './fiscal-payload-equivalence';
+import { FiscalIssuanceEligibilityService } from './fiscal-xml/fiscal-issuance-eligibility.service';
 
 export interface AuthenticatedUser {
   readonly userId: string;
@@ -40,6 +47,9 @@ export interface FiscalDocumentLineInput {
   readonly quantity: string;
   readonly unitPrice: string;
   readonly discountAmount?: string;
+  readonly discountCode?: string;
+  readonly discountNature?: string;
+  readonly discountOther?: string;
   readonly taxAmount?: string;
   readonly taxCode?: string;
   readonly taxRateCode?: string;
@@ -55,11 +65,16 @@ export interface CreateFiscalDocumentCommand {
   readonly currency: string;
   readonly exchangeRate?: string;
   readonly saleCondition: string;
-  readonly paymentMethod: string;
+  readonly creditTermDays?: number;
+  readonly paymentMethod?: string;
   readonly lines: FiscalDocumentLineInput[];
   readonly idempotencyKey?: string;
   readonly apiKeyId?: string;
   readonly actor?: string;
+  readonly fiscalPayloadEquivalence?: {
+    readonly contractVersion?: string;
+    readonly hash?: string;
+  };
 }
 
 @Injectable()
@@ -67,6 +82,7 @@ export class FiscalDocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly issuanceEligibility?: FiscalIssuanceEligibilityService,
   ) {}
 
   async ensureDefaultIssuancePoint(input: {
@@ -257,12 +273,37 @@ export class FiscalDocumentService {
       });
       if ('response' in idempotency) return idempotency.response;
 
+      // Perform the shared read-only predicate before allocation. A production
+      // module always injects it; the fallback keeps isolated legacy tests valid.
+      let eligibleConnection:
+        { readonly connectionId: string; readonly secretReference: string } | undefined;
+      if (this.issuanceEligibility) {
+        const eligibility = await this.issuanceEligibility.haciendaEligibility({
+          tenantId: command.tenantId,
+          companyId: command.companyId,
+          environment: command.environment,
+        });
+        if (!eligibility.eligible) {
+          throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
+        }
+        eligibleConnection = eligibility;
+      }
+
+      // Recheck the exact validated connection/reference in the allocation
+      // transaction. A concurrent rotation or revocation must restart readiness
+      // rather than allocate against credential state that was never validated.
       const haciendaConnection = await tx.haciendaConnection.findFirst({
         where: {
           tenantId: command.tenantId,
           companyId: command.companyId,
           environment: command.environment,
-          NOT: { status: 'DISABLED' },
+          status: 'CONNECTED',
+          ...(eligibleConnection
+            ? {
+                id: eligibleConnection.connectionId,
+                secretReference: eligibleConnection.secretReference,
+              }
+            : {}),
         },
       });
       if (!haciendaConnection)
@@ -276,6 +317,7 @@ export class FiscalDocumentService {
           active: true,
           isDefault: true,
         },
+        orderBy: { id: 'asc' },
       });
       if (!point) throw new BadRequestException({ code: 'FISCAL_ISSUANCE_POINT_REQUIRED' });
 
@@ -335,7 +377,7 @@ export class FiscalDocumentService {
             tradeName: company.tradeName,
             identificationType: company.identificationType,
             identificationNumber: company.identificationNumber,
-            codigoActividad: fiscalProfile.economicActivityCode,
+            codigoActividad: fiscalProfile.resolvedActivityCode,
             proveedorSistemas: fiscalProfile.proveedorSistemas,
             provincia: fiscalProfile.province,
             canton: fiscalProfile.canton,
@@ -350,7 +392,8 @@ export class FiscalDocumentService {
           currency: command.currency,
           exchangeRate: command.exchangeRate ?? null,
           saleCondition: command.saleCondition,
-          paymentMethod: command.paymentMethod,
+          creditTermDays: command.creditTermDays ?? null,
+          paymentMethod: command.paymentMethod ?? null,
           lines: command.lines as never,
           totals: totals as never,
           idempotencyKey,
@@ -393,10 +436,9 @@ export class FiscalDocumentService {
   ): Promise<{ id: string } | { response: Record<string, unknown> }> {
     const existing = await tx.fiscalIdempotencyKey.findUnique({
       where: {
-        tenantId_companyId_apiKeyId_operation_key: {
+        tenantId_companyId_operation_key: {
           tenantId: input.tenantId,
           companyId: input.companyId,
-          apiKeyId: input.apiKeyId,
           operation: input.operation,
           key: input.key,
         },
@@ -413,7 +455,7 @@ export class FiscalDocumentService {
         ${input.key}, ${input.apiKeyId}::uuid, ${input.operation}, ${input.requestHash},
         'IN_PROGRESS'::"FiscalIdempotencyStatus", NOW(), NOW()
       )
-      ON CONFLICT ("tenant_id", "company_id", "api_key_id", "operation", "key")
+      ON CONFLICT ("tenant_id", "company_id", "operation", "key")
       DO NOTHING
       RETURNING "id"
     `;
@@ -421,10 +463,9 @@ export class FiscalDocumentService {
 
     const raced = await tx.fiscalIdempotencyKey.findUnique({
       where: {
-        tenantId_companyId_apiKeyId_operation_key: {
+        tenantId_companyId_operation_key: {
           tenantId: input.tenantId,
           companyId: input.companyId,
-          apiKeyId: input.apiKeyId,
           operation: input.operation,
           key: input.key,
         },
@@ -451,7 +492,7 @@ export class FiscalDocumentService {
   }
 
   private async getReadyCompanyFiscalProfile(
-    tx: Pick<PrismaService, 'companyFiscalProfile'>,
+    tx: Pick<PrismaService, 'companyFiscalProfile' | 'companyEconomicActivity'>,
     tenantId: string,
     companyId: string,
   ) {
@@ -460,8 +501,15 @@ export class FiscalDocumentService {
     });
     if (!profile) throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_REQUIRED' });
 
+    // Economic activity used for NEW fiscal issuance must come from Billing's
+    // verified CompanyEconomicActivity projection. The legacy
+    // economicActivityCode remains a compatibility projection only; it is never
+    // an independent source of truth for emission. This focused validator runs
+    // before idempotency reservation and before fiscal sequence allocation.
+    const resolvedActivityCode = await this.resolveIssuerEconomicActivity(tx, profile, companyId);
+
     const requiredProfileFields = [
-      profile.economicActivityCode,
+      resolvedActivityCode,
       profile.province,
       profile.canton,
       profile.district,
@@ -472,7 +520,54 @@ export class FiscalDocumentService {
     if (hasMissingField) {
       throw new BadRequestException({ code: 'COMPANY_FISCAL_PROFILE_INCOMPLETE' });
     }
-    return profile;
+    return { ...profile, resolvedActivityCode };
+  }
+
+  private async resolveIssuerEconomicActivity(
+    tx: Pick<PrismaService, 'companyEconomicActivity'>,
+    profile: { defaultEconomicActivityId: string | null },
+    companyId: string,
+  ): Promise<string> {
+    if (profile.defaultEconomicActivityId) {
+      const defaultActivity = await tx.companyEconomicActivity.findUnique({
+        where: { id: profile.defaultEconomicActivityId },
+        select: {
+          id: true,
+          companyId: true,
+          code: true,
+          haciendaStatus: true,
+          billingEnabled: true,
+        },
+      });
+      if (!defaultActivity || defaultActivity.companyId !== companyId) {
+        throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_INVALID' });
+      }
+      if (!this.isValidIssuerEconomicActivity(defaultActivity)) {
+        throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_INVALID' });
+      }
+      return defaultActivity.code;
+    }
+
+    const activities = await tx.companyEconomicActivity.findMany({
+      where: { companyId },
+      select: { id: true, code: true, haciendaStatus: true, billingEnabled: true },
+    });
+    const validActivities = activities.filter((activity) =>
+      this.isValidIssuerEconomicActivity(activity),
+    );
+
+    if (validActivities.length === 1) return validActivities[0].code;
+    if (activities.length === 0) {
+      throw new BadRequestException({ code: 'ECONOMIC_ACTIVITY_MISSING' });
+    }
+    throw new BadRequestException({ code: 'DEFAULT_ECONOMIC_ACTIVITY_MISSING' });
+  }
+
+  private isValidIssuerEconomicActivity(activity: {
+    haciendaStatus: string;
+    billingEnabled: boolean;
+  }): boolean {
+    return activity.haciendaStatus === 'A' && activity.billingEnabled;
   }
 
   private async findTenantCompany(tenantId: string, companyId: string) {
@@ -509,22 +604,20 @@ export class FiscalDocumentService {
     }
     if (!ALLOWED_SALE_CONDITIONS.includes(command.saleCondition as never))
       throw new BadRequestException({ code: 'INVALID_SALE_CONDITION' });
-    if (['02', '09', '11', '99'].includes(command.saleCondition))
+    if (['09', '11', '99'].includes(command.saleCondition))
       throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_SALE_CONDITION' });
-    if (!ALLOWED_PAYMENT_METHODS.includes(command.paymentMethod as never))
-      throw new BadRequestException({ code: 'INVALID_PAYMENT_METHOD' });
-    if (command.paymentMethod === '99')
-      throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_PAYMENT_METHOD' });
+    this.validateSalePaymentTerms(command);
     if (command.currency !== 'CRC' && !command.exchangeRate)
       throw new BadRequestException({ code: 'EXCHANGE_RATE_REQUIRED' });
     this.validateReceiver(command);
+    this.validateFiscalPayloadEquivalence(command);
     if (command.lines.length === 0)
       throw new BadRequestException({ code: 'FISCAL_DOCUMENT_LINES_REQUIRED' });
     for (const line of command.lines) {
       if (!/^\d{13}$/.test(line.cabysCode))
         throw new BadRequestException({ code: 'INVALID_CABYS_CODE' });
       if (line.lineNumber < 1) throw new BadRequestException({ code: 'INVALID_LINE_NUMBER' });
-      if (!['Sp', 'Unid'].includes(line.unitMeasure)) {
+      if (!isCanonicalHaciendaUnit(line.unitMeasure)) {
         throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_UNIT_MEASURE' });
       }
       if (
@@ -541,9 +634,90 @@ export class FiscalDocumentService {
           throw new BadRequestException({ code: 'INVALID_FISCAL_TAX_METADATA' });
         }
       }
-      if (ScaledDecimal.from(line.discountAmount ?? '0').toString() !== '0.00000') {
-        throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_DISCOUNT_METADATA' });
+      this.validateLineDiscount(line);
+    }
+  }
+
+  private validateFiscalPayloadEquivalence(command: CreateFiscalDocumentCommand): void {
+    const evidence = command.fiscalPayloadEquivalence;
+    if (!evidence) return;
+    if (!evidence.contractVersion || !evidence.hash) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_EQUIVALENCE_HEADERS_REQUIRED' });
+    }
+    if (evidence.contractVersion !== FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_CONTRACT_VERSION_UNSUPPORTED' });
+    }
+    if (!/^[a-fA-F0-9]{64}$/.test(evidence.hash)) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
+    }
+    if (
+      canonicalFiscalPayloadHash(fiscalPayloadInputFromCommand(command)) !==
+      evidence.hash.toLowerCase()
+    ) {
+      throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
+    }
+  }
+  private validateSalePaymentTerms(command: CreateFiscalDocumentCommand): void {
+    if (command.saleCondition === '02') {
+      const creditTermDays = command.creditTermDays;
+      if (
+        typeof creditTermDays !== 'number' ||
+        !Number.isInteger(creditTermDays) ||
+        creditTermDays < 1 ||
+        creditTermDays > 99999
+      ) {
+        throw new BadRequestException({ code: 'FISCAL_CREDIT_TERM_REQUIRED' });
       }
+      if (command.paymentMethod) {
+        throw new BadRequestException({ code: 'CREDIT_PAYMENT_METHOD_NOT_ALLOWED' });
+      }
+      return;
+    }
+
+    if (command.creditTermDays !== undefined) {
+      throw new BadRequestException({ code: 'FISCAL_CREDIT_TERM_NOT_ALLOWED' });
+    }
+    if (!command.paymentMethod) {
+      throw new BadRequestException({ code: 'PAYMENT_METHOD_REQUIRED' });
+    }
+    if (!ALLOWED_PAYMENT_METHODS.includes(command.paymentMethod as never)) {
+      throw new BadRequestException({ code: 'INVALID_PAYMENT_METHOD' });
+    }
+    if (command.paymentMethod === '99') {
+      throw new BadRequestException({ code: 'UNSUPPORTED_FISCAL_PAYMENT_METHOD' });
+    }
+  }
+
+  private validateLineDiscount(line: FiscalDocumentLineInput): void {
+    const discount = ScaledDecimal.from(line.discountAmount ?? '0');
+    if (discount.isZero()) {
+      if (line.discountCode || line.discountNature || line.discountOther) {
+        throw new BadRequestException({ code: 'FISCAL_DISCOUNT_METADATA_WITHOUT_AMOUNT' });
+      }
+      return;
+    }
+
+    const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
+    if (discount.isNegative() || gross.subtract(discount).isNegative()) {
+      throw new BadRequestException({ code: 'INVALID_FISCAL_DISCOUNT_AMOUNT' });
+    }
+    if (!line.discountCode || !line.discountNature) {
+      throw new BadRequestException({ code: 'FISCAL_DISCOUNT_METADATA_REQUIRED' });
+    }
+    if (!isHaciendaDiscountCode(line.discountCode)) {
+      throw new BadRequestException({ code: 'INVALID_FISCAL_DISCOUNT_CODE' });
+    }
+    const nature = line.discountNature.trim();
+    if (nature.length < 3 || nature.length > 80) {
+      throw new BadRequestException({ code: 'INVALID_FISCAL_DISCOUNT_NATURE' });
+    }
+    if (line.discountCode === '99') {
+      const other = line.discountOther?.trim() ?? '';
+      if (other.length < 5 || other.length > 100) {
+        throw new BadRequestException({ code: 'FISCAL_DISCOUNT_OTHER_REQUIRED' });
+      }
+    } else if (line.discountOther) {
+      throw new BadRequestException({ code: 'FISCAL_DISCOUNT_OTHER_NOT_ALLOWED' });
     }
   }
 
@@ -631,6 +805,7 @@ export class FiscalDocumentService {
       actor: undefined,
       apiKeyId: undefined,
       idempotencyKey: undefined,
+      fiscalPayloadEquivalence: undefined,
     });
     return createHash('sha256').update(normalized).digest('hex');
   }

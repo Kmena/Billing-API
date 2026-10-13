@@ -4,15 +4,27 @@
  * (integrity, accessibility, confidentiality, authenticity, queryability).
  * All stored objects are private by default — use signed URLs for access.
  */
+export interface StorageUploadRequest {
+  readonly key: string;
+  readonly bytes: Buffer;
+  readonly contentType: string;
+  readonly metadata?: Readonly<Record<string, string>>;
+}
+
 export interface StoragePort {
   /**
+   * Verifies that the configured backing store is available before fiscal
+   * processing records any attempt or writes immutable evidence.
+   */
+  ensureReady(): Promise<void>;
+
+  /**
    * Uploads content to object storage.
-   * @param key Unique storage path/key (e.g., 'invoices/tenant-id/doc-key.xml')
-   * @param content File content as Buffer
-   * @param metadata Optional metadata to attach to the object
+   * Content type is authoritative transport metadata and is intentionally
+   * separate from custom object metadata.
    * @returns The storage key (same as input key)
    */
-  upload(key: string, content: Buffer, metadata?: Record<string, string>): Promise<string>;
+  upload(request: StorageUploadRequest): Promise<string>;
 
   /**
    * Downloads an object from storage.

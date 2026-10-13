@@ -16,3 +16,13 @@ Thumbs.db
 prisma/dev.db
 docs/
 specs/
+# Never send runtime fiscal evidence, local validation evidence, or backups to the daemon.
+storage/
+secrets-storage/
+secret-backups/
+output/
+tmp/
+backups/
+*.backup
+*.bak
+*.sql

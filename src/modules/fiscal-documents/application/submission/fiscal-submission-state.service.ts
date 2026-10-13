@@ -6,6 +6,7 @@ import { AuditService, EventClass } from '../../../audit/application/audit.servi
 import { HaciendaSubmissionResult } from './ports/hacienda-submission.port';
 import { FiscalSubmissionStateMachine, FiscalSubmissionStatus } from '../../domain/submission';
 import { EnsureHaciendaResponseDeliveryService } from '../delivery/ensure-hacienda-response-delivery.service';
+import { FiscalArtifactIndexService } from '../artifacts/fiscal-artifact-index.service';
 
 @Injectable()
 export class FiscalSubmissionStateService {
@@ -15,6 +16,7 @@ export class FiscalSubmissionStateService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     @Inject(STORAGE_PORT) private readonly storage: StoragePort,
+    private readonly artifactIndex: FiscalArtifactIndexService,
     @Optional()
     private readonly haciendaResponseDeliveryService?: EnsureHaciendaResponseDeliveryService,
   ) {}
@@ -59,7 +61,7 @@ export class FiscalSubmissionStateService {
       const update = await tx.fiscalSubmission.updateMany({
         where: {
           id: submissionId,
-          status: { notIn: ['ACCEPTED', 'REJECTED'] },
+          status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
         },
         data: {
           status: nextStatus,
@@ -85,11 +87,22 @@ export class FiscalSubmissionStateService {
 
       if (terminal) {
         await tx.fiscalDocument.updateMany({
-          where: { id: submission.fiscalDocumentId, status: { notIn: ['ACCEPTED', 'REJECTED'] } },
+          where: {
+            id: submission.fiscalDocumentId,
+            status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+          },
           data: { status: nextStatus },
         });
       }
     });
+
+    if (artifactMetadata) {
+      await this.artifactIndex.ensureHaciendaResponseArtifact({
+        tenantId: submission.tenantId,
+        companyId: submission.companyId,
+        fiscalDocumentId: submission.fiscalDocumentId,
+      });
+    }
 
     this.auditService.record({
       tenantId: submission.tenantId,
@@ -147,11 +160,15 @@ export class FiscalSubmissionStateService {
 
     const sha256 = createHash('sha256').update(result.responseArtifact.content).digest('hex');
     const storageKey = `fiscal-submissions/${submission.tenantId}/${submission.companyId}/${submission.environment}/${submission.clave}/hacienda-response.xml`;
-    await this.storage.upload(storageKey, result.responseArtifact.content, {
+    await this.storage.upload({
+      key: storageKey,
+      bytes: result.responseArtifact.content,
       contentType: result.responseArtifact.contentType,
-      sha256,
-      clave: submission.clave,
-      submissionId: submission.id,
+      metadata: {
+        sha256,
+        clave: submission.clave,
+        submissionId: submission.id,
+      },
     });
 
     return { storageKey, sha256, contentType: result.responseArtifact.contentType };

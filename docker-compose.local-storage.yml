@@ -1,0 +1,21 @@
+# Compatibility override retained for operators that used it before durable
+# filesystem storage became the default in docker-compose.yml. It is now a
+# no-op by design: the normal local stack already carries this exact contract.
+services:
+  billing-api:
+    environment:
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
+      LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
+    volumes:
+      - ./storage:/var/lib/billing-artifacts
+
+  billing-worker:
+    environment:
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
+      LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
+    volumes:
+      - ./storage:/var/lib/billing-artifacts

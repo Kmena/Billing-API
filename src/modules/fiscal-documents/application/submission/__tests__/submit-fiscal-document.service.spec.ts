@@ -95,8 +95,26 @@ describe('SubmitFiscalDocumentService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.submit-to-hacienda',
       { submissionId: 'submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
     );
+  });
+
+  it('leaves exactly one QUEUED submission recoverable when enqueue fails after persistence', async () => {
+    const { service, prisma, queue } = makeService();
+    queue.publish.mockRejectedValueOnce(new Error('pg-boss unavailable'));
+
+    await expect(service.execute(input())).rejects.toThrow('pg-boss unavailable');
+
+    expect(prisma.fiscalSubmission.create).toHaveBeenCalledTimes(1);
+    expect(prisma.fiscalSubmission.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'submission-id' },
+        data: expect.objectContaining({ status: 'QUEUED' }),
+      }),
+    );
+    expect(queue.publish).toHaveBeenCalledTimes(1);
   });
 
   it('denies invoice submission without invoice scope', async () => {
@@ -190,8 +208,44 @@ describe('SubmitFiscalDocumentService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       expectedJob,
       { submissionId: 'submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: `fiscal-submission:${expectedJob}:submission-id`,
+      }),
     );
+  });
+
+  it('returns a SUPERSEDED existing submission without re-enqueueing', async () => {
+    const superseded = {
+      id: 'submission-id',
+      fiscalDocumentId: readyDocument.id,
+      clave: readyDocument.clave,
+      environment: readyDocument.environment,
+      status: 'SUPERSEDED',
+      attemptCount: 1,
+      reconciliationAttemptCount: 1,
+      nextAttemptAt: null,
+      acceptedAt: null,
+      rejectedAt: null,
+      lastNormalizedErrorCode: null,
+      lastSanitizedErrorMessage: null,
+      lastProviderStatus: null,
+      responseSha256: null,
+      responseContentType: null,
+      responseReceivedAt: null,
+    };
+    const { service, prisma, queue } = makeService({
+      fiscalDocument: {
+        findFirst: jest.fn().mockResolvedValue({
+          ...readyDocument,
+          status: 'SUPERSEDED',
+          submission: superseded,
+        }),
+      },
+    });
+
+    await expect(service.execute(input())).resolves.toMatchObject({ status: 'SUPERSEDED' });
+    expect(prisma.fiscalSubmission.update).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
   });
 
   it('returns terminal existing submission without re-enqueueing', async () => {

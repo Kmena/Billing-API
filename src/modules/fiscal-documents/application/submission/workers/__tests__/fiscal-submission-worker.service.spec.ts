@@ -75,10 +75,19 @@ function makeWorker(
 
 describe('FiscalSubmissionWorkerService', () => {
   it('submits exact persisted signed XML and schedules reconciliation after HTTP 201 acknowledgement', async () => {
-    const { worker, hacienda, state, queue } = makeWorker();
+    const { worker, prisma, hacienda, state, queue } = makeWorker();
 
     await worker.handleSubmitJob({ submissionId: 'submission-id' });
 
+    expect(prisma.fiscalSubmission.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'submission-id', status: { in: ['QUEUED', 'TECHNICAL_RETRY_PENDING'] } },
+        data: expect.objectContaining({
+          status: 'SUBMITTING',
+          attemptCount: { increment: 1 },
+        }),
+      }),
+    );
     expect(hacienda.submitSignedDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         accessToken: 'token',
@@ -93,7 +102,10 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.reconcile-hacienda-status',
       { submissionId: 'submission-id' },
-      expect.objectContaining({ startAfterSeconds: 60 }),
+      expect.objectContaining({
+        startAfterSeconds: 60,
+        singletonKey: 'fiscal-submission:fiscal-documents.reconcile-hacienda-status:submission-id',
+      }),
     );
   });
 
@@ -133,10 +145,53 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.submit-to-hacienda',
       { submissionId: 'submission-id' },
-      expect.objectContaining({ startAfterSeconds: 60 }),
+      expect.objectContaining({
+        startAfterSeconds: 60,
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
     );
   });
 
+  it('fails closed without provider contact when credentials are revoked before a retry', async () => {
+    const { worker, prisma, secrets, hacienda, state, queue } = makeWorker();
+    prisma.haciendaConnection.findFirst.mockResolvedValueOnce(null);
+
+    await worker.handleSubmitJob({ submissionId: 'submission-id' });
+
+    expect(state.applyProviderResult).toHaveBeenCalledWith(
+      'submission-id',
+      expect.objectContaining({
+        nextStatus: 'MANUAL_REVIEW_REQUIRED',
+        normalizedErrorCode: 'HACIENDA_CONNECTION_NOT_CONNECTED',
+      }),
+    );
+    expect(secrets.getSecret).not.toHaveBeenCalled();
+    expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
+  });
+
+  it('keeps a retry internal when the replacement credential cannot be resolved', async () => {
+    const { worker, secrets, hacienda, state, queue } = makeWorker();
+    secrets.getSecret.mockRejectedValueOnce(new Error('credential unavailable'));
+
+    await worker.handleSubmitJob({ submissionId: 'submission-id' });
+
+    expect(state.applyProviderResult).toHaveBeenCalledWith(
+      'submission-id',
+      expect.objectContaining({
+        nextStatus: 'TECHNICAL_RETRY_PENDING',
+        normalizedErrorCode: 'FISCAL_SUBMISSION_WORKER_FAILURE',
+      }),
+    );
+    expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+    expect(queue.publish).toHaveBeenCalledWith(
+      'fiscal-documents.submit-to-hacienda',
+      { submissionId: 'submission-id' },
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
+    );
+  });
   it('recovers stale SUBMITTING rows from persisted state on startup', async () => {
     const { worker, prisma, state, queue } = makeWorker();
     prisma.fiscalSubmission.findMany
@@ -155,8 +210,36 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(queue.publish).toHaveBeenCalledWith(
       'fiscal-documents.submit-to-hacienda',
       { submissionId: 'submission-id' },
-      expect.any(Object),
+      expect.objectContaining({
+        singletonKey: 'fiscal-submission:fiscal-documents.submit-to-hacienda:submission-id',
+      }),
     );
+  });
+
+  it('uses the submission claim as concurrency protection so duplicate jobs do not duplicate provider POSTs', async () => {
+    const { worker, prisma, hacienda } = makeWorker();
+    prisma.fiscalSubmission.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+
+    await Promise.all([
+      worker.handleSubmitJob({ submissionId: 'submission-id' }),
+      worker.handleSubmitJob({ submissionId: 'submission-id' }),
+    ]);
+
+    expect(prisma.fiscalSubmission.updateMany).toHaveBeenCalledTimes(2);
+    expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconcile or resubmit a terminal SUPERSEDED submission', async () => {
+    const { worker, prisma, hacienda, state } = makeWorker();
+    prisma.fiscalSubmission.findUnique.mockResolvedValue({ ...submission, status: 'SUPERSEDED' });
+
+    await worker.handleReconcileJob({ submissionId: 'submission-id' });
+
+    expect(hacienda.queryStatusByClave).not.toHaveBeenCalled();
+    expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+    expect(state.applyProviderResult).not.toHaveBeenCalled();
   });
 
   it('reconciles ambiguous POST outcome by GET status query instead of resubmitting', async () => {

@@ -64,6 +64,16 @@ describe('ScopeGuard', () => {
       expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
     });
 
+    it('enforces the exact AFPR resend scope', () => {
+      const guard = new ScopeGuard(makeReflector(['fiscal-deliveries:resend']));
+      expect(guard.canActivate(makeMockContext({ scopes: ['fiscal-deliveries:resend'] }))).toBe(
+        true,
+      );
+      expect(() =>
+        guard.canActivate(makeMockContext({ scopes: ['fiscal-deliveries:read'] })),
+      ).toThrow(ForbiddenException);
+    });
+
     it('AND semantics: throws when only some scopes are present', () => {
       const guard = new ScopeGuard(makeReflector(['taxpayers:read', 'cabys:read']));
       const ctx = makeMockContext({ scopes: ['taxpayers:read'] });

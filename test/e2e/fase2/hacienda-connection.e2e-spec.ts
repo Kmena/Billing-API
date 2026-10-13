@@ -2,18 +2,20 @@
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import * as request from 'supertest';
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient } from '@prisma/client';
 import { AppModule } from '../../../src/app.module';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../../../src/api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../../../src/api/interceptors/tenant-context.interceptor';
 import { createTestCompany, createTestTenant, createTestUser } from '../../helpers/test-factories';
+import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
 
 describe('Hacienda Connection (E2E)', () => {
   let app: INestApplication;
   let prisma: PrismaClient;
 
   beforeAll(async () => {
+    ({ prisma } = await createGuardedTestPrisma());
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = module.createNestApplication();
     app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'health/live'] });
@@ -23,7 +25,6 @@ describe('Hacienda Connection (E2E)', () => {
     );
     app.useGlobalInterceptors(app.get(CorrelationIdInterceptor), app.get(TenantContextInterceptor));
     await app.init();
-    prisma = new PrismaClient();
   });
 
   afterAll(async () => {

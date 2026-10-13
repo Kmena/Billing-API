@@ -17,4 +17,8 @@ export const FISCAL_XML_ERROR = {
   certificateEmitterMismatch: 'FISCAL_CERTIFICATE_EMITTER_MISMATCH',
   certificateIdentityUnverified: 'FISCAL_CERTIFICATE_IDENTITY_UNVERIFIED',
   certificateIdentityConflict: 'FISCAL_CERTIFICATE_IDENTITY_CONFLICT',
+  // Wave 8 — RFR-TASK-801: receiver economic activity
+  // Emitted when receiver.economicActivity is supplied (non-null, non-empty) but does not
+  // satisfy the Hacienda v4.4 XSD contract (exactly 6 characters).
+  invalidReceiverActivity: 'FISCAL_XML_INVALID_RECEIVER_ACTIVITY',
 } as const;

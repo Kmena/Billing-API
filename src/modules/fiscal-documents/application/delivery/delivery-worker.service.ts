@@ -13,7 +13,7 @@
  * INVARIANT: Attachment bytes are exact persisted bytes (SHA-256 verified).
  * INVARIANT: DELIVERED cannot regress to FAILED due to stale worker.
  */
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
@@ -26,6 +26,10 @@ import {
 } from '../email/email-delivery.port';
 import { FiscalEvidenceResolverService } from '../artifacts/fiscal-evidence-resolver.service';
 import { FiscalArtifactService } from '../artifacts/fiscal-artifact.service';
+import {
+  FiscalPdfArtifactPolicyException,
+  FiscalPdfArtifactStateService,
+} from '../artifacts/fiscal-pdf-artifact-state.service';
 import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import {
   DeliveryRetryClassifier,
@@ -33,6 +37,7 @@ import {
 } from '../../domain/delivery/delivery-retry-classifier';
 import { DocumentDeliveryKind } from '../../domain/delivery/document-delivery-kind.enum';
 import { DEFAULT_MAX_DELIVERY_RETRIES, DELIVERY_JOB_NAME } from './delivery.constants';
+import { AcceptedFiscalPackageResendService } from './accepted-fiscal-package-resend.service';
 
 export interface DeliveryJobPayload {
   readonly deliveryId: string;
@@ -50,6 +55,8 @@ export class DeliveryWorkerService implements OnModuleInit {
     private readonly evidenceResolver: FiscalEvidenceResolverService,
     private readonly artifactService: FiscalArtifactService,
     private readonly auditService: AuditService,
+    private readonly artifactState?: FiscalPdfArtifactStateService,
+    @Optional() private readonly acceptedPackageService?: AcceptedFiscalPackageResendService,
   ) {}
 
   /**
@@ -88,6 +95,7 @@ export class DeliveryWorkerService implements OnModuleInit {
             tenantId: true,
             companyId: true,
             clave: true,
+            consecutive: true,
             type: true,
             status: true,
           },
@@ -209,19 +217,31 @@ export class DeliveryWorkerService implements OnModuleInit {
           attemptId,
           attemptNumber,
           emailResult.outcome,
-          emailResult.sanitizedErrorCode,
+          emailResult.outcome === 'UNKNOWN'
+            ? 'UNKNOWN_EXTERNAL_OUTCOME'
+            : emailResult.sanitizedErrorCode,
           emailResult.sanitizedErrorMessage,
         );
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
+      const policyError = err instanceof FiscalPdfArtifactPolicyException ? err : undefined;
 
       // Classify the error
       let errorClass: DeliveryErrorClass = 'UNKNOWN_PROVIDER_RESPONSE';
-      if (errorMessage.includes('hash mismatch') || errorMessage.includes('integrity')) {
+      if (policyError?.code === 'ARTIFACT_HASH_MISMATCH') {
         errorClass = 'ARTIFACT_HASH_MISMATCH';
-      } else if (errorMessage.includes('not found') || errorMessage.includes('missing')) {
+      } else if (policyError?.code === 'ARTIFACT_MISSING') {
         errorClass = 'ARTIFACT_MISSING';
+      } else if (
+        policyError?.code === 'PDF_INVALID_STRUCTURE' ||
+        policyError?.code === 'PDF_OVERSIZED'
+      ) {
+        errorClass = 'ARTIFACT_CORRUPT';
+      } else if (policyError?.code === 'ARTIFACT_WRONG_VERSION') {
+        errorClass = 'ARTIFACT_WRONG_VERSION';
+      } else if (policyError?.code === 'LEGACY_PDF_UNAVAILABLE') {
+        errorClass = 'HISTORICAL_MOCK';
       } else if (errorMessage.includes('timeout') || errorMessage.includes('ETIMEDOUT')) {
         errorClass = 'NETWORK_TIMEOUT';
       }
@@ -232,7 +252,7 @@ export class DeliveryWorkerService implements OnModuleInit {
         attemptId,
         attemptNumber,
         'UNKNOWN',
-        errorClass,
+        policyError?.code ?? errorClass,
         errorMessage.substring(0, 200),
       );
     }
@@ -240,7 +260,14 @@ export class DeliveryWorkerService implements OnModuleInit {
 
   private async buildAttachments(
     delivery: { kind: string; fiscalDocumentId: string },
-    doc: { id: string; tenantId: string; companyId: string; clave: string },
+    doc: {
+      id: string;
+      tenantId: string;
+      companyId: string;
+      clave: string;
+      consecutive: string;
+      type: 'INVOICE' | 'TICKET';
+    },
   ): Promise<EmailAttachment[]> {
     const attachments: EmailAttachment[] = [];
 
@@ -257,7 +284,8 @@ export class DeliveryWorkerService implements OnModuleInit {
         contentType: signedXml.contentType,
       });
 
-      // Attach PDF if available
+      // INITIAL_DOCUMENT requires a current, verified real PDF. XML-only fallback
+      // would make a failed representation look like a completed delivery.
       const pdfArtifact = await this.prisma.fiscalArtifact.findFirst({
         where: {
           tenantId: doc.tenantId,
@@ -268,16 +296,27 @@ export class DeliveryWorkerService implements OnModuleInit {
         },
       });
 
-      if (pdfArtifact) {
-        const pdfBytes = await this.storage.download(pdfArtifact.storageKey);
-        // Verify PDF integrity
-        await this.evidenceResolver.verifyIntegrity(pdfBytes, pdfArtifact.sha256, doc.id, 'PDF');
-        attachments.push({
-          filename: `${doc.clave}.pdf`, // FR-027: official filename
-          content: pdfBytes,
-          contentType: 'application/pdf',
-        });
-      }
+      const pdfBytes = this.requireArtifactState().requireCurrent(
+        await this.requireArtifactState().assess(pdfArtifact, {
+          documentType: doc.type,
+          clave: doc.clave,
+          consecutive: doc.consecutive,
+        }),
+      );
+      attachments.push({
+        filename: `${doc.clave}.pdf`, // FR-027: official filename
+        content: pdfBytes,
+        contentType: 'application/pdf',
+      });
+    } else if (delivery.kind === 'ACCEPTED_FISCAL_PACKAGE') {
+      return (
+        await this.requireAcceptedPackageService().preflightForWorker({
+          tenantId: doc.tenantId,
+          companyId: doc.companyId,
+          fiscalDocumentId: doc.id,
+          recipient: (delivery as { recipient?: string }).recipient ?? '',
+        })
+      ).attachments.slice();
     } else if (delivery.kind === 'HACIENDA_RESPONSE') {
       // Attach exact Hacienda response bytes (SHA-256 verified)
       const responseXml = await this.evidenceResolver.resolveHaciendaResponseBytes(
@@ -299,6 +338,9 @@ export class DeliveryWorkerService implements OnModuleInit {
     const typeLabel = docType === 'INVOICE' ? 'Factura Electrónica' : 'Tiquete Electrónico';
     const shortClave = clave.substring(clave.length - 8); // Last 8 digits for readability
 
+    if (kind === DocumentDeliveryKind.ACCEPTED_FISCAL_PACKAGE) {
+      return 'Factura electrónica aceptada por Hacienda';
+    }
     if (kind === DocumentDeliveryKind.INITIAL_DOCUMENT) {
       return `${typeLabel} emitida - Clave ...${shortClave}`;
     } else {
@@ -314,6 +356,13 @@ export class DeliveryWorkerService implements OnModuleInit {
   ): string {
     const typeLabel = docType === 'INVOICE' ? 'Factura Electrónica' : 'Tiquete Electrónico';
 
+    if (kind === DocumentDeliveryKind.ACCEPTED_FISCAL_PACKAGE) {
+      return [
+        'Se adjunta el paquete fiscal aceptado por Hacienda.',
+        '',
+        'Documentos adjuntos: PDF, XML firmado y respuesta de Hacienda.',
+      ].join('\\n');
+    }
     if (kind === DocumentDeliveryKind.INITIAL_DOCUMENT) {
       return [
         `Se adjunta su ${typeLabel} electrónica emitida.`,
@@ -426,8 +475,13 @@ export class DeliveryWorkerService implements OnModuleInit {
   }
 
   private mapOutcomeToErrorClass(outcome: string, errorCode?: string): DeliveryErrorClass {
+    if (errorCode === 'UNKNOWN_EXTERNAL_OUTCOME') return 'UNKNOWN_EXTERNAL_OUTCOME';
     if (errorCode === 'ARTIFACT_HASH_MISMATCH') return 'ARTIFACT_HASH_MISMATCH';
     if (errorCode === 'ARTIFACT_MISSING') return 'ARTIFACT_MISSING';
+    if (errorCode === 'PDF_INVALID_STRUCTURE') return 'ARTIFACT_CORRUPT';
+    if (errorCode === 'PDF_OVERSIZED') return 'ARTIFACT_CORRUPT';
+    if (errorCode === 'ARTIFACT_WRONG_VERSION') return 'ARTIFACT_WRONG_VERSION';
+    if (errorCode === 'LEGACY_PDF_UNAVAILABLE') return 'HISTORICAL_MOCK';
 
     switch (outcome) {
       case 'TRANSIENT_FAILURE':
@@ -440,5 +494,19 @@ export class DeliveryWorkerService implements OnModuleInit {
       default:
         return 'UNKNOWN_PROVIDER_RESPONSE';
     }
+  }
+
+  private requireAcceptedPackageService(): AcceptedFiscalPackageResendService {
+    if (!this.acceptedPackageService) {
+      throw new Error('Accepted fiscal package resend service is not configured.');
+    }
+    return this.acceptedPackageService;
+  }
+
+  private requireArtifactState(): FiscalPdfArtifactStateService {
+    if (!this.artifactState) {
+      throw new Error('Fiscal PDF artifact state verifier is not configured.');
+    }
+    return this.artifactState;
   }
 }

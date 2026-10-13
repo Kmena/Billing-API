@@ -15,6 +15,7 @@ import { CrCertificateIdentityExtractorService } from './application/fiscal-xml/
 import { UploadFiscalSigningCertificateService } from './application/fiscal-xml/upload-fiscal-signing-certificate.service';
 import { FiscalReadCertificateMetadataService } from './application/fiscal-xml/fiscal-read-certificate-metadata.service';
 import { FiscalReadinessService } from './application/fiscal-xml/fiscal-readiness.service';
+import { FiscalIssuanceEligibilityService } from './application/fiscal-xml/fiscal-issuance-eligibility.service';
 import { FiscalCertificateController } from './infrastructure/http/fiscal-certificate.controller';
 import { FISCAL_XML_SERIALIZER } from './application/fiscal-xml/fiscal-xml-serializer.port';
 import { XSD_VALIDATOR } from './application/fiscal-xml/xsd-validator.port';
@@ -23,10 +24,15 @@ import { Xsd11ValidatorAdapter } from './infrastructure/xml/xsd11-validator.adap
 import { FiscalManagementController } from './infrastructure/http/fiscal-management.controller';
 import { FiscalPublicDocumentsController } from './infrastructure/http/fiscal-public-documents.controller';
 import { FiscalDocumentsController } from './infrastructure/http/fiscal-documents.controller';
+import { FiscalIdentityLookupController } from './infrastructure/http/fiscal-identity-lookup.controller';
+import { FiscalIdentityLookupService } from './application/fiscal-identity-lookup.service';
+import { FiscalIdentityEvidenceLookupController } from './infrastructure/http/fiscal-identity-evidence-lookup.controller';
+import { FiscalIdentityEvidenceLookupService } from './application/fiscal-identity-evidence-lookup.service';
 import { FiscalXmlController } from './infrastructure/http/fiscal-xml.controller';
 import { FiscalSubmissionController } from './infrastructure/http/fiscal-submission.controller';
 import { FiscalArtifactsController } from './infrastructure/http/fiscal-artifacts.controller';
 import { FiscalDeliveriesController } from './infrastructure/http/fiscal-deliveries.controller';
+import { AcceptedFiscalPackageResendController } from './infrastructure/http/accepted-fiscal-package-resend.controller';
 import { CompanyPdfSettingsController } from './infrastructure/http/company-pdf-settings.controller';
 import { SubmitFiscalDocumentService } from './application/submission/submit-fiscal-document.service';
 import { HACIENDA_SUBMISSION_PORT } from './application/submission/ports/hacienda-submission.port';
@@ -42,12 +48,26 @@ import { FiscalSubmissionWorkerService } from './application/submission/workers/
 import { FiscalEvidenceResolverService } from './application/artifacts/fiscal-evidence-resolver.service';
 import { FiscalArtifactService } from './application/artifacts/fiscal-artifact.service';
 import { GenerateFiscalPdfService } from './application/artifacts/generate-fiscal-pdf.service';
+import { FiscalPdfArtifactStateService } from './application/artifacts/fiscal-pdf-artifact-state.service';
+import { FiscalArtifactIndexService } from './application/artifacts/fiscal-artifact-index.service';
 import { CompanyPdfSettingsService } from './application/pdf/company-pdf-settings.service';
 import { EnsureInitialFiscalPackageService } from './application/delivery/ensure-initial-fiscal-package.service';
 import { EnsureHaciendaResponseDeliveryService } from './application/delivery/ensure-hacienda-response-delivery.service';
 import { DeliveryWorkerService } from './application/delivery/delivery-worker.service';
+import { DurableDeliveryRecoveryService } from './application/delivery/durable-delivery-recovery.service';
 import { DeliveryRequestService } from './application/delivery/delivery-request.service';
-import { PDF_RENDERER } from './application/pdf/pdf-renderer.port';
+import { AcceptedFiscalPackageResendService } from './application/delivery/accepted-fiscal-package-resend.service';
+import {
+  FISCAL_PDF_ATOMIC_RUNTIME_ACTIVATED,
+  FISCAL_REPRESENTATION_PDF_RENDERER,
+} from './application/pdf/pdf-renderer.port';
+import { VALID_PDF_VERIFIER } from './application/pdf/valid-pdf-verifier.port';
+import {
+  FISCAL_REPRESENTATION_PDF_RENDERER_PROVIDER,
+  NORMAL_PDF_RENDERER_PROVIDER,
+  assertFiscalPdfBootstrapState,
+} from './application/pdf/fiscal-pdf-provider-policy';
+import { FiscalRepresentationPdfPipeline } from './application/pdf/fiscal-representation-pdf-pipeline';
 import { QR_CONTENT_BUILDER } from './application/qr/qr-content-builder.port';
 import { EMAIL_DELIVERY_PORT } from './application/email/email-delivery.port';
 import { BillingDefaultV1PdfRendererAdapter } from './infrastructure/pdf/billing-default-v1-pdf-renderer.adapter';
@@ -56,6 +76,7 @@ import { HaciendaQrContentBuilderAdapter } from './infrastructure/qr/hacienda-qr
 import { MockQrContentBuilderAdapter } from './infrastructure/qr/mock-qr-content-builder.adapter';
 import { MockEmailDeliveryAdapter } from './infrastructure/email/mock-email-delivery.adapter';
 import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemailer-email-delivery.adapter';
+import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-pdf-verifier.adapter';
 
 @Module({
   imports: [
@@ -71,6 +92,8 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
   controllers: [
     FiscalManagementController,
     FiscalDocumentsController,
+    FiscalIdentityLookupController,
+    FiscalIdentityEvidenceLookupController,
     FiscalPublicDocumentsController,
     FiscalXmlController,
     FiscalSubmissionController,
@@ -78,12 +101,15 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     // F4 controllers
     FiscalArtifactsController,
     FiscalDeliveriesController,
+    AcceptedFiscalPackageResendController,
     CompanyPdfSettingsController,
     // F5 certificate management
     FiscalCertificateController,
   ],
   providers: [
     FiscalDocumentService,
+    FiscalIdentityLookupService,
+    FiscalIdentityEvidenceLookupService,
     PrepareFiscalXmlService,
     FiscalSigningCertificateService,
     // F5: certificate upload and management
@@ -91,6 +117,7 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     UploadFiscalSigningCertificateService,
     FiscalReadCertificateMetadataService,
     FiscalReadinessService,
+    FiscalIssuanceEligibilityService,
     SubmitFiscalDocumentService,
     GetFiscalSubmissionStatusService,
     RequestFiscalSubmissionReconciliationService,
@@ -114,16 +141,14 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     },
     // F4: PDF renderer
     BillingDefaultV1PdfRendererAdapter,
-    MockPdfRendererAdapter,
-    {
-      provide: PDF_RENDERER,
-      useFactory: (
-        configService: ConfigService,
-        real: BillingDefaultV1PdfRendererAdapter,
-        mock: MockPdfRendererAdapter,
-      ) => (configService.get<string>('NODE_ENV') === 'production' ? real : mock),
-      inject: [ConfigService, BillingDefaultV1PdfRendererAdapter, MockPdfRendererAdapter],
-    },
+    NORMAL_PDF_RENDERER_PROVIDER,
+    // Wave 7 atomic activation: generation, verification and delivery consume
+    // the complete safety floor through this single fail-closed runtime token.
+    FISCAL_REPRESENTATION_PDF_RENDERER_PROVIDER,
+    PdfjsValidPdfVerifierAdapter,
+    { provide: VALID_PDF_VERIFIER, useExisting: PdfjsValidPdfVerifierAdapter },
+    { provide: FISCAL_PDF_ATOMIC_RUNTIME_ACTIVATED, useValue: true },
+    FiscalRepresentationPdfPipeline,
     // F4: QR content builder
     MockQrContentBuilderAdapter,
     {
@@ -142,8 +167,21 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     MockEmailDeliveryAdapter,
     {
       provide: EMAIL_DELIVERY_PORT,
-      useFactory: (configService: ConfigService, mock: MockEmailDeliveryAdapter) => {
+      useFactory: (
+        configService: ConfigService,
+        mock: MockEmailDeliveryAdapter,
+        renderer: BillingDefaultV1PdfRendererAdapter | MockPdfRendererAdapter,
+        atomicRuntimeActivated: boolean,
+      ) => {
         const useReal = configService.get<boolean>('EMAIL_USE_REAL');
+        const rendererKind = renderer instanceof MockPdfRendererAdapter ? 'MOCK_TEST_ONLY' : 'REAL';
+        assertFiscalPdfBootstrapState({
+          renderer: rendererKind,
+          email: useReal ? 'SMTP' : 'CAPTURED',
+          verifierActive: atomicRuntimeActivated,
+          isolatedTestOverride:
+            rendererKind === 'MOCK_TEST_ONLY' && configService.get<string>('NODE_ENV') === 'test',
+        });
         if (useReal) {
           const smtpHost = configService.get<string>('SMTP_HOST');
           const smtpUser = configService.get<string>('SMTP_USER');
@@ -167,17 +205,26 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
         }
         return mock;
       },
-      inject: [ConfigService, MockEmailDeliveryAdapter],
+      inject: [
+        ConfigService,
+        MockEmailDeliveryAdapter,
+        FISCAL_REPRESENTATION_PDF_RENDERER,
+        FISCAL_PDF_ATOMIC_RUNTIME_ACTIVATED,
+      ],
     },
     // F4: Application services
     FiscalEvidenceResolverService,
     FiscalArtifactService,
+    FiscalArtifactIndexService,
+    FiscalPdfArtifactStateService,
     GenerateFiscalPdfService,
     CompanyPdfSettingsService,
     EnsureInitialFiscalPackageService,
     EnsureHaciendaResponseDeliveryService,
     DeliveryWorkerService,
+    DurableDeliveryRecoveryService,
     DeliveryRequestService,
+    AcceptedFiscalPackageResendService,
   ],
   exports: [
     // Export F4 services needed by workers
@@ -185,6 +232,19 @@ import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemaile
     EnsureHaciendaResponseDeliveryService,
     DeliveryWorkerService,
     FiscalEvidenceResolverService,
+    FiscalArtifactIndexService,
+    GenerateFiscalPdfService,
+    FISCAL_REPRESENTATION_PDF_RENDERER,
+    VALID_PDF_VERIFIER,
+    FiscalRepresentationPdfPipeline,
+    UploadFiscalSigningCertificateService,
+    FiscalReadCertificateMetadataService,
+    FiscalReadinessService,
+    FiscalDocumentService,
+    PrepareFiscalXmlService,
+    SubmitFiscalDocumentService,
+    FiscalArtifactService,
+    DeliveryRequestService,
   ],
 })
 export class FiscalDocumentsModule {}

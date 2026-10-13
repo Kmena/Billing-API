@@ -5,8 +5,9 @@
  *   - proveedorSistemas is optional: null or absent does NOT block fiscal profile completeness.
  *   - proveedorSistemas present continues to work (regression guard).
  *   - No fabricated proveedorSistemas value is injected: null is returned as null.
- *   - All genuinely required fields (economicActivityCode, province, canton, district,
+ *   - All genuinely required fiscal profile fields (province, canton, district,
  *     otrasSenas, email) still fail completeness when absent.
+ *   - Legacy economicActivityCode is not required for issuance when a verified activity resolves.
  *   - Missing profile row still fails with COMPANY_FISCAL_PROFILE_REQUIRED.
  *
  * Test boundary: private method tested via (service as any) without full createDocument stack.
@@ -47,6 +48,20 @@ function makeTx(profile: Record<string, unknown> | null) {
   return {
     companyFiscalProfile: {
       findFirst: jest.fn().mockResolvedValue(profile),
+    },
+    companyEconomicActivity: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'activity-default',
+        companyId: COMPANY_ID,
+        code: '9609.0',
+        haciendaStatus: 'A',
+        billingEnabled: true,
+      }),
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          { id: 'activity-single', code: '9609.0', haciendaStatus: 'A', billingEnabled: true },
+        ]),
     },
   };
 }
@@ -134,13 +149,11 @@ describe('FiscalDocumentService -- fiscal profile completeness validation', () =
   // -- genuinely required fields still enforced ---
 
   it.each([
-    ['economicActivityCode', { economicActivityCode: null }],
     ['province', { province: null }],
     ['canton', { canton: null }],
     ['district', { district: null }],
     ['otrasSenas', { otrasSenas: null }],
     ['email', { email: null }],
-    ['economicActivityCode (empty string)', { economicActivityCode: '' }],
     ['otrasSenas (whitespace only)', { otrasSenas: '   ' }],
   ])(
     'throws COMPANY_FISCAL_PROFILE_INCOMPLETE when required field %s is absent',
@@ -155,6 +168,16 @@ describe('FiscalDocumentService -- fiscal profile completeness validation', () =
       );
     },
   );
+
+  it('does not require legacy economicActivityCode when a verified activity resolves', async () => {
+    const service = buildService();
+    const tx = makeTx(buildProfile({ economicActivityCode: '' }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = await (service as any).getReadyCompanyFiscalProfile(tx, TENANT_ID, COMPANY_ID);
+
+    expect(result.resolvedActivityCode).toBe('9609.0');
+  });
 
   it('does not throw for whitespace-only proveedorSistemas (optional field)', async () => {
     // proveedorSistemas is stored as-is from the DB; whitespace trim is done at upsert time.

@@ -263,13 +263,13 @@ describe('Fiscal Documents (E2E)', () => {
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
-      .set('Idempotency-Key', 'unsupported-discount-metadata')
+      .set('Idempotency-Key', 'missing-discount-metadata')
       .send(discountPayload)
       .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_DISCOUNT_METADATA'));
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_DISCOUNT_METADATA_REQUIRED'));
 
     const unsupportedUnitPayload = fiscalInvoicePayload(fixture.companyId);
-    unsupportedUnitPayload.lines[0].unitMeasure = 'Kg';
+    unsupportedUnitPayload.lines[0].unitMeasure = 'box';
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
@@ -283,10 +283,10 @@ describe('Fiscal Documents (E2E)', () => {
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKey.secret)
-      .set('Idempotency-Key', 'unsupported-sale-condition')
+      .set('Idempotency-Key', 'missing-credit-term')
       .send(unsupportedSaleConditionPayload)
       .expect(400)
-      .expect(({ body }) => expect(body.error.code).toBe('UNSUPPORTED_FISCAL_SALE_CONDITION'));
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_CREDIT_TERM_REQUIRED'));
 
     await expectDocumentAndSequenceCounts(fixture.tenantId, fixture.companyId, 'INVOICE', 0, '1');
   });
@@ -448,8 +448,19 @@ describe('Fiscal Documents (E2E)', () => {
       .set('Idempotency-Key', 'idem-replay')
       .send(payload)
       .expect(201);
-    expect(apiKeyBResponse.body.id).not.toBe(firstResponse.body.id);
-    expect(apiKeyBResponse.body.consecutive).not.toBe(firstResponse.body.consecutive);
+    expect(apiKeyBResponse.body.id).toBe(firstResponse.body.id);
+    expect(apiKeyBResponse.body.consecutive).toBe(firstResponse.body.consecutive);
+    expect(apiKeyBResponse.body.clave).toBe(firstResponse.body.clave);
+
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKeyB.secret)
+      .set('Idempotency-Key', 'idem-replay')
+      .send(changedPayload)
+      .expect(409)
+      .expect(({ body }) =>
+        expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST'),
+      );
 
     const sameTextualKeyDocumentCount = await context.prisma.fiscalDocument.count({
       where: {
@@ -458,7 +469,7 @@ describe('Fiscal Documents (E2E)', () => {
         idempotencyKey: 'idem-replay',
       },
     });
-    expect(sameTextualKeyDocumentCount).toBe(3);
+    expect(sameTextualKeyDocumentCount).toBe(2);
   });
 
   async function expectDocumentAndSequenceCounts(

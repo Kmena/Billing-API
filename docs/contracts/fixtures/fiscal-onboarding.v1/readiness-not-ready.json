@@ -1,0 +1,18 @@
+{
+  "contractVersion": "1.0",
+  "profileVersion": "inventori-fiscal-v1",
+  "companyId": "22222222-2222-4222-8222-222222222222",
+  "environment": "SANDBOX",
+  "status": "NOT_READY",
+  "readyToIssue": false,
+  "checkedAt": "2026-10-11T00:00:00.000Z",
+  "blockers": ["ACTIVE_CERTIFICATE_MISSING"],
+  "warnings": [],
+  "dimensions": {
+    "certificate": {
+      "state": "NOT_READY",
+      "blockers": ["ACTIVE_CERTIFICATE_MISSING"],
+      "metadata": { "status": "MISSING" }
+    }
+  }
+}

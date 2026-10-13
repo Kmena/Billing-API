@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -21,10 +22,14 @@ import {
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
+import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import { CreateApiKeyHandler } from '../../application/use-cases/create-api-key/create-api-key.handler';
 import { ListApiKeysHandler } from '../../application/use-cases/list-api-keys/list-api-keys.handler';
 import { RevokeApiKeyHandler } from '../../application/use-cases/revoke-api-key/revoke-api-key.handler';
+import { AssignApiKeyCompanyHandler } from '../../application/use-cases/assign-api-key-company/assign-api-key-company.handler';
 import { CreateApiKeyRequestDto } from './dtos/create-api-key.request.dto';
+import { AssignApiKeyCompanyRequestDto } from './dtos/assign-api-key-company.request.dto';
 import { CreateApiKeyResponseDto, ApiKeyListItemDto } from './dtos/api-key.response.dto';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 import type { ApiKeyEnvironment } from '../../domain/entities/api-key.entity';
@@ -32,29 +37,47 @@ import type { ApiKeyEnvironment } from '../../domain/entities/api-key.entity';
 @ApiTags('API Keys')
 @SkipThrottle()
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantAdminGuard)
 @Controller('api-keys')
 export class ApiKeysController {
   constructor(
     private readonly createApiKeyHandler: CreateApiKeyHandler,
     private readonly listApiKeysHandler: ListApiKeysHandler,
     private readonly revokeApiKeyHandler: RevokeApiKeyHandler,
+    private readonly assignApiKeyCompanyHandler: AssignApiKeyCompanyHandler,
+    private readonly auditService: AuditService,
   ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @ApiOperation({ summary: 'Create a new API key (secret shown only once)' })
+  @ApiOperation({ summary: 'Create a new API key (secret shown only once; TENANT_ADMIN only)' })
   @ApiCreatedResponse({ type: CreateApiKeyResponseDto })
   async createApiKey(
     @Request() req: { user: JwtRequest },
     @Body() dto: CreateApiKeyRequestDto,
   ): Promise<CreateApiKeyResponseDto> {
+    this.assertTenantAdmin(req.user);
     const result = await this.createApiKeyHandler.execute({
       tenantId: req.user.tenantId,
       name: dto.name,
       environment: dto.environment as ApiKeyEnvironment,
-      scopes: dto.scopes,
+      scopes: dto.scopes ?? [],
+      integrationProfile: dto.integrationProfile,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
+    });
+
+    this.auditService.record({
+      tenantId: req.user.tenantId,
+      apiKeyId: result.id,
+      actor: req.user.userId,
+      action: 'api-key.created',
+      resource: `ApiKey:${result.id}`,
+      eventClass: EventClass.SECURITY,
+      metadata: {
+        environment: result.environment,
+        scopeCount: result.scopes.length,
+        ...(result.integrationProfile ? { integrationProfile: result.integrationProfile } : {}),
+      },
     });
 
     // BR-001: secret is ONLY included in this 201 response
@@ -65,6 +88,7 @@ export class ApiKeysController {
       keyPrefix: result.keyPrefix,
       secret: result.secret,
       scopes: result.scopes,
+      integrationProfile: result.integrationProfile,
       status: result.status,
       expiresAt: result.expiresAt,
       createdAt: result.createdAt,
@@ -73,9 +97,12 @@ export class ApiKeysController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'List all API keys for the tenant (secret never returned)' })
+  @ApiOperation({
+    summary: 'List all API keys for the tenant (TENANT_ADMIN only; secret never returned)',
+  })
   @ApiOkResponse({ type: [ApiKeyListItemDto] })
   async listApiKeys(@Request() req: { user: JwtRequest }): Promise<ApiKeyListItemDto[]> {
+    this.assertTenantAdmin(req.user);
     const items = await this.listApiKeysHandler.execute({ tenantId: req.user.tenantId });
 
     // BR-001: keyHash and secret are explicitly EXCLUDED from list responses
@@ -85,6 +112,7 @@ export class ApiKeysController {
       environment: item.environment,
       keyPrefix: item.keyPrefix,
       scopes: item.scopes,
+      integrationProfile: item.integrationProfile,
       status: item.status,
       expiresAt: item.expiresAt,
       lastUsedAt: item.lastUsedAt,
@@ -94,13 +122,49 @@ export class ApiKeysController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Revoke an API key (idempotent)' })
+  @ApiOperation({ summary: 'Revoke an API key (TENANT_ADMIN only; idempotent)' })
   @ApiNoContentResponse({ description: 'API key revoked' })
   @ApiUnauthorizedResponse()
   async revokeApiKey(@Request() req: { user: JwtRequest }, @Param('id') id: string): Promise<void> {
+    this.assertTenantAdmin(req.user);
     await this.revokeApiKeyHandler.execute({
       id,
       revokedBy: req.user.userId,
     });
+  }
+
+  @Post(':id/companies')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Authorize an active API key for one active tenant company (TENANT_ADMIN only)',
+  })
+  async assignCompany(
+    @Request() req: { user: JwtRequest },
+    @Param('id') id: string,
+    @Body() dto: AssignApiKeyCompanyRequestDto,
+  ): Promise<{ created: boolean }> {
+    this.assertTenantAdmin(req.user);
+    const result = await this.assignApiKeyCompanyHandler.execute({
+      tenantId: req.user.tenantId,
+      apiKeyId: id,
+      companyId: dto.companyId,
+    });
+    this.auditService.record({
+      tenantId: req.user.tenantId,
+      companyId: dto.companyId,
+      apiKeyId: id,
+      actor: req.user.userId,
+      action: 'api-key.company-authorized',
+      resource: `ApiKey:${id}`,
+      eventClass: EventClass.SECURITY,
+      metadata: { created: result.created },
+    });
+    return result;
+  }
+
+  private assertTenantAdmin(user: JwtRequest): void {
+    if (user.role !== 'TENANT_ADMIN') {
+      throw new ForbiddenException({ code: 'TENANT_ADMIN_REQUIRED' });
+    }
   }
 }

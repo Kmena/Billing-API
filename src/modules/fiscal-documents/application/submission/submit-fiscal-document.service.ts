@@ -11,6 +11,7 @@ import { JOB_QUEUE, JobQueuePort } from '../../../../infrastructure/queue/ports/
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import { FiscalDocumentType, HaciendaEnvironment } from '../../domain/fiscal.constants';
+import { FiscalSubmissionStateMachine } from '../../domain/submission';
 import { FiscalSubmissionResponse } from './fiscal-submission-response';
 import {
   RECONCILE_FISCAL_SUBMISSION_JOB,
@@ -73,7 +74,7 @@ export class SubmitFiscalDocumentService {
     }
 
     const existing = document.submission;
-    if (existing?.status === 'ACCEPTED' || existing?.status === 'REJECTED') {
+    if (existing && FiscalSubmissionStateMachine.isTerminal(existing.status)) {
       return { ...this.toResponse(existing), jobName: SUBMIT_FISCAL_DOCUMENT_JOB };
     }
 
@@ -95,7 +96,12 @@ export class SubmitFiscalDocumentService {
       await this.jobQueue.publish(
         jobName,
         { submissionId: queuedSubmission.id },
-        { retryLimit: 3, retryDelay: 60 },
+        {
+          retryLimit: 3,
+          retryDelay: 60,
+          singletonKey: this.singletonKey(jobName, queuedSubmission.id),
+          singletonSeconds: 12 * 60 * 60,
+        },
       );
     }
 
@@ -116,6 +122,10 @@ export class SubmitFiscalDocumentService {
     });
 
     return { ...this.toResponse(queuedSubmission), jobName: jobName ?? SUBMIT_FISCAL_DOCUMENT_JOB };
+  }
+
+  private singletonKey(jobName: string, submissionId: string): string {
+    return `fiscal-submission:${jobName}:${submissionId}`;
   }
 
   private jobNameForSubmissionStatus(status: string): string | null {
