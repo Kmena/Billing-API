@@ -37,7 +37,10 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
 
     writer = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
-    reader = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:read', 'tickets:read']);
+    reader = await createFiscalApiKey(context.prisma, fixture.tenantId, [
+      'invoices:read',
+      'tickets:read',
+    ]);
     await authorizeApiKeyForCompany(context.prisma, writer.id, fixture.companyId);
     await authorizeApiKeyForCompany(context.prisma, reader.id, fixture.companyId);
 
@@ -94,7 +97,10 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
       .expect(201);
 
     const [original, canonical] = await Promise.all([
-      context.prisma.fiscalDocument.findUniqueOrThrow({ where: { id: documentId }, select: { requestHash: true } }),
+      context.prisma.fiscalDocument.findUniqueOrThrow({
+        where: { id: documentId },
+        select: { requestHash: true },
+      }),
       context.prisma.fiscalDocument.findFirstOrThrow({
         where: { tenantId: fixture.tenantId, idempotencyKey: 'future-canonical-header-match' },
         select: { requestHash: true },
@@ -110,7 +116,9 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
       .set('X-Fiscal-Payload-Hash', 'a'.repeat(64))
       .send(payload)
       .expect(400)
-      .expect(({ body: response }) => expect(response.error.code).toBe('FISCAL_PAYLOAD_HASH_INVALID'));
+      .expect(({ body: response }) =>
+        expect(response.error.code).toBe('FISCAL_PAYLOAD_HASH_INVALID'),
+      );
     expect(await fiscalCounts()).toEqual({
       ...beforeMismatch,
       documents: beforeMismatch.documents + 1,
@@ -127,7 +135,9 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
     };
     await lookup(reader.secret, changed)
       .expect(404)
-      .expect(({ body: response }) => expect(response.error.code).toBe('FISCAL_IDENTITY_NOT_FOUND'));
+      .expect(({ body: response }) =>
+        expect(response.error.code).toBe('FISCAL_IDENTITY_NOT_FOUND'),
+      );
   });
 
   it('fails closed for the wrong operation or environment', async () => {
@@ -136,16 +146,21 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
 
     const production = { ...body };
     await request(context.app.getHttpServer())
-      .post(`/api/v1/companies/${fixture.companyId}/fiscal-documents/PRODUCTION/identity-by-fiscal-evidence`)
+      .post(
+        `/api/v1/companies/${fixture.companyId}/fiscal-documents/PRODUCTION/identity-by-fiscal-evidence`,
+      )
       .set('X-API-Key', reader.secret)
       .send(production)
-      .expect(409);
+      .expect(403)
+      .expect(({ body }) => expect(body.error.code).toBe('API_KEY_ENVIRONMENT_NOT_AUTHORIZED'));
   });
 
   it('rejects missing payload evidence before discovering a fiscal identity', async () => {
     await lookup(reader.secret, { ...body, fiscalPayload: undefined })
       .expect(400)
-      .expect(({ body: response }) => expect(response.error.code).toBe('FISCAL_PAYLOAD_EVIDENCE_INVALID'));
+      .expect(({ body: response }) =>
+        expect(response.error.code).toBe('FISCAL_PAYLOAD_EVIDENCE_INVALID'),
+      );
   });
 
   it('does not disclose the identity across tenant boundaries', async () => {
@@ -155,12 +170,16 @@ describe('Fiscal identity evidence lookup (E2E)', () => {
 
     await lookup(otherReader.secret, body)
       .expect(404)
-      .expect(({ body: response }) => expect(response.error.code).toBe('FISCAL_IDENTITY_NOT_FOUND'));
+      .expect(({ body: response }) =>
+        expect(response.error.code).toBe('FISCAL_IDENTITY_NOT_FOUND'),
+      );
   });
 
   it('handles concurrent read-only evidence lookups without fiscal mutation', async () => {
     const before = await fiscalCounts();
-    const responses = await Promise.all(Array.from({ length: 6 }, () => lookup(reader.secret, body).expect(200)));
+    const responses = await Promise.all(
+      Array.from({ length: 6 }, () => lookup(reader.secret, body).expect(200)),
+    );
     const after = await fiscalCounts();
     expect(responses.every((response) => response.body.fiscalDocumentId === documentId)).toBe(true);
     expect(after).toEqual(before);

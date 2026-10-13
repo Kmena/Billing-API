@@ -42,6 +42,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
     ConfigureConnectionHandler,
     GetConnectionHandler,
     ValidateConnectionHandler,
+    DisableConnectionHandler,
     HaciendaTokenCache,
     HACIENDA_AUTH_PORT,
   ],

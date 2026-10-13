@@ -15,6 +15,7 @@ import { CrCertificateIdentityExtractorService } from './application/fiscal-xml/
 import { UploadFiscalSigningCertificateService } from './application/fiscal-xml/upload-fiscal-signing-certificate.service';
 import { FiscalReadCertificateMetadataService } from './application/fiscal-xml/fiscal-read-certificate-metadata.service';
 import { FiscalReadinessService } from './application/fiscal-xml/fiscal-readiness.service';
+import { FiscalIssuanceEligibilityService } from './application/fiscal-xml/fiscal-issuance-eligibility.service';
 import { FiscalCertificateController } from './infrastructure/http/fiscal-certificate.controller';
 import { FISCAL_XML_SERIALIZER } from './application/fiscal-xml/fiscal-xml-serializer.port';
 import { XSD_VALIDATOR } from './application/fiscal-xml/xsd-validator.port';
@@ -53,6 +54,7 @@ import { CompanyPdfSettingsService } from './application/pdf/company-pdf-setting
 import { EnsureInitialFiscalPackageService } from './application/delivery/ensure-initial-fiscal-package.service';
 import { EnsureHaciendaResponseDeliveryService } from './application/delivery/ensure-hacienda-response-delivery.service';
 import { DeliveryWorkerService } from './application/delivery/delivery-worker.service';
+import { DurableDeliveryRecoveryService } from './application/delivery/durable-delivery-recovery.service';
 import { DeliveryRequestService } from './application/delivery/delivery-request.service';
 import { AcceptedFiscalPackageResendService } from './application/delivery/accepted-fiscal-package-resend.service';
 import {
@@ -115,6 +117,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     UploadFiscalSigningCertificateService,
     FiscalReadCertificateMetadataService,
     FiscalReadinessService,
+    FiscalIssuanceEligibilityService,
     SubmitFiscalDocumentService,
     GetFiscalSubmissionStatusService,
     RequestFiscalSubmissionReconciliationService,
@@ -219,6 +222,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     EnsureInitialFiscalPackageService,
     EnsureHaciendaResponseDeliveryService,
     DeliveryWorkerService,
+    DurableDeliveryRecoveryService,
     DeliveryRequestService,
     AcceptedFiscalPackageResendService,
   ],
@@ -233,6 +237,14 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     FISCAL_REPRESENTATION_PDF_RENDERER,
     VALID_PDF_VERIFIER,
     FiscalRepresentationPdfPipeline,
+    UploadFiscalSigningCertificateService,
+    FiscalReadCertificateMetadataService,
+    FiscalReadinessService,
+    FiscalDocumentService,
+    PrepareFiscalXmlService,
+    SubmitFiscalDocumentService,
+    FiscalArtifactService,
+    DeliveryRequestService,
   ],
 })
 export class FiscalDocumentsModule {}

@@ -18,6 +18,7 @@ import { SetDefaultEconomicActivityHandler } from './application/use-cases/set-d
 // FiscalReadinessService depends only on PrismaService (@Global) and SECRET_PROVIDER (@Global),
 // so it is safe to provide directly without cross-module import.
 import { FiscalReadinessService } from '../fiscal-documents/application/fiscal-xml/fiscal-readiness.service';
+import { FiscalIssuanceEligibilityService } from '../fiscal-documents/application/fiscal-xml/fiscal-issuance-eligibility.service';
 import { PrismaCompanyRepository } from './infrastructure/persistence/prisma-company.repository';
 import { CompanyController } from './infrastructure/http/company.controller';
 import {
@@ -44,6 +45,7 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
     SetDefaultEconomicActivityHandler,
     // M2M readiness — provided here to avoid circular module dependency.
     // Dependencies (PrismaService, SECRET_PROVIDER) are global.
+    FiscalIssuanceEligibilityService,
     FiscalReadinessService,
     {
       provide: COMPANY_REPOSITORY,

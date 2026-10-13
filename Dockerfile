@@ -34,6 +34,20 @@ RUN npm prune --production
 FROM node:24-alpine AS runner
 WORKDIR /app
 
+ARG OCI_IMAGE_REVISION=unknown
+ARG OCI_IMAGE_SOURCE=unknown
+ARG OCI_IMAGE_CREATED=unknown
+ARG OCI_IMAGE_VERSION=unknown
+ARG OCI_SOURCE_CONTENT_SHA256=unknown
+ARG OCI_SOURCE_STATE=unknown
+
+LABEL org.opencontainers.image.revision=$OCI_IMAGE_REVISION \
+      org.opencontainers.image.source=$OCI_IMAGE_SOURCE \
+      org.opencontainers.image.created=$OCI_IMAGE_CREATED \
+      org.opencontainers.image.version=$OCI_IMAGE_VERSION \
+      io.inventori.billing.source-content-sha256=$OCI_SOURCE_CONTENT_SHA256 \
+      io.inventori.billing.source-state=$OCI_SOURCE_STATE
+
 ENV NODE_ENV=production
 ENV PORT=3000
 

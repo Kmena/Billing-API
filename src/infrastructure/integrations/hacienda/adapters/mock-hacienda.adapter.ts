@@ -18,6 +18,24 @@ import {
 @Injectable()
 export class MockHaciendaAdapter implements HaciendaPort {
   private readonly MOCK_TAXPAYERS: Record<string, TaxpayerResult> = {
+    '3101000000': {
+      identification: '3101000000',
+      name: 'Inventori Demo',
+      found: true,
+      identificationType: '02',
+      taxRegime: 'Régimen general',
+      taxSituation: 'Inscrito',
+      moroso: false,
+      omiso: false,
+      economicActivities: [
+        {
+          code: '620210',
+          description: 'Actividades de programación informática',
+          status: 'A',
+          type: 'P',
+        },
+      ],
+    },
     '3101234567': {
       identification: '3101234567',
       name: 'Empresa Demo S.A.',

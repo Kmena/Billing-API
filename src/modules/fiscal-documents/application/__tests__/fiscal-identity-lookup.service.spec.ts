@@ -40,7 +40,9 @@ function makeReservation(overrides: Record<string, unknown> = {}) {
 function makePrisma(options: { authorized?: boolean; reservations?: unknown[] } = {}) {
   return {
     apiKeyCompany: {
-      findUnique: jest.fn().mockResolvedValue(options.authorized === false ? null : { apiKeyId: API_KEY_ID }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(options.authorized === false ? null : { apiKeyId: API_KEY_ID }),
     },
     fiscalIdempotencyKey: {
       findMany: jest.fn().mockResolvedValue(options.reservations ?? [makeReservation()]),
@@ -95,7 +97,9 @@ describe('FiscalIdentityLookupService', () => {
         where: expect.objectContaining({ tenantId: TENANT_ID, companyId: COMPANY_ID, key: KEY }),
       }),
     );
-    expect(prisma.fiscalIdempotencyKey.findMany.mock.calls[0][0].where).not.toHaveProperty('apiKeyId');
+    expect(prisma.fiscalIdempotencyKey.findMany.mock.calls[0][0].where).not.toHaveProperty(
+      'apiKeyId',
+    );
     expect(prisma.fiscalIdempotencyKey.create).not.toHaveBeenCalled();
     expect(prisma.fiscalIdempotencyKey.update).not.toHaveBeenCalled();
     expect(prisma.fiscalDocument.create).not.toHaveBeenCalled();
@@ -121,10 +125,12 @@ describe('FiscalIdentityLookupService', () => {
     const prisma = makePrisma();
     const service = new FiscalIdentityLookupService(prisma as never);
 
-    await expect(service.execute(command({ scopes: [] }))).rejects.toBeInstanceOf(ForbiddenException);
-    await service.execute(command({ scopes: [] })).catch((error) =>
-      expect(errorCode(error)).toBe('INSUFFICIENT_SCOPE'),
+    await expect(service.execute(command({ scopes: [] }))).rejects.toBeInstanceOf(
+      ForbiddenException,
     );
+    await service
+      .execute(command({ scopes: [] }))
+      .catch((error) => expect(errorCode(error)).toBe('INSUFFICIENT_SCOPE'));
     expect(prisma.apiKeyCompany.findUnique).not.toHaveBeenCalled();
     expect(prisma.fiscalIdempotencyKey.findMany).not.toHaveBeenCalled();
   });
@@ -145,13 +151,15 @@ describe('FiscalIdentityLookupService', () => {
   });
 
   it('fails closed on duplicate candidate reservations', async () => {
-    const prisma = makePrisma({ reservations: [makeReservation(), makeReservation({ id: 'other' })] });
+    const prisma = makePrisma({
+      reservations: [makeReservation(), makeReservation({ id: 'other' })],
+    });
     const service = new FiscalIdentityLookupService(prisma as never);
 
     await expect(service.execute(command())).rejects.toBeInstanceOf(ConflictException);
-    await service.execute(command()).catch((error) =>
-      expect(errorCode(error)).toBe('FISCAL_IDENTITY_AMBIGUOUS'),
-    );
+    await service
+      .execute(command())
+      .catch((error) => expect(errorCode(error)).toBe('FISCAL_IDENTITY_AMBIGUOUS'));
   });
 
   it('fails closed when the original request hash does not match', async () => {
@@ -164,19 +172,25 @@ describe('FiscalIdentityLookupService', () => {
   });
 
   it.each([
-    ['wrong environment', makeReservation({ fiscalDocument: makeDocument({ environment: 'PRODUCTION' }) })],
+    [
+      'wrong environment',
+      makeReservation({ fiscalDocument: makeDocument({ environment: 'PRODUCTION' }) }),
+    ],
     ['wrong document type', makeReservation({ fiscalDocument: makeDocument({ type: 'TICKET' }) })],
     ['missing fiscal document', makeReservation({ fiscalDocument: null })],
     ['reservation without document id', makeReservation({ fiscalDocumentId: null })],
-    ['different request hash on document', makeReservation({ fiscalDocument: makeDocument({ requestHash: 'c'.repeat(64) }) })],
+    [
+      'different request hash on document',
+      makeReservation({ fiscalDocument: makeDocument({ requestHash: 'c'.repeat(64) }) }),
+    ],
   ])('fails closed on %s integrity inconsistency', async (_label, reservation) => {
     const prisma = makePrisma({ reservations: [reservation] });
     const service = new FiscalIdentityLookupService(prisma as never);
 
     await expect(service.execute(command())).rejects.toBeInstanceOf(ConflictException);
-    await service.execute(command()).catch((error) =>
-      expect(errorCode(error)).toBe('FISCAL_IDENTITY_INTEGRITY_ERROR'),
-    );
+    await service
+      .execute(command())
+      .catch((error) => expect(errorCode(error)).toBe('FISCAL_IDENTITY_INTEGRITY_ERROR'));
   });
 
   it('has stable concurrent read behavior without writes', async () => {

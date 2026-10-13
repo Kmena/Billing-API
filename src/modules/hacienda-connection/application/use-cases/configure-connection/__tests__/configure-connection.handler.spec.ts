@@ -14,7 +14,7 @@ function makeHandler(
   const company = { execute: jest.fn().mockResolvedValue({ id: companyId }) };
   const repo = {
     findByCompanyAndEnvironment: jest.fn().mockResolvedValue(existing),
-    save: jest.fn().mockResolvedValue(undefined),
+    save: jest.fn().mockResolvedValue(true),
   };
   const secrets = {
     getSecret: jest.fn().mockResolvedValue(JSON.stringify(previousSecret)),
@@ -59,12 +59,17 @@ describe('ConfigureConnectionHandler', () => {
 
     expect(result.status).toBe('CONNECTED');
     expect(result.id).toBe('connection-id');
-    expect(result.secretReference).toBe(`hacienda-conn/${companyId}/SANDBOX`);
+    expect(result.secretReference).toMatch(
+      new RegExp(`^hacienda-conn/${companyId}/SANDBOX/[0-9a-f-]{36}$`),
+    );
     expect(secrets.storeSecret).toHaveBeenCalledWith(
-      `hacienda-conn/${companyId}/SANDBOX`,
+      result.secretReference,
       JSON.stringify({ username: 'opaque-user', password: 'opaque-password' }),
     );
-    expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ id: 'connection-id' }));
+    expect(repo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'connection-id' }),
+      new Date('2026-01-01T00:00:00.000Z'),
+    );
   });
 
   it('keeps normal public credential updates conservative by marking existing connections pending validation', async () => {
@@ -110,7 +115,7 @@ describe('ConfigureConnectionHandler', () => {
     await handler.execute({ tenantId, companyId, environment: 'SANDBOX', username: 'new-user' });
 
     expect(secrets.storeSecret).toHaveBeenCalledWith(
-      `hacienda-conn/${companyId}/SANDBOX`,
+      expect.stringMatching(new RegExp(`^hacienda-conn/${companyId}/SANDBOX/[0-9a-f-]{36}$`)),
       JSON.stringify({ username: 'new-user', password: 'preserved-password' }),
     );
     expect(cache.invalidate).toHaveBeenCalledWith(companyId, 'SANDBOX');
@@ -140,12 +145,68 @@ describe('ConfigureConnectionHandler', () => {
     });
 
     expect(secrets.storeSecret).toHaveBeenCalledWith(
-      `hacienda-conn/${companyId}/SANDBOX`,
+      expect.stringMatching(new RegExp(`^hacienda-conn/${companyId}/SANDBOX/[0-9a-f-]{36}$`)),
       JSON.stringify({ username: 'preserved-user', password: 'new-password' }),
     );
     expect(repo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ secretReference: `hacienda-conn/${companyId}/SANDBOX` }),
+      expect.objectContaining({
+        secretReference: expect.stringMatching(
+          new RegExp(`^hacienda-conn/${companyId}/SANDBOX/[0-9a-f-]{36}$`),
+        ),
+      }),
+      new Date('2026-01-01T00:00:00.000Z'),
     );
     expect(JSON.stringify(repo.save.mock.calls)).not.toContain('new-password');
+  });
+
+  it('rejects reconfiguration after disable without reading or replacing stored credentials', async () => {
+    const existing = HaciendaConnection.reconstruct({
+      id: 'connection-id',
+      tenantId,
+      companyId,
+      environment: 'SANDBOX',
+      status: 'DISABLED',
+      secretReference: `hacienda-conn/${companyId}/SANDBOX/existing`,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const { handler, repo, secrets } = makeHandler(existing);
+
+    await expect(
+      handler.execute({
+        tenantId,
+        companyId,
+        environment: 'SANDBOX',
+        username: 'new-user',
+        password: 'new-password',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'HACIENDA_CONNECTION_DISABLED' } });
+    expect(secrets.storeSecret).not.toHaveBeenCalled();
+    expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('raises a stable conflict when an existing connection changes concurrently', async () => {
+    const existing = HaciendaConnection.reconstruct({
+      id: 'connection-id',
+      tenantId,
+      companyId,
+      environment: 'SANDBOX',
+      status: 'CONNECTED',
+      secretReference: `hacienda-conn/${companyId}/SANDBOX/existing`,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    });
+    const { handler, repo } = makeHandler(existing);
+    repo.save.mockResolvedValue(false);
+
+    await expect(
+      handler.execute({
+        tenantId,
+        companyId,
+        environment: 'SANDBOX',
+        username: 'new-user',
+        password: 'new-password',
+      }),
+    ).rejects.toMatchObject({ response: { code: 'HACIENDA_CONNECTION_CONCURRENT_CONFLICT' } });
   });
 });

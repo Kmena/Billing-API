@@ -1,0 +1,5 @@
+{
+  "statusCode": 403,
+  "code": "API_KEY_COMPANY_NOT_AUTHORIZED",
+  "message": "API key is not authorized for this company."
+}

@@ -119,7 +119,11 @@ describe('Fiscal identity lookup (E2E)', () => {
         `/api/v1/companies/${fixture.companyId}/fiscal-documents/SANDBOX/identity-by-idempotency`,
       )
       .set('X-API-Key', apiKey)
-      .query({ idempotencyKey, operation: LOOKUP_OPERATION, requestHash: requestHash.toUpperCase() });
+      .query({
+        idempotencyKey,
+        operation: LOOKUP_OPERATION,
+        requestHash: requestHash.toUpperCase(),
+      });
   }
 
   async function fiscalCounts() {

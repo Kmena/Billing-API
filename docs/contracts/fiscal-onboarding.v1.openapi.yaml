@@ -1,0 +1,984 @@
+openapi: 3.0.3
+info:
+  title: Billing Fiscal Onboarding M2M
+  version: 1.0.0
+  description: Company-scoped fiscal configuration contract for inventori-fiscal-v1.
+servers:
+  - url: /api/v1
+security: []
+paths:
+  /fiscal-onboarding/v1/bootstrap:
+    post:
+      operationId: bootstrapInventoriFiscalIssuer
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-authorization: TENANT_BOUND_INVENTORI_BOOTSTRAP_PROFILE_ONLY
+      x-required-scope: fiscal-bootstrap:provision
+      x-binding: bootstrap API-key tenant + TEST/SANDBOX or LIVE/PRODUCTION
+      x-idempotency: externalCompanyKey preserves one association; an ambiguous replay revokes the prior unconfirmed operational handoff and returns one replacement credential.
+      x-concurrency: SERIALIZABLE association plus tenant/key advisory lock; one active handoff credential per association/environment.
+      x-audit-event: fiscal-onboarding.associated and fiscal-onboarding.credential-issued
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BootstrapFiscalIssuer' }
+      responses:
+        '200':
+          description: Canonical association plus returned-once company credential
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BootstrapFiscalIssuerResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /fiscal-onboarding/v1/associations:
+    post:
+      operationId: provisionFiscalIssuerAssociation
+      security: [{ bearerAuth: [] }]
+      x-classification: NEW
+      x-authorization: TENANT_ADMIN_PRIVILEGED_BOOTSTRAP_ONLY
+      x-idempotency: externalCompanyKey is the stable tenant/provider idempotency key; equivalent replay returns canonical state; conflicting replay is 409.
+      x-concurrency: SERIALIZABLE transaction plus unique tenant/provider/external key and unique company association.
+      x-audit-event: fiscal-onboarding.associated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProvisionFiscalIssuer' }
+      responses:
+        '200':
+          {
+            description: Canonical association,
+            content: { application/json: { schema: { $ref: '#/components/schemas/Association' } } },
+          }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/issuer:
+    parameters:
+      [
+        { $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' },
+      ]
+    get:
+      operationId: getFiscalIssuer
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-required-scope: fiscal-issuer:read
+      x-binding: tenant + ApiKeyCompany + TEST/SANDBOX or LIVE/PRODUCTION + inventori-fiscal-v1
+      x-idempotency: read-only
+      x-concurrency: canonical read
+      x-audit-event: HTTP audit interceptor
+      responses:
+        {
+          '200': { description: Canonical issuer association, content: { application/json: { schema: { $ref: '#/components/schemas/Association' } } } },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '404': { $ref: '#/components/responses/NotFound' },
+        }
+    patch:
+      operationId: updateFiscalIssuer
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-required-scope: fiscal-issuer:write
+      x-binding: tenant + ApiKeyCompany + environment + profile
+      x-idempotency: canonical partial update; identity changes fail after certificate/reservation/document lock.
+      x-concurrency: database update; locked historical identity is immutable.
+      x-audit-event: company.updated or company.identity-updated
+      requestBody:
+        {
+          required: true,
+          content: { application/json: { schema: { $ref: '#/components/schemas/IssuerUpdate' } } },
+        }
+      responses:
+        {
+          '200': { description: Canonical issuer, content: { application/json: { schema: { $ref: '#/components/schemas/Issuer' } } } },
+          '403': { $ref: '#/components/responses/Forbidden' },
+          '409': { $ref: '#/components/responses/Conflict' },
+        }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/profile:
+    parameters:
+      [
+        { $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' },
+      ]
+    get:
+      {
+        operationId: getFiscalProfile,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-profile:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: canonical read,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200': { description: Canonical profile, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalProfileResponse' } } } },
+            '403': { $ref: '#/components/responses/Forbidden' },
+          },
+      }
+    put:
+      operationId: upsertFiscalProfile
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-required-scope: fiscal-profile:write
+      x-binding: tenant/company/environment/profile
+      x-idempotency: upsert to canonical representation
+      x-concurrency: last complete validated command wins; historical snapshots are untouched
+      x-audit-event: company-fiscal-profile.upserted
+      requestBody:
+        {
+          required: true,
+          content: { application/json: { schema: { $ref: '#/components/schemas/FiscalProfile' } } },
+        }
+      responses:
+        {
+          '200': { description: Canonical profile, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalProfileResponse' } } } },
+          '400': { $ref: '#/components/responses/BadRequest' },
+          '403': { $ref: '#/components/responses/Forbidden' },
+        }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/activities/refresh:
+    post:
+      {
+        operationId: refreshEconomicActivities,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-activities:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: authoritative Hacienda projection upsert,
+        x-concurrency: transactional canonical refresh,
+        x-audit-event: taxpayer.verification-succeeded,
+        responses:
+          {
+            '200': { description: Verified activities, content: { application/json: { schema: { $ref: '#/components/schemas/TaxpayerVerification' } } } },
+            '403': { $ref: '#/components/responses/Forbidden' },
+            '503': { description: Hacienda unavailable; no fabricated activity },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/activities:
+    get:
+      {
+        operationId: listEconomicActivities,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-activities:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: canonical read,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200': { description: Canonical verified activities, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/EconomicActivity' } } } } },
+            '403': { $ref: '#/components/responses/Forbidden' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/activities/{code}:
+    patch:
+      {
+        operationId: setEconomicActivityEnabled,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-activities:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: desired-state boolean,
+        x-concurrency: canonical update,
+        x-audit-event: economic-activity.billing-enabled-changed,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SetActiveRequest' } } } },
+        responses:
+          {
+            '200': { description: Canonical activity, content: { application/json: { schema: { $ref: '#/components/schemas/EconomicActivity' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/activities/default:
+    put:
+      {
+        operationId: selectDefaultEconomicActivity,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-activities:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: selecting current eligible default is a no-op,
+        x-concurrency: transactional canonical default,
+        x-audit-event: economic-activity.default-selected,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SetDefaultActivityRequest' } } } },
+        responses:
+          {
+            '200': { description: Canonical default, content: { application/json: { schema: { $ref: '#/components/schemas/EconomicActivity' } } } },
+            '400': { $ref: '#/components/responses/BadRequest' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/hacienda-connection:
+    get:
+      {
+        operationId: getHaciendaConnection,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-credentials:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: canonical read,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200': { description: Safe status without secret reference, content: { application/json: { schema: { $ref: '#/components/schemas/HaciendaConnection' } } } },
+            '404': { $ref: '#/components/responses/NotFound' },
+          },
+      }
+    put:
+      {
+        operationId: replaceHaciendaCredentials,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-credentials:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: replaces secret material through the existing SecretProvider,
+        x-concurrency: validated canonical update,
+        x-audit-event: hacienda-connection.configured,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/HaciendaCredentialsRequest' } } } },
+        responses:
+          {
+            '200': { description: Safe status; credential values are write-only, content: { application/json: { schema: { $ref: '#/components/schemas/HaciendaConnection' } } } },
+            '403': { $ref: '#/components/responses/Forbidden' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/hacienda-connection/validate:
+    post:
+      {
+        operationId: validateHaciendaConnection,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-credentials:validate',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: validation updates status only,
+        x-concurrency: latest completed validation is canonical,
+        x-audit-event: hacienda-connection.validated,
+        responses:
+          {
+            '200': { description: Safe connection status, content: { application/json: { schema: { $ref: '#/components/schemas/HaciendaConnection' } } } },
+            '403': { $ref: '#/components/responses/Forbidden' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/hacienda-connection/disable:
+    post:
+      {
+        operationId: disableHaciendaConnection,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-credentials:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: repeated disable returns the same canonical disabled connection,
+        x-concurrency: optimistic updatedAt guard rejects concurrent configuration or validation,
+        x-audit-event: hacienda-connection.disabled,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DisableHaciendaConnectionRequest' } } } },
+        responses:
+          {
+            '200': { description: Safe canonical disabled status; secrets and certificates remain stored, content: { application/json: { schema: { $ref: '#/components/schemas/HaciendaConnection' } } } },
+            '400': { $ref: '#/components/responses/BadRequest' },
+            '403': { $ref: '#/components/responses/Forbidden' },
+            '404': { $ref: '#/components/responses/NotFound' },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/certificate:
+    get:
+      {
+        operationId: getSigningCertificateMetadata,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-certificates:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: current ACTIVE metadata,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200': { description: Safe metadata only, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateMetadata' } } } },
+            '404': { $ref: '#/components/responses/NotFound' },
+          },
+      }
+    post:
+      {
+        operationId: uploadSigningCertificate,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-certificates:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: certificate fingerprint and active-scope lifecycle,
+        x-concurrency: partial unique ACTIVE certificate constraint,
+        x-audit-event: fiscal-certificate.activated,
+        requestBody: { $ref: '#/components/requestBodies/Certificate' },
+        responses:
+          {
+            '201': { description: Safe certificate metadata, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateMetadata' } } } },
+            '400': { $ref: '#/components/responses/BadRequest' },
+          },
+      }
+    put:
+      {
+        operationId: replaceSigningCertificate,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-certificates:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: atomic replacement; failed replacement preserves previous ACTIVE certificate,
+        x-concurrency: partial unique ACTIVE certificate constraint,
+        x-audit-event: fiscal-certificate.activated,
+        requestBody: { $ref: '#/components/requestBodies/Certificate' },
+        responses:
+          {
+            '200': { description: Safe replacement metadata, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateMetadata' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/branches:
+    get:
+      {
+        operationId: listFiscalBranches,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-issuance-points:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: canonical read,
+        x-audit-event: HTTP audit interceptor,
+        responses: { '200': { description: Branches with terminals, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/FiscalBranch' } } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } },
+      }
+    post:
+      {
+        operationId: createFiscalBranch,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-issuance-points:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: company/environment/code upsert,
+        x-concurrency: unique company/environment/code,
+        x-audit-event: fiscal-branch.upserted,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateFiscalBranchRequest' } } } },
+        responses:
+          {
+            '200': { description: Canonical branch, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalBranch' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/branches/{branchId}:
+    patch:
+      {
+        operationId: setFiscalBranchActive,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-issuance-points:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: desired-state boolean,
+        x-concurrency: default branch cannot be disabled,
+        x-audit-event: fiscal-branch.status-changed,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SetActiveRequest' } } } },
+        responses:
+          {
+            '200': { description: Canonical branch, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalBranch' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/branches/{branchId}/terminals:
+    post:
+      {
+        operationId: createFiscalTerminal,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-issuance-points:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: branch/code upsert,
+        x-concurrency: unique branch/code,
+        x-audit-event: fiscal-terminal.upserted,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateFiscalTerminalRequest' } } } },
+        responses: { '200': { description: Canonical terminal and issuance-point projection, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalTerminal' } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' }, '409': { $ref: '#/components/responses/Conflict' } },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/terminals/{terminalId}:
+    patch:
+      {
+        operationId: setFiscalTerminalActive,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-issuance-points:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: desired-state boolean,
+        x-concurrency: default terminal cannot be disabled,
+        x-audit-event: fiscal-terminal.status-changed,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SetActiveRequest' } } } },
+        responses:
+          {
+            '200': { description: Canonical terminal, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalTerminal' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/issuance-points/default:
+    get:
+      {
+        operationId: getDefaultIssuancePoint,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-issuance-points:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: current active default,
+        x-audit-event: HTTP audit interceptor,
+        responses: { '200': { description: Effective point; null when no active default exists, content: { application/json: { schema: { $ref: '#/components/schemas/IssuancePoint', nullable: true } } } }, '403': { $ref: '#/components/responses/Forbidden' }, '404': { $ref: '#/components/responses/NotFound' } },
+      }
+    put:
+      {
+        operationId: selectDefaultIssuancePoint,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-issuance-points:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: selecting the current point is safe,
+        x-concurrency: SERIALIZABLE plus partial unique active-default index,
+        x-audit-event: fiscal-issuance-point.default-selected,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SelectDefaultIssuancePointRequest' } } } },
+        responses:
+          {
+            '200': { description: Effective point, content: { application/json: { schema: { $ref: '#/components/schemas/IssuancePoint' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/terminals/{terminalId}/sequences/{documentType}/initial:
+    put:
+      {
+        operationId: configureInitialSequence,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-sequences:write',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: same initial value replays; different value or any used sequence is 409,
+        x-concurrency: create-only unique sequence scope; first writer wins,
+        x-audit-event: fiscal-sequence.initialized,
+        requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ConfigureInitialSequenceRequest' } } } },
+        responses:
+          {
+            '200': { description: Safe sequence state as strings, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalSequence' } } } },
+            '409': { $ref: '#/components/responses/Conflict' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/terminals/{terminalId}/sequences/{documentType}:
+    get:
+      {
+        operationId: getFiscalSequence,
+        security: [{ apiKey: [] }],
+        x-classification: EXTENDED,
+        x-required-scope: 'fiscal-sequences:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only,
+        x-concurrency: canonical read,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200': { description: nextValue and lastAssigned as decimal strings, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalSequence' } } } },
+            '404': { $ref: '#/components/responses/NotFound' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/readiness:
+    get:
+      {
+        operationId: getFiscalReadinessV1,
+        security: [{ apiKey: [] }],
+        x-classification: NEW,
+        x-required-scope: 'fiscal-readiness:read',
+        x-binding: tenant/company/environment/profile,
+        x-idempotency: read-only and non-cached authorization,
+        x-concurrency: point-in-time result; issuance repeats authoritative checks,
+        x-audit-event: HTTP audit interceptor,
+        responses:
+          {
+            '200':
+              {
+                description: Multidimensional issuer readiness,
+                content:
+                  { application/json: { schema: { $ref: '#/components/schemas/Readiness' } } },
+              },
+            '403': { $ref: '#/components/responses/Forbidden' },
+          },
+      }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/test-invoices:
+    post:
+      operationId: initiateFiscalTestInvoiceV1
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-required-scope: 'invoices:write + invoices:read'
+      x-binding: tenant/company/SANDBOX/TEST-key/inventori-fiscal-v1
+      x-idempotency: UUID Idempotency-Key maps to one prefixed fiscal document; same payload replays and different payload conflicts
+      x-concurrency: PostgreSQL advisory transaction lock plus fiscal idempotency and submission singleton
+      x-audit-event: fiscal-test-invoice.requested
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/FiscalTestInvoiceRequest' } } }
+      responses:
+        '202': { description: Accepted for the existing SANDBOX fiscal pipeline; not Hacienda acceptance, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalTestInvoiceStatus' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /companies/{companyId}/fiscal-onboarding/v1/{environment}/test-invoices/{executionId}:
+    get:
+      operationId: getFiscalTestInvoiceStatusV1
+      security: [{ apiKey: [] }]
+      x-classification: NEW
+      x-required-scope: 'invoices:write + invoices:read'
+      x-binding: tenant/company/SANDBOX/TEST-key/inventori-fiscal-v1/test-execution
+      x-idempotency: read-only
+      x-concurrency: canonical point-in-time read of immutable document identity and current lifecycle state
+      x-audit-event: HTTP audit interceptor
+      parameters:
+        - { name: executionId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Safe consolidated document, submission, artifact and delivery status, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalTestInvoiceStatus' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    apiKey: { type: apiKey, in: header, name: X-API-Key }
+  parameters:
+    CompanyId: { name: companyId, in: path, required: true, schema: { type: string, format: uuid } }
+    Environment:
+      {
+        name: environment,
+        in: path,
+        required: true,
+        schema: { type: string, enum: [SANDBOX, PRODUCTION] },
+      }
+  requestBodies:
+    Certificate:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [certificate, pin]
+            properties:
+              certificate: { type: string, format: binary, maxLength: 1048576 }
+              pin: { type: string, format: password, writeOnly: true }
+  responses:
+    Unauthorized:
+      {
+        description: Missing, invalid, expired or revoked API key,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+      }
+    BadRequest:
+      {
+        description: Safe validation error,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+      }
+    Forbidden:
+      {
+        description: Scope/profile/company/environment denial before mutation,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+      }
+    NotFound:
+      {
+        description: Non-enumerating missing resource,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+      }
+    Conflict:
+      {
+        description: Identity lock,
+        idempotency or concurrency conflict,
+        content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } },
+      }
+  schemas:
+    Error:
+      type: object
+      required: [statusCode, code]
+      properties:
+        statusCode: { type: integer, enum: [400, 401, 403, 404, 409, 422, 503, 500] }
+        code:
+          type: string
+          enum:
+            [API_KEY_INVALID, API_KEY_EXPIRED, API_KEY_REVOKED, API_KEY_COMPANY_NOT_AUTHORIZED, API_KEY_ENVIRONMENT_NOT_AUTHORIZED, INSUFFICIENT_SCOPE, INTEGRATION_PROFILE_NOT_AUTHORIZED, BOOTSTRAP_PROFILE_NOT_AUTHORIZED, TENANT_ADMIN_REQUIRED, COMPANY_NOT_FOUND, FISCAL_ASSOCIATION_NOT_FOUND, FISCAL_ASSOCIATION_PAYLOAD_CONFLICT, ASSOCIATION_CONCURRENT_CONFLICT, ISSUER_IDENTITY_LOCKED, COMPANY_FISCAL_PROFILE_NOT_FOUND, FISCAL_PROFILE_NOT_FOUND, INVALID_PROVEEDOR_SISTEMAS, ECONOMIC_ACTIVITY_NOT_FOUND, DEFAULT_ACTIVITY_INVALID, TAXPAYER_NOT_FOUND, TAXPAYER_IDENTITY_MISMATCH, TAXPAYER_LOOKUP_UNAVAILABLE, HACIENDA_CONNECTION_NOT_FOUND, HACIENDA_CONNECTION_DISABLED, HACIENDA_CONNECTION_INSUFFICIENT_CREDENTIALS, HACIENDA_CONNECTION_CONCURRENT_CONFLICT, FISCAL_CERTIFICATE_FILE_REQUIRED, FISCAL_CERTIFICATE_PIN_REQUIRED, FISCAL_CERTIFICATE_NOT_FOUND, FISCAL_BRANCH_NOT_FOUND, FISCAL_TERMINAL_NOT_FOUND, FISCAL_TERMINAL_NOT_ELIGIBLE, DEFAULT_ISSUANCE_POINT_ACTIVE, DEFAULT_ISSUANCE_POINT_CONCURRENT_CONFLICT, INVALID_SEQUENCE_VALUE, FISCAL_SEQUENCE_NOT_FOUND, FISCAL_SEQUENCE_ALREADY_STARTED, FISCAL_SEQUENCE_INITIAL_VALUE_CONFLICT, SEQUENCE_INITIALIZATION_CONFLICT, FISCAL_TEST_INVOICE_PRODUCTION_FORBIDDEN, FISCAL_TEST_IDEMPOTENCY_KEY_INVALID, FISCAL_TEST_INVOICE_NOT_FOUND]
+        message: { type: string }
+    ProvisionFiscalIssuer:
+      type: object
+      required: [externalCompanyKey, legalName, identificationType, identificationNumber]
+      properties:
+        externalCompanyKey: { type: string, pattern: '^[A-Za-z0-9:_-]{8,128}$' }
+        companyId: { type: string, format: uuid }
+        legalName: { type: string, maxLength: 255 }
+        tradeName: { type: string, maxLength: 255 }
+        identificationType: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificationNumber: { type: string, maxLength: 20 }
+    BootstrapFiscalIssuer:
+      type: object
+      additionalProperties: false
+      required: [externalCompanyKey, legalName, identificationType, identificationNumber, environment]
+      properties:
+        externalCompanyKey: { type: string, pattern: '^[A-Za-z0-9:_-]{8,128}$' }
+        existingCompanyId: { type: string, format: uuid }
+        legalName: { type: string, minLength: 2, maxLength: 255 }
+        tradeName: { type: string, minLength: 1, maxLength: 255 }
+        identificationType: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificationNumber: { type: string, minLength: 9, maxLength: 20 }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+    BootstrapFiscalIssuerResponse:
+      type: object
+      additionalProperties: false
+      required: [association, credential]
+      properties:
+        association: { $ref: '#/components/schemas/Association' }
+        credential:
+          type: object
+          additionalProperties: false
+          required: [apiKeyId, keyPrefix, secret, environment, profileVersion, returnedOnce]
+          properties:
+            apiKeyId: { type: string, format: uuid }
+            keyPrefix: { type: string }
+            secret: { type: string, writeOnly: true }
+            environment: { type: string, enum: [TEST, LIVE] }
+            profileVersion: { type: string, enum: [inventori-fiscal-v1] }
+            returnedOnce: { type: boolean, enum: [true] }
+    Association:
+      type: object
+      required: [associationId, externalCompanyKey, profileVersion, company]
+      properties:
+        associationId: { type: string, format: uuid }
+        externalCompanyKey: { type: string }
+        profileVersion: { type: string, enum: [inventori-fiscal-v1] }
+        company: { $ref: '#/components/schemas/Issuer' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    IssuerUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        legalName: { type: string, minLength: 2, maxLength: 255 }
+        tradeName: { type: string, minLength: 1, maxLength: 255 }
+        identificationType: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificationNumber: { type: string, minLength: 9, maxLength: 20 }
+    FiscalProfile:
+      type: object
+      required: [economicActivityCode, province, canton, district, otrasSenas, email]
+      properties:
+        economicActivityCode: { type: string, minLength: 1, maxLength: 20 }
+        proveedorSistemas: { type: string, minLength: 1, maxLength: 20 }
+        province: { type: string, pattern: '^\d$' }
+        canton: { type: string, pattern: '^\d{2}$' }
+        district: { type: string, pattern: '^\d{2}$' }
+        barrio: { type: string, minLength: 1, maxLength: 50 }
+        otrasSenas: { type: string, minLength: 5, maxLength: 250 }
+        email: { type: string, format: email, minLength: 3, maxLength: 160 }
+        phoneCountryCode: { type: string, pattern: '^\\d{1,3}$' }
+        phoneNumber: { type: string, pattern: '^\\d{4,20}$' }
+    Readiness:
+      type: object
+      required:
+        [
+          contractVersion,
+          profileVersion,
+          companyId,
+          environment,
+          status,
+          readyToIssue,
+          checkedAt,
+          blockers,
+          warnings,
+          dimensions,
+        ]
+      properties:
+        contractVersion: { type: string, enum: ['1.0'] }
+        profileVersion: { type: string, enum: [inventori-fiscal-v1] }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, enum: [READY, NOT_READY, UNKNOWN] }
+        readyToIssue: { type: boolean }
+        checkedAt: { type: string, format: date-time }
+        blockers: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        dimensions:
+          type: object
+          required:
+            [issuer, profile, activity, hacienda, certificate, issuancePoint, sequence, operational]
+          additionalProperties: { $ref: '#/components/schemas/ReadinessDimension' }
+    ReadinessDimension:
+      type: object
+      required: [state, blockers, metadata]
+      properties:
+        state: { type: string, enum: [READY, NOT_READY, WARNING, UNKNOWN] }
+        blockers: { type: array, items: { type: string } }
+        metadata: { $ref: '#/components/schemas/ReadinessMetadata' }
+    Issuer:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, legalName, tradeName, identificationType, identificationNumber, status, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        legalName: { type: string }
+        tradeName: { type: string, nullable: true }
+        identificationType: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificationNumber: { type: string }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        updatedAt: { type: string, format: date-time }
+    FiscalProfileResponse:
+      allOf:
+        - $ref: '#/components/schemas/FiscalProfile'
+        - type: object
+          additionalProperties: false
+          required: [id, tenantId, companyId, createdAt, updatedAt]
+          properties:
+            id: { type: string, format: uuid }
+            tenantId: { type: string, format: uuid }
+            companyId: { type: string, format: uuid }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    EconomicActivity:
+      type: object
+      additionalProperties: false
+      required: [id, code, description, haciendaStatus, haciendaKind, billingEnabled, verifiedAt, lastSeenAt, verificationSource]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        description: { type: string }
+        haciendaStatus: { type: string, enum: [A, I] }
+        haciendaKind: { type: string, nullable: true }
+        billingEnabled: { type: boolean }
+        verifiedAt: { type: string, format: date-time }
+        lastSeenAt: { type: string, format: date-time }
+        verificationSource: { type: string, enum: [HACIENDA_FE_AE] }
+    TaxpayerVerification:
+      type: object
+      additionalProperties: false
+      required: [companyId, haciendaName, haciendaVerificationStatus, haciendaVerifiedAt, haciendaTaxSituation, moroso, omiso, activities, autoSelectedDefaultActivityId]
+      properties:
+        companyId: { type: string, format: uuid }
+        haciendaName: { type: string }
+        haciendaVerificationStatus: { type: string, enum: [VERIFIED] }
+        haciendaVerifiedAt: { type: string, format: date-time }
+        haciendaTaxSituation: { type: string, nullable: true }
+        moroso: { type: boolean }
+        omiso: { type: boolean }
+        activities: { type: array, items: { $ref: '#/components/schemas/EconomicActivity' } }
+        autoSelectedDefaultActivityId: { type: string, format: uuid, nullable: true }
+    HaciendaCredentialsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        username: { type: string, minLength: 1, maxLength: 100, writeOnly: true }
+        password: { type: string, minLength: 1, maxLength: 200, format: password, writeOnly: true }
+    DisableHaciendaConnectionRequest:
+      type: object
+      additionalProperties: false
+      maxProperties: 0
+    HaciendaConnection:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, companyId, environment, status, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, enum: [NOT_CONFIGURED, CONFIGURED, CONNECTED, INVALID_CREDENTIALS, UNAVAILABLE, DISABLED] }
+        lastValidatedAt: { type: string, format: date-time, nullable: true }
+        lastSuccessfulAuthAt: { type: string, format: date-time, nullable: true }
+        lastValidationErrorCode: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CertificateMetadata:
+      type: object
+      additionalProperties: false
+      required: [id, companyId, environment, status, fingerprintSha256, serialNumber, subjectName, issuerName, validFrom, validTo, extractedIdentityNumber, extractedIdentityType, activeFrom, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, enum: [ACTIVE, INACTIVE, REVOKED, EXPIRED] }
+        fingerprintSha256: { type: string, nullable: true }
+        serialNumber: { type: string, nullable: true }
+        subjectName: { type: string, nullable: true }
+        issuerName: { type: string, nullable: true }
+        validFrom: { type: string, format: date-time, nullable: true }
+        validTo: { type: string, format: date-time, nullable: true }
+        extractedIdentityNumber: { type: string, nullable: true }
+        extractedIdentityType: { type: string, nullable: true }
+        activeFrom: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    CreateFiscalBranchRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string, pattern: '^\\d{3}$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+    SetDefaultActivityRequest:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties: { code: { type: string, minLength: 1, maxLength: 20 } }
+    FiscalBranch:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, companyId, environment, code, name, active]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        code: { type: string, pattern: '^\\d{3}$' }
+        name: { type: string }
+        active: { type: boolean }
+        terminals: { type: array, items: { $ref: '#/components/schemas/FiscalTerminal' } }
+    CreateFiscalTerminalRequest:
+      type: object
+      additionalProperties: false
+      required: [code, name]
+      properties:
+        code: { type: string, pattern: '^\\d{5}$' }
+        name: { type: string, minLength: 1, maxLength: 120 }
+    FiscalTerminal:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, companyId, branchId, environment, code, name, active]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        branchId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        code: { type: string, pattern: '^\\d{5}$' }
+        name: { type: string }
+        active: { type: boolean }
+    SetActiveRequest:
+      type: object
+      additionalProperties: false
+      required: [active]
+      properties: { active: { type: boolean } }
+    SelectDefaultIssuancePointRequest:
+      type: object
+      additionalProperties: false
+      required: [terminalId]
+      properties: { terminalId: { type: string, format: uuid } }
+    IssuancePoint:
+      type: object
+      additionalProperties: false
+      required: [id, environment, branchCode, terminalCode, branchId, terminalId, name, active, isDefault]
+      properties:
+        id: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        branchCode: { type: string, pattern: '^\\d{3}$' }
+        terminalCode: { type: string, pattern: '^\\d{5}$' }
+        branchId: { type: string, format: uuid }
+        terminalId: { type: string, format: uuid }
+        name: { type: string }
+        active: { type: boolean }
+        isDefault: { type: boolean }
+    ConfigureInitialSequenceRequest:
+      type: object
+      additionalProperties: false
+      required: [nextValue]
+      properties: { nextValue: { type: integer, minimum: 1, maximum: 9999999999 } }
+    FiscalSequence:
+      type: object
+      additionalProperties: false
+      required: [id, tenantId, companyId, environment, branchCode, terminalCode, documentType, nextValue, lastAssigned]
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        branchCode: { type: string, pattern: '^\\d{3}$' }
+        terminalCode: { type: string, pattern: '^\\d{5}$' }
+        documentType: { type: string, enum: [INVOICE, TICKET] }
+        nextValue: { type: string, pattern: '^\\d+$' }
+        lastAssigned: { type: string, pattern: '^\\d+$', nullable: true }
+    ReadinessMetadata:
+      type: object
+      additionalProperties: false
+      properties:
+        companyActive: { type: boolean }
+        verificationStatus: { type: string, nullable: true }
+        configured: { type: boolean }
+        count: { type: integer }
+        defaultActivityId: { type: string, format: uuid, nullable: true }
+        status: { type: string }
+        lastValidatedAt: { type: string, format: date-time, nullable: true }
+        id: { type: string, format: uuid }
+        fingerprintSha256: { type: string }
+        validFrom: { type: string, format: date-time }
+        validTo: { type: string, format: date-time }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        branchCode: { type: string }
+        terminalCode: { type: string }
+        branchId: { type: string, format: uuid }
+        terminalId: { type: string, format: uuid }
+        name: { type: string }
+        active: { type: boolean }
+        isDefault: { type: boolean }
+        configuredTypes: { type: integer }
+        automaticInitialization: { type: boolean }
+        database: { type: string, enum: [AVAILABLE] }
+    FiscalTestInvoiceRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, confirmation, currency, saleCondition, lines]
+      properties:
+        mode: { type: string, enum: [HACIENDA_SANDBOX_SUBMISSION] }
+        confirmation: { type: string, enum: [CONSUME_SANDBOX_CONSECUTIVE] }
+        receiver: { type: object, additionalProperties: true }
+        currency: { type: string, enum: [CRC, USD] }
+        exchangeRate: { type: string, pattern: '^\\d+(\\.\\d{1,5})?$' }
+        saleCondition: { type: string, pattern: '^\\d{2}$' }
+        creditTermDays: { type: integer, minimum: 1, maximum: 99999 }
+        paymentMethod: { type: string, pattern: '^\\d{2}$' }
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [lineNumber, cabysCode, description, unitMeasure, quantity, unitPrice]
+            properties:
+              lineNumber: { type: integer, minimum: 1 }
+              cabysCode: { type: string, pattern: '^\\d{13}$' }
+              description: { type: string, minLength: 1 }
+              unitMeasure: { type: string, minLength: 1 }
+              quantity: { type: string }
+              unitPrice: { type: string }
+              taxAmount: { type: string }
+              taxCode: { type: string }
+              taxRateCode: { type: string }
+              taxRate: { type: string }
+    FiscalTestInvoiceStatus:
+      type: object
+      additionalProperties: false
+      required: [contractVersion, profileVersion, executionId, documentId, environment, mode, disclosure, document, submission, xmlProcessing, artifacts, deliveries]
+      properties:
+        contractVersion: { type: string, enum: ['1.0'] }
+        profileVersion: { type: string, enum: [inventori-fiscal-v1] }
+        executionId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX] }
+        mode: { type: string, enum: [HACIENDA_SANDBOX_SUBMISSION] }
+        disclosure:
+          type: object
+          required: [consumesSandboxConsecutive, billingRequestAcceptedIsNotHaciendaAcceptance]
+          properties:
+            consumesSandboxConsecutive: { type: boolean, enum: [true] }
+            billingRequestAcceptedIsNotHaciendaAcceptance: { type: boolean, enum: [true] }
+        document: { type: object, additionalProperties: true }
+        submission: { type: object, nullable: true, additionalProperties: true }
+        xmlProcessing:
+          type: object
+          additionalProperties: false
+          required: [generatedXmlAvailable, signedXmlAvailable, unsignedXmlSha256, signedXmlSha256, validationStatus, signedAt, signatureVerifiedAt]
+          properties:
+            generatedXmlAvailable: { type: boolean }
+            signedXmlAvailable: { type: boolean }
+            unsignedXmlSha256: { type: string, nullable: true }
+            signedXmlSha256: { type: string, nullable: true }
+            validationStatus: { type: string }
+            signedAt: { type: string, format: date-time, nullable: true }
+            signatureVerifiedAt: { type: string, format: date-time, nullable: true }
+        artifacts: { type: array, items: { type: object, additionalProperties: true } }
+        deliveries: { type: array, items: { type: object, additionalProperties: true } }

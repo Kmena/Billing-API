@@ -5,12 +5,14 @@ import * as argon2 from 'argon2';
 import * as crypto from 'crypto';
 import { ApiKey, ApiKeyEnvironment } from '../../../domain/entities/api-key.entity';
 import { IApiKeyRepository, API_KEY_REPOSITORY } from '../../../domain/ports/api-key.repository';
+import { scopesForIntegrationProfile } from '../../../../fiscal-onboarding/domain/inventori-fiscal-profile';
 
 export interface CreateApiKeyCommand {
   readonly tenantId: string;
   readonly name: string;
   readonly environment: ApiKeyEnvironment;
   readonly scopes: string[];
+  readonly integrationProfile?: string;
   readonly expiresAt?: Date;
 }
 
@@ -23,6 +25,7 @@ export interface CreateApiKeyResult {
   // BR-001: secret is returned ONLY in the 201 response — never again
   readonly secret: string;
   readonly scopes: string[];
+  readonly integrationProfile?: string;
   readonly status: string;
   readonly expiresAt?: Date;
   readonly createdAt: Date;
@@ -53,8 +56,11 @@ export class CreateApiKeyHandler {
   ) {}
 
   async execute(command: CreateApiKeyCommand): Promise<CreateApiKeyResult> {
+    const scopes = command.integrationProfile
+      ? scopesForIntegrationProfile(command.integrationProfile)
+      : command.scopes;
     // FR-012: Validate requested scopes against allowed list
-    validateApiKeyScopes(command.scopes);
+    validateApiKeyScopes(scopes);
 
     const { prefix, fullKey } = generateApiKeyComponents(command.environment);
 
@@ -68,8 +74,9 @@ export class CreateApiKeyHandler {
       command.environment,
       prefix,
       keyHash,
-      command.scopes,
+      scopes,
       command.expiresAt,
+      command.integrationProfile,
     );
 
     await this.apiKeyRepository.save(apiKey);
@@ -82,6 +89,7 @@ export class CreateApiKeyHandler {
       keyPrefix: apiKey.keyPrefix,
       secret: fullKey, // BR-001: shown ONCE in 201 response — stored as hash only
       scopes: apiKey.scopes,
+      integrationProfile: apiKey.integrationProfile,
       status: apiKey.status,
       expiresAt: apiKey.expiresAt,
       createdAt: apiKey.createdAt,

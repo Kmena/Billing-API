@@ -66,9 +66,9 @@ describe('ScopeGuard', () => {
 
     it('enforces the exact AFPR resend scope', () => {
       const guard = new ScopeGuard(makeReflector(['fiscal-deliveries:resend']));
-      expect(
-        guard.canActivate(makeMockContext({ scopes: ['fiscal-deliveries:resend'] })),
-      ).toBe(true);
+      expect(guard.canActivate(makeMockContext({ scopes: ['fiscal-deliveries:resend'] }))).toBe(
+        true,
+      );
       expect(() =>
         guard.canActivate(makeMockContext({ scopes: ['fiscal-deliveries:read'] })),
       ).toThrow(ForbiddenException);

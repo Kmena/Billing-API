@@ -31,6 +31,7 @@ import {
   FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
   fiscalPayloadInputFromCommand,
 } from './fiscal-payload-equivalence';
+import { FiscalIssuanceEligibilityService } from './fiscal-xml/fiscal-issuance-eligibility.service';
 
 export interface AuthenticatedUser {
   readonly userId: string;
@@ -81,6 +82,7 @@ export class FiscalDocumentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly issuanceEligibility?: FiscalIssuanceEligibilityService,
   ) {}
 
   async ensureDefaultIssuancePoint(input: {
@@ -271,12 +273,37 @@ export class FiscalDocumentService {
       });
       if ('response' in idempotency) return idempotency.response;
 
+      // Perform the shared read-only predicate before allocation. A production
+      // module always injects it; the fallback keeps isolated legacy tests valid.
+      let eligibleConnection:
+        { readonly connectionId: string; readonly secretReference: string } | undefined;
+      if (this.issuanceEligibility) {
+        const eligibility = await this.issuanceEligibility.haciendaEligibility({
+          tenantId: command.tenantId,
+          companyId: command.companyId,
+          environment: command.environment,
+        });
+        if (!eligibility.eligible) {
+          throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
+        }
+        eligibleConnection = eligibility;
+      }
+
+      // Recheck the exact validated connection/reference in the allocation
+      // transaction. A concurrent rotation or revocation must restart readiness
+      // rather than allocate against credential state that was never validated.
       const haciendaConnection = await tx.haciendaConnection.findFirst({
         where: {
           tenantId: command.tenantId,
           companyId: command.companyId,
           environment: command.environment,
-          NOT: { status: 'DISABLED' },
+          status: 'CONNECTED',
+          ...(eligibleConnection
+            ? {
+                id: eligibleConnection.connectionId,
+                secretReference: eligibleConnection.secretReference,
+              }
+            : {}),
         },
       });
       if (!haciendaConnection)
@@ -290,6 +317,7 @@ export class FiscalDocumentService {
           active: true,
           isDefault: true,
         },
+        orderBy: { id: 'asc' },
       });
       if (!point) throw new BadRequestException({ code: 'FISCAL_ISSUANCE_POINT_REQUIRED' });
 
@@ -408,10 +436,9 @@ export class FiscalDocumentService {
   ): Promise<{ id: string } | { response: Record<string, unknown> }> {
     const existing = await tx.fiscalIdempotencyKey.findUnique({
       where: {
-        tenantId_companyId_apiKeyId_operation_key: {
+        tenantId_companyId_operation_key: {
           tenantId: input.tenantId,
           companyId: input.companyId,
-          apiKeyId: input.apiKeyId,
           operation: input.operation,
           key: input.key,
         },
@@ -428,7 +455,7 @@ export class FiscalDocumentService {
         ${input.key}, ${input.apiKeyId}::uuid, ${input.operation}, ${input.requestHash},
         'IN_PROGRESS'::"FiscalIdempotencyStatus", NOW(), NOW()
       )
-      ON CONFLICT ("tenant_id", "company_id", "api_key_id", "operation", "key")
+      ON CONFLICT ("tenant_id", "company_id", "operation", "key")
       DO NOTHING
       RETURNING "id"
     `;
@@ -436,10 +463,9 @@ export class FiscalDocumentService {
 
     const raced = await tx.fiscalIdempotencyKey.findUnique({
       where: {
-        tenantId_companyId_apiKeyId_operation_key: {
+        tenantId_companyId_operation_key: {
           tenantId: input.tenantId,
           companyId: input.companyId,
-          apiKeyId: input.apiKeyId,
           operation: input.operation,
           key: input.key,
         },
@@ -624,7 +650,10 @@ export class FiscalDocumentService {
     if (!/^[a-fA-F0-9]{64}$/.test(evidence.hash)) {
       throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
     }
-    if (canonicalFiscalPayloadHash(fiscalPayloadInputFromCommand(command)) !== evidence.hash.toLowerCase()) {
+    if (
+      canonicalFiscalPayloadHash(fiscalPayloadInputFromCommand(command)) !==
+      evidence.hash.toLowerCase()
+    ) {
       throw new BadRequestException({ code: 'FISCAL_PAYLOAD_HASH_INVALID' });
     }
   }

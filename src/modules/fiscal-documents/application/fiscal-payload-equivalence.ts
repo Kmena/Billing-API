@@ -1,6 +1,9 @@
 import { createHash } from 'crypto';
 import { ScaledDecimal } from '../domain/scaled-decimal';
-import type { CreateFiscalDocumentCommand, FiscalDocumentLineInput } from './fiscal-document.service';
+import type {
+  CreateFiscalDocumentCommand,
+  FiscalDocumentLineInput,
+} from './fiscal-document.service';
 
 export const FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION = 'fiscal-payload-equivalence.v1' as const;
 
@@ -14,7 +17,8 @@ export interface FiscalPayloadEquivalenceInput {
   readonly lines: readonly FiscalDocumentLineInput[];
 }
 
-type CanonicalJson = null | boolean | number | string | CanonicalJson[] | { [key: string]: CanonicalJson };
+type CanonicalJson =
+  null | boolean | number | string | CanonicalJson[] | { [key: string]: CanonicalJson };
 
 /**
  * Independent versioned fiscal-payload evidence. Its SHA-256 is deliberately
@@ -88,7 +92,8 @@ export function fiscalPayloadInputFromStoredDocument(document: {
 }
 
 export function stableStringify(value: CanonicalJson): string {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number') return JSON.stringify(value);
+  if (value === null || typeof value === 'boolean' || typeof value === 'number')
+    return JSON.stringify(value);
   if (typeof value === 'string') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
   return `{${Object.keys(value)
@@ -124,7 +129,8 @@ function normalizeJsonValue(value: unknown, path: string): CanonicalJson {
     if (!Number.isFinite(value)) throw new Error(`${path} must be finite`);
     return value;
   }
-  if (Array.isArray(value)) return value.map((item, index) => normalizeJsonValue(item, `${path}[${index}]`));
+  if (Array.isArray(value))
+    return value.map((item, index) => normalizeJsonValue(item, `${path}[${index}]`));
   if (typeof value !== 'object') throw new Error(`${path} is not JSON-compatible`);
 
   return Object.fromEntries(

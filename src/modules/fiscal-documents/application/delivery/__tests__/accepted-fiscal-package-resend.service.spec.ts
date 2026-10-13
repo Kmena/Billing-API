@@ -106,7 +106,10 @@ describe('AcceptedFiscalPackageResendService', () => {
     expect(ctx.queue.publish).toHaveBeenCalledWith(
       'fiscal-document-delivery',
       { deliveryId: 'delivery-id' },
-      { retryLimit: 3 },
+      expect.objectContaining({
+        retryLimit: 3,
+        singletonKey: 'fiscal-delivery:delivery-id',
+      }),
     );
     expect(ctx.evidence.resolveSignedXmlBytes).toHaveBeenCalledWith(
       IDS.tenant,

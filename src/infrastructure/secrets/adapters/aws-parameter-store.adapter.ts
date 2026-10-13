@@ -11,6 +11,7 @@ import { SecretProvider } from '../ports/secret-provider.port';
 @Injectable()
 export class AwsParameterStoreSecretProvider implements SecretProvider {
   readonly isDurable = true;
+  readonly providerId = 'aws-ssm';
 
   private readonly client: SSMClient;
   private readonly parameterPrefix: string;

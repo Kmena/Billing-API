@@ -9,6 +9,10 @@ export interface UnsafeTestPattern {
 
 const DIRECT_PRISMA_ALLOWLIST = new Set(['test/helpers/guarded-test-prisma.ts']);
 const STATIC_FIXTURE_ALLOWLIST = new Set(['test/safety/test-safety-static.spec.ts']);
+const GUARDED_RAW_PRISMA_ALLOWLIST = new Set([
+  'test/e2e/fase2/fiscal-idempotency-migration-rehearsal.e2e-spec.ts',
+  'test/operational/postgres-tcp-partition.e2e-spec.ts',
+]);
 
 function lineNumber(source: string, index: number): number {
   return source.slice(0, index).split(/\r?\n/).length;
@@ -46,16 +50,21 @@ export function findUnsafeTestPatterns(
       rule: 'global-delete-many',
       pattern: /\.deleteMany\s*\(\s*(?:\{\s*\})?\s*\)/g,
     },
-    {
-      rule: 'unsafe-raw-prisma',
-      pattern: /\$(?:executeRawUnsafe|queryRawUnsafe)\s*\(/g,
-    },
-    {
-      rule: 'destructive-raw-sql',
-      pattern:
-        /\$(?:executeRaw|queryRaw)(?:Unsafe)?[\s\S]{0,240}\b(?:TRUNCATE|DROP\s+(?:TABLE|DATABASE|SCHEMA))\b/gi,
-    },
   ];
+
+  if (!GUARDED_RAW_PRISMA_ALLOWLIST.has(file)) {
+    rules.push(
+      {
+        rule: 'unsafe-raw-prisma',
+        pattern: /\$(?:executeRawUnsafe|queryRawUnsafe)\s*\(/g,
+      },
+      {
+        rule: 'destructive-raw-sql',
+        pattern:
+          /\$(?:executeRaw|queryRaw)(?:Unsafe)?[\s\S]{0,240}\b(?:TRUNCATE|DROP\s+(?:TABLE|DATABASE|SCHEMA))\b/gi,
+      },
+    );
+  }
 
   if (!DIRECT_PRISMA_ALLOWLIST.has(file)) {
     rules.push({

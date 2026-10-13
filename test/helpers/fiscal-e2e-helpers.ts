@@ -33,6 +33,8 @@ export interface FiscalTenantFixture {
   readonly companyIdentification: string;
 }
 
+const FISCAL_E2E_HACIENDA_SECRET_REFERENCE = 'FISCAL_E2E_HACIENDA_SECRET';
+
 export interface FiscalApiKeyFixture {
   readonly id: string;
   readonly secret: string;
@@ -40,6 +42,8 @@ export interface FiscalApiKeyFixture {
 }
 
 export async function createFiscalE2eApp(): Promise<FiscalE2eContext> {
+  // A disposable sentinel exists only for eligibility checks; no real credential is used.
+  process.env[FISCAL_E2E_HACIENDA_SECRET_REFERENCE] ??= 'disposable-test-sentinel';
   installGuardedTestDatabaseEnvironment();
   const { prisma } = await createGuardedTestPrisma();
   const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -68,19 +72,40 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
   const ownedTenantIds = await assertOwnedTestTenants(prisma, tenantIds);
   const tenantScope = { tenantId: { in: [...ownedTenantIds] } };
 
-  await prisma.deliveryAttempt.deleteMany({ where: { delivery: tenantScope } });
-  await prisma.documentDelivery.deleteMany({ where: tenantScope });
-  await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
-  await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
-  await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
+  // READY_TO_SUBMIT intentionally launches INITIAL_DOCUMENT preparation in a
+  // setImmediate hook. Under a loaded parallel E2E run that hook can commit a
+  // dependent artifact/delivery between the first child cleanup and the parent
+  // document delete. Retry only that FK window; once the parent is gone, the
+  // production hook fails closed and cannot recreate fiscal state.
+  let fiscalDocumentsDeleted = false;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await prisma.deliveryAttempt.deleteMany({ where: { delivery: tenantScope } });
+    await prisma.documentDelivery.deleteMany({ where: tenantScope });
+    await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
+    await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
+    await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
+    await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
+    try {
+      await prisma.fiscalDocument.deleteMany({ where: tenantScope });
+      fiscalDocumentsDeleted = true;
+      break;
+    } catch (error: unknown) {
+      const isForeignKeyRace =
+        typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2003';
+      if (!isForeignKeyRace || attempt === 5) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  if (!fiscalDocumentsDeleted) throw new Error('Fiscal E2E document cleanup did not converge');
   await prisma.fiscalSigningCertificate.deleteMany({ where: tenantScope });
   await prisma.companyFiscalProfile.deleteMany({ where: tenantScope });
   await prisma.companyEconomicActivity.deleteMany({ where: tenantScope });
   await prisma.companyPdfSettings.deleteMany({ where: tenantScope });
-  await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
-  await prisma.fiscalDocument.deleteMany({ where: tenantScope });
   await prisma.fiscalSequence.deleteMany({ where: tenantScope });
   await prisma.fiscalIssuancePoint.deleteMany({ where: tenantScope });
+  await prisma.fiscalTerminal.deleteMany({ where: tenantScope });
+  await prisma.fiscalBranch.deleteMany({ where: tenantScope });
+  await prisma.fiscalIntegrationAssociation.deleteMany({ where: tenantScope });
   await prisma.haciendaConnection.deleteMany({ where: tenantScope });
   await prisma.auditLog.deleteMany({ where: tenantScope });
   await prisma.apiKeyCompany.deleteMany({ where: { apiKey: tenantScope } });
@@ -122,9 +147,11 @@ export async function createFiscalApiKey(
   tenantId: string,
   scopes: string[],
   status: 'ACTIVE' | 'REVOKED' = 'ACTIVE',
+  environment: 'TEST' | 'LIVE' = 'TEST',
+  integrationProfile?: string,
 ): Promise<FiscalApiKeyFixture> {
   const keyPrefix = randomBytes(4).toString('hex');
-  const secret = `bk_test_${keyPrefix}_${randomBytes(16).toString('hex')}`;
+  const secret = `bk_${environment.toLowerCase()}_${keyPrefix}_${randomBytes(16).toString('hex')}`;
   const keyHash = await argon2.hash(secret, { type: argon2.argon2id });
   const id = randomUUID();
 
@@ -133,10 +160,11 @@ export async function createFiscalApiKey(
       id,
       tenantId,
       name: `Fiscal E2E ${keyPrefix}`,
-      environment: 'TEST',
+      environment,
       keyPrefix,
       keyHash,
       scopes,
+      integrationProfile,
       status,
       revokedAt: status === 'REVOKED' ? new Date() : undefined,
     },
@@ -167,7 +195,7 @@ export async function createEnabledHaciendaConnection(
       companyId,
       environment,
       status,
-      secretReference: `test-secret-${randomUUID()}`,
+      secretReference: FISCAL_E2E_HACIENDA_SECRET_REFERENCE,
     },
   });
 }

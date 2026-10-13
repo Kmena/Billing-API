@@ -126,8 +126,10 @@ export class FiscalIdentityEvidenceLookupService {
         },
       },
     });
-    if (reservations.length === 0) throw new NotFoundException({ code: 'FISCAL_IDENTITY_NOT_FOUND' });
-    if (reservations.length !== 1) throw new ConflictException({ code: 'FISCAL_IDENTITY_AMBIGUOUS' });
+    if (reservations.length === 0)
+      throw new NotFoundException({ code: 'FISCAL_IDENTITY_NOT_FOUND' });
+    if (reservations.length !== 1)
+      throw new ConflictException({ code: 'FISCAL_IDENTITY_AMBIGUOUS' });
 
     const reservation = reservations[0];
     const document = reservation.fiscalDocument;
@@ -149,7 +151,9 @@ export class FiscalIdentityEvidenceLookupService {
 
     let historicalEvidenceHash: string;
     try {
-      historicalEvidenceHash = canonicalFiscalPayloadHash(fiscalPayloadInputFromStoredDocument(document));
+      historicalEvidenceHash = canonicalFiscalPayloadHash(
+        fiscalPayloadInputFromStoredDocument(document),
+      );
     } catch {
       throw new ConflictException({ code: 'FISCAL_IDENTITY_EVIDENCE_INTEGRITY_ERROR' });
     }

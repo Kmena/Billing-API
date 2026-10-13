@@ -21,6 +21,7 @@ export type DeliveryErrorClass =
   | 'PDF_NOT_YET_GENERATED'
   | 'CONFIG_CREDENTIAL_ERROR'
   | 'UNKNOWN_PROVIDER_RESPONSE'
+  | 'UNKNOWN_EXTERNAL_OUTCOME'
   | 'WORKER_CRASH_STALE_SENDING'
   | 'DUPLICATE_TRIGGER'
   | 'MANUAL_RESEND_AFTER_DELIVERED'
@@ -182,7 +183,18 @@ export class DeliveryRetryClassifier {
       return this.classifyTransient(retryCount, maxRetries);
     }
 
-    // Unknown provider response: limited bounded retry, escalate to MRR
+    // SMTP acceptance can be unknowable after the transport call. There is no
+    // provider idempotency proof, so automatic replay could duplicate mail.
+    if (errorClass === 'UNKNOWN_EXTERNAL_OUTCOME') {
+      return {
+        nextStatus: DocumentDeliveryStatus.MANUAL_REVIEW_REQUIRED,
+        immediateRetry: false,
+        emitSecurityAudit: false,
+        reason: 'External delivery outcome is unknown — operator review required before resend.',
+      };
+    }
+
+    // Unknown pre-send provider response: limited bounded retry, escalate to MRR
     if (errorClass === 'UNKNOWN_PROVIDER_RESPONSE') {
       if (retryCount >= maxRetries) {
         return {

@@ -12,6 +12,8 @@ describe('configuration validation schema', () => {
     HACIENDA_IDP_CLIENT_ID_SANDBOX: 'api-stag',
     // F4: QR URL base is a required deployment prerequisite in production (R-001)
     HACIENDA_QR_URL_BASE: 'https://hacienda-ce.example.com/qr',
+    LOCAL_STORAGE_SECRET: 'production-storage-signing-secret-at-least-32-chars',
+    SECRET_PROVIDER: 'ssm',
   };
 
   it('rejects production without CORS_ALLOWED_ORIGINS (AC-001)', () => {
@@ -59,6 +61,68 @@ describe('configuration validation schema', () => {
     expect(result.value.CORS_ALLOWED_ORIGINS).toBe('https://app.example.com');
   });
 
+  it('rejects the development local-storage secret in production', () => {
+    const result = validationSchema.validate(
+      {
+        NODE_ENV: 'production',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_SECRET: validJwtSecret,
+        CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+        ...validProductionConfig,
+        LOCAL_STORAGE_SECRET: 'local-signing-secret-dev-only',
+      },
+      { abortEarly: false },
+    );
+
+    expect(result.error?.message).toContain('LOCAL_STORAGE_SECRET');
+  });
+
+  it('rejects the process environment secret provider in production', () => {
+    const result = validationSchema.validate(
+      {
+        NODE_ENV: 'production',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_SECRET: validJwtSecret,
+        CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+        ...validProductionConfig,
+        SECRET_PROVIDER: 'env',
+      },
+      { abortEarly: false },
+    );
+
+    expect(result.error?.message).toContain('SECRET_PROVIDER');
+  });
+
+  it('accepts the encrypted local provider only with explicit store and key paths', () => {
+    const valid = validationSchema.validate(
+      {
+        NODE_ENV: 'production',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_SECRET: validJwtSecret,
+        CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+        ...validProductionConfig,
+        SECRET_PROVIDER: 'local-encrypted',
+        LOCAL_SECRET_STORE_PATH: '/var/lib/billing-secrets',
+        LOCAL_SECRET_STORE_MASTER_KEY_PATH: '/run/secrets/billing-local-secret-store.key',
+      },
+      { abortEarly: false },
+    );
+    expect(valid.error).toBeUndefined();
+
+    const missingKey = validationSchema.validate(
+      {
+        NODE_ENV: 'production',
+        DATABASE_URL: validDatabaseUrl,
+        JWT_SECRET: validJwtSecret,
+        CORS_ALLOWED_ORIGINS: 'https://app.example.com',
+        ...validProductionConfig,
+        SECRET_PROVIDER: 'local-encrypted',
+        LOCAL_SECRET_STORE_PATH: '/var/lib/billing-secrets',
+      },
+      { abortEarly: false },
+    );
+    expect(missingKey.error?.message).toContain('LOCAL_SECRET_STORE_MASTER_KEY_PATH');
+  });
   it('defaults development CORS_ALLOWED_ORIGINS to wildcard when absent (AC-003)', () => {
     const result = validationSchema.validate(
       {

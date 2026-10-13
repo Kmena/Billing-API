@@ -71,7 +71,28 @@ export class AcceptedFiscalPackageResendService {
     const requestedAt = new Date();
     const delivery = await this.claimDelivery(command, packageData.recipient, requestedAt);
 
-    await this.jobQueue.publish(DELIVERY_JOB_NAME, { deliveryId: delivery.id }, { retryLimit: 3 });
+    try {
+      await this.jobQueue.publish(
+        DELIVERY_JOB_NAME,
+        { deliveryId: delivery.id },
+        {
+          retryLimit: 3,
+          retryDelay: 60,
+          singletonKey: `fiscal-delivery:${delivery.id}`,
+          singletonSeconds: 15 * 60,
+        },
+      );
+    } catch (error: unknown) {
+      await this.prisma.documentDelivery.updateMany({
+        where: { id: delivery.id, status: 'QUEUED' },
+        data: {
+          lastErrorCode: 'QUEUE_PUBLICATION_FAILED',
+          lastSanitizedError: String(error).substring(0, 500),
+          updatedAt: new Date(),
+        },
+      });
+      // The request remains durably queued; recovery owns later publication.
+    }
     this.auditService.record({
       tenantId: command.tenantId,
       companyId: command.companyId,

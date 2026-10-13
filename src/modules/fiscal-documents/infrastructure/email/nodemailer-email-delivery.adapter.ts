@@ -101,19 +101,36 @@ export class NodemailerEmailDeliveryAdapter implements EmailDeliveryPort {
 
     const err = error as Record<string, unknown>;
     const code = typeof err['code'] === 'string' ? err['code'] : undefined;
+    const command = typeof err['command'] === 'string' ? err['command'] : undefined;
     const responseCode = typeof err['responseCode'] === 'number' ? err['responseCode'] : undefined;
 
-    // Network/connection errors → transient
+    // DNS/refusal proves that no SMTP session was established, so retry is safe.
     if (
       code === 'ECONNREFUSED' ||
-      code === 'ETIMEDOUT' ||
       code === 'ENOTFOUND' ||
-      code === 'ECONNRESET'
+      code === 'EAI_AGAIN' ||
+      (code === 'ESOCKET' && command === 'CONN')
     ) {
       return {
         outcome: 'TRANSIENT_FAILURE',
-        sanitizedErrorCode: `SMTP_NETWORK_${code ?? 'ERROR'}`,
+        sanitizedErrorCode: `SMTP_NETWORK_${code}`,
         sanitizedErrorMessage: 'Network error connecting to SMTP server.',
+      };
+    }
+
+    // A timeout/reset after a session exists cannot prove whether the server
+    // accepted DATA before the acknowledgement was lost. Fail safe to UNKNOWN;
+    // DeliveryWorkerService will quarantine this for manual reconciliation.
+    if (
+      code === 'ETIMEDOUT' ||
+      code === 'ECONNRESET' ||
+      code === 'ECONNECTION' ||
+      code === 'ESOCKET'
+    ) {
+      return {
+        outcome: 'UNKNOWN',
+        sanitizedErrorCode: 'SMTP_ACCEPTANCE_UNKNOWN',
+        sanitizedErrorMessage: 'SMTP acceptance could not be determined safely.',
       };
     }
 

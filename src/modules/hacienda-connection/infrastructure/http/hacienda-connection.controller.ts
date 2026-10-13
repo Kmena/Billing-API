@@ -16,6 +16,7 @@ import {
 import { ApiBearerAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import type { JwtRequest } from '../../../../api/strategies/jwt.strategy';
 import type { HaciendaEnvironment } from '../../domain/entities/hacienda-connection.entity';
 import { ConfigureConnectionHandler } from '../../application/use-cases/configure-connection/configure-connection.handler';
@@ -39,7 +40,10 @@ export class HaciendaConnectionController {
     private readonly validate: ValidateConnectionHandler,
     private readonly disable: DisableConnectionHandler,
   ) {}
-  @Put() @ApiOkResponse({ type: HaciendaConnectionResponseDto }) async put(
+  @Put()
+  @UseGuards(TenantAdminGuard)
+  @ApiOkResponse({ type: HaciendaConnectionResponseDto })
+  async put(
     @Request() req: { user: JwtRequest },
     @Param('companyId') companyId: string,
     @Param('environment', new ParseEnumPipe(environments)) environment: HaciendaEnvironment,
@@ -62,6 +66,7 @@ export class HaciendaConnectionController {
     return toHaciendaConnectionResponseDto(result);
   }
   @Post('validate')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: HaciendaConnectionResponseDto })
   async postValidate(
@@ -73,6 +78,7 @@ export class HaciendaConnectionController {
     return toHaciendaConnectionResponseDto(connection);
   }
   @Delete()
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: HaciendaConnectionResponseDto })
   async delete(

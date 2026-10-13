@@ -65,6 +65,41 @@ describe('PgBossJobQueue lifecycle', () => {
     );
   });
 
+  it('retries bounded transient PostgreSQL contention while creating a shared queue', async () => {
+    jest.spyOn(PgBoss.prototype, 'start').mockResolvedValue(undefined as never);
+    const queue = new PgBossJobQueue(
+      new ConfigService({ database: { url: 'postgresql://localhost/billing_queue_test' } }),
+    );
+
+    await queue.onModuleInit();
+    const boss = bossOf(queue);
+    boss.createQueue = jest
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('deadlock'), { code: '40P01' }))
+      .mockResolvedValue(undefined);
+    boss.send = jest.fn().mockResolvedValue('job-id');
+
+    await expect(queue.publish('shared-queue', { ok: true })).resolves.toBeUndefined();
+    expect(boss.createQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry non-transient queue creation failures', async () => {
+    jest.spyOn(PgBoss.prototype, 'start').mockResolvedValue(undefined as never);
+    const queue = new PgBossJobQueue(
+      new ConfigService({ database: { url: 'postgresql://localhost/billing_queue_test' } }),
+    );
+
+    await queue.onModuleInit();
+    const boss = bossOf(queue);
+    boss.createQueue = jest
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('permission denied'), { code: '42501' }));
+
+    await expect(queue.publish('forbidden-queue', { ok: true })).rejects.toThrow(
+      'permission denied',
+    );
+    expect(boss.createQueue).toHaveBeenCalledTimes(1);
+  });
   it('throws when pg-boss does not persist a non-singleton job', async () => {
     jest.spyOn(PgBoss.prototype, 'start').mockResolvedValue(undefined as never);
     const queue = new PgBossJobQueue(

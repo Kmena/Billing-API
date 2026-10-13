@@ -186,6 +186,15 @@ export class DeliveryRequestService {
       // Partially redact recipient for listing (prevent PII exposure in logs/responses)
       recipientDomain: d.recipient.includes('@') ? d.recipient.split('@')[1] : 'unknown',
       status: d.status,
+      deliveryEvidence: d.providerMessageId?.startsWith('mock-msg-')
+        ? 'MOCK_TRANSPORT_CAPTURED'
+        : d.status === 'DELIVERED'
+          ? 'SMTP_ACCEPTED_EXTERNAL_DELIVERY_UNCONFIRMED'
+          : d.status === 'PENDING' || d.status === 'QUEUED' || d.status === 'SENDING'
+            ? 'DELIVERY_QUEUED_OR_PROCESSING'
+            : d.status === 'MANUAL_REVIEW_REQUIRED'
+              ? 'EXTERNAL_OUTCOME_UNKNOWN'
+              : 'DELIVERY_FAILED_OR_NOT_COMPLETED',
       attemptCount: d.attemptCount,
       lastAttemptAt: d.lastAttemptAt,
       deliveredAt: d.deliveredAt,
@@ -210,6 +219,12 @@ export interface DeliveryHistoryDto {
   /** Recipient domain only — no full email in list response. */
   recipientDomain: string;
   status: string;
+  deliveryEvidence:
+    | 'MOCK_TRANSPORT_CAPTURED'
+    | 'SMTP_ACCEPTED_EXTERNAL_DELIVERY_UNCONFIRMED'
+    | 'DELIVERY_QUEUED_OR_PROCESSING'
+    | 'EXTERNAL_OUTCOME_UNKNOWN'
+    | 'DELIVERY_FAILED_OR_NOT_COMPLETED';
   attemptCount: number;
   lastAttemptAt: Date | null;
   deliveredAt: Date | null;

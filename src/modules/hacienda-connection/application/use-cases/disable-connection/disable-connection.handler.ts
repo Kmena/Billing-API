@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { GetCompanyHandler } from '../../../../companies/application/use-cases/get-company/get-company.handler';
 import { AuditService, EventClass } from '../../../../audit/application/audit.service';
 import type { HaciendaEnvironment } from '../../../domain/entities/hacienda-connection.entity';
@@ -19,15 +19,29 @@ export class DisableConnectionHandler {
     await this.company.execute({ id: companyId });
     const c = await this.repo.findByCompanyAndEnvironment(companyId, environment);
     if (!c) throw new NotFoundException({ code: 'HACIENDA_CONNECTION_NOT_FOUND' });
+    if (c.status === 'DISABLED') {
+      this.cache.invalidate(companyId, environment);
+      this.audit.record({
+        tenantId,
+        companyId,
+        action: 'hacienda-connection.disabled',
+        eventClass: EventClass.SECURITY,
+        metadata: { environment, idempotentReplay: true },
+      });
+      return c;
+    }
+    const expectedUpdatedAt = c.updatedAt;
     c.disable();
-    await this.repo.save(c);
+    if (!(await this.repo.save(c, expectedUpdatedAt))) {
+      throw new ConflictException({ code: 'HACIENDA_CONNECTION_CONCURRENT_CONFLICT' });
+    }
     this.cache.invalidate(companyId, environment);
     this.audit.record({
       tenantId,
       companyId,
       action: 'hacienda-connection.disabled',
       eventClass: EventClass.SECURITY,
-      metadata: { environment },
+      metadata: { environment, idempotentReplay: false },
     });
     return c;
   }

@@ -12,6 +12,7 @@ export interface ApiKeyListItem {
   readonly keyPrefix: string;
   // BR-001: keyHash and secret are NEVER included in list responses
   readonly scopes: string[];
+  readonly integrationProfile?: string;
   readonly status: string;
   readonly expiresAt?: Date;
   readonly lastUsedAt?: Date;
@@ -35,6 +36,7 @@ export class ListApiKeysHandler {
       keyPrefix: key.keyPrefix,
       // BR-001: keyHash and secret explicitly excluded
       scopes: key.scopes,
+      integrationProfile: key.integrationProfile,
       status: key.status,
       expiresAt: key.expiresAt,
       lastUsedAt: key.lastUsedAt,

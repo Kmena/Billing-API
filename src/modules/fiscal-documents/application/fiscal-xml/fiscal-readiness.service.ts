@@ -4,6 +4,7 @@ import {
   SECRET_PROVIDER,
   SecretProvider,
 } from '../../../../infrastructure/secrets/ports/secret-provider.port';
+import { FiscalIssuanceEligibilityService } from './fiscal-issuance-eligibility.service';
 
 /**
  * Hard blockers — any one of these makes readyToIssue = false.
@@ -80,6 +81,7 @@ export class FiscalReadinessService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(SECRET_PROVIDER) private readonly secrets: SecretProvider,
+    private readonly issuanceEligibility?: FiscalIssuanceEligibilityService,
   ) {}
 
   async evaluate(query: CheckFiscalReadinessQuery): Promise<FiscalReadinessResult> {
@@ -97,19 +99,34 @@ export class FiscalReadinessService {
     }
 
     // ── Check 2 & 3: Hacienda connection + credentials ──────────────────────
-    const haciendaConnection = await this.prisma.haciendaConnection.findFirst({
-      where: {
-        companyId: query.companyId,
+    // The injected predicate is the same one used before fiscal allocation.
+    if (this.issuanceEligibility) {
+      const eligibility = await this.issuanceEligibility.haciendaEligibility({
         tenantId: query.tenantId,
+        companyId: query.companyId,
         environment: query.environment as 'PRODUCTION' | 'SANDBOX',
-      },
-      select: { id: true, status: true },
-    });
-    if (!haciendaConnection) {
-      reasons.push('HACIENDA_CONNECTION_MISSING');
-      reasons.push('HACIENDA_CREDENTIALS_MISSING');
-    } else if (haciendaConnection.status === 'NOT_CONFIGURED') {
-      reasons.push('HACIENDA_CREDENTIALS_MISSING');
+      });
+      if (!eligibility.eligible) {
+        if (eligibility.reason === 'MISSING') reasons.push('HACIENDA_CONNECTION_MISSING');
+        reasons.push('HACIENDA_CREDENTIALS_MISSING');
+      }
+    } else {
+      // Compatibility for isolated legacy unit fixtures. Runtime always injects
+      // FiscalIssuanceEligibilityService through FiscalDocumentsModule.
+      const haciendaConnection = await this.prisma.haciendaConnection.findFirst({
+        where: {
+          companyId: query.companyId,
+          tenantId: query.tenantId,
+          environment: query.environment as 'PRODUCTION' | 'SANDBOX',
+        },
+        select: { id: true, status: true },
+      });
+      if (!haciendaConnection) {
+        reasons.push('HACIENDA_CONNECTION_MISSING');
+        reasons.push('HACIENDA_CREDENTIALS_MISSING');
+      } else if (haciendaConnection.status !== 'CONNECTED') {
+        reasons.push('HACIENDA_CREDENTIALS_MISSING');
+      }
     }
 
     // ── Check 4–6: ACTIVE signing certificate ───────────────────────────────
@@ -181,14 +198,22 @@ export class FiscalReadinessService {
     }
 
     // ── Check 7: Issuance point ──────────────────────────────────────────────
-    const issuancePoint = await this.prisma.fiscalIssuancePoint.findFirst({
-      where: {
-        tenantId: query.tenantId,
-        companyId: query.companyId,
-        environment: query.environment as 'PRODUCTION' | 'SANDBOX',
-      },
-      select: { id: true },
-    });
+    const issuancePoint = this.issuanceEligibility
+      ? await this.issuanceEligibility.activeDefaultIssuancePoint({
+          tenantId: query.tenantId,
+          companyId: query.companyId,
+          environment: query.environment as 'PRODUCTION' | 'SANDBOX',
+        })
+      : await this.prisma.fiscalIssuancePoint.findFirst({
+          where: {
+            tenantId: query.tenantId,
+            companyId: query.companyId,
+            environment: query.environment as 'PRODUCTION' | 'SANDBOX',
+            active: true,
+            isDefault: true,
+          },
+          select: { id: true },
+        });
     if (!issuancePoint) {
       reasons.push('ISSUANCE_POINT_MISSING');
     }

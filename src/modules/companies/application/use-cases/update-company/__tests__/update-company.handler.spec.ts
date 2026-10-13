@@ -1,6 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { UpdateCompanyHandler } from '../update-company.handler';
-import { FiscalCertificateIdentityConflictException } from '../../../../../fiscal-documents/domain/fiscal-xml/exceptions/fiscal-certificate.exceptions';
 
 const TENANT_ID = 'tenant-aaa';
 const COMPANY_ID = 'company-bbb';
@@ -38,6 +37,8 @@ function makeActiveCert(overrides: Record<string, unknown> = {}) {
 function createHandler(opts: {
   company?: ReturnType<typeof makeCurrentCompany> | null;
   activeCert?: ReturnType<typeof makeActiveCert> | null;
+  reservationCount?: number;
+  documentCount?: number;
   updateResult?: Record<string, unknown>;
 }) {
   const updatedCompany = {
@@ -54,9 +55,16 @@ function createHandler(opts: {
       update: jest.fn().mockResolvedValue(updatedCompany),
     },
     fiscalSigningCertificate: {
+      count: jest.fn().mockResolvedValue(opts.activeCert ? 1 : 0),
       findFirst: jest
         .fn()
         .mockResolvedValue(opts.activeCert !== undefined ? opts.activeCert : null),
+    },
+    fiscalIdempotencyKey: {
+      count: jest.fn().mockResolvedValue(opts.reservationCount ?? 0),
+    },
+    fiscalDocument: {
+      count: jest.fn().mockResolvedValue(opts.documentCount ?? 0),
     },
   };
 
@@ -71,11 +79,21 @@ function makeCommand(overrides: Record<string, unknown> = {}) {
     tenantId: TENANT_ID,
     companyId: COMPANY_ID,
     actorUserId: 'user-1',
+    role: 'TENANT_ADMIN',
     ...overrides,
   };
 }
 
 describe('UpdateCompanyHandler (TASK-006)', () => {
+  it('rejects a non-admin before loading or changing a company', async () => {
+    const { handler, prisma } = createHandler({});
+
+    await expect(handler.execute(makeCommand({ role: 'TENANT_USER' }))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.company.findFirst).not.toHaveBeenCalled();
+    expect(prisma.company.update).not.toHaveBeenCalled();
+  });
   // ── Happy paths ─────────────────────────────────────────────────────────────
 
   it('updates legalName without triggering identity check when no identity change', async () => {
@@ -85,7 +103,9 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     expect(prisma.fiscalSigningCertificate.findFirst).not.toHaveBeenCalled();
     expect(prisma.company.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ legalName: 'New Name SRL' }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ legalName: 'New Name SRL' }),
+      }),
     );
   });
 
@@ -93,20 +113,23 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
     const { handler } = createHandler({ activeCert: null });
 
     const result = await handler.execute(
-      makeCommand({ identificationType: 'FISICA', identificationNumber: '999999999' }),
+      makeCommand({
+        identificationType: 'FISICA',
+        identificationNumber: '999999999',
+      }),
     );
 
     expect(result).toBeDefined();
   });
 
-  it('allows identity change when ACTIVE cert has no extractedIdentityNumber (legacy cert)', async () => {
+  it('locks identity when an ACTIVE legacy certificate exists', async () => {
     const { handler } = createHandler({
       activeCert: makeActiveCert({ extractedIdentityNumber: null }),
     });
 
-    const result = await handler.execute(makeCommand({ identificationNumber: '999999999' }));
-
-    expect(result).toBeDefined();
+    await expect(
+      handler.execute(makeCommand({ identificationNumber: '999999999' })),
+    ).rejects.toMatchObject({ response: { code: 'ISSUER_IDENTITY_LOCKED' } });
   });
 
   it('allows identity change when new identity matches ACTIVE cert identity', async () => {
@@ -143,7 +166,10 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
     });
 
     const result = await handler.execute(
-      makeCommand({ identificationNumber: '207530251', identificationType: 'FISICA' }),
+      makeCommand({
+        identificationNumber: '207530251',
+        identificationType: 'FISICA',
+      }),
     );
 
     expect(result).toBeDefined();
@@ -163,9 +189,12 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     await expect(
       handler.execute(
-        makeCommand({ identificationNumber: '999999999', identificationType: 'FISICA' }),
+        makeCommand({
+          identificationNumber: '999999999',
+          identificationType: 'FISICA',
+        }),
       ),
-    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('DEC-003: blocks identificationNumber change when ACTIVE cert identity would conflict', async () => {
@@ -178,7 +207,7 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     await expect(
       handler.execute(makeCommand({ identificationNumber: '9999999999' })),
-    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('DEC-003: blocked update does NOT modify company or certificate', async () => {
@@ -190,7 +219,7 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     await expect(
       handler.execute(makeCommand({ identificationNumber: '8888888888' })),
-    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
 
     // Company update must NOT have been called
     expect(prisma.company.update).not.toHaveBeenCalled();
@@ -203,12 +232,12 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     await expect(
       handler.execute(makeCommand({ identificationNumber: '7777777777' })),
-    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
 
     // AC-029: audit event MUST be emitted when identity change is blocked
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
-        action: 'company.identity-change-blocked-by-certificate-conflict',
+        action: 'company.identity-change-blocked-by-fiscal-lock',
         tenantId: TENANT_ID,
         companyId: COMPANY_ID,
       }),
@@ -236,7 +265,7 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
           identificationType: 'FISICA', // changed from JURIDICA → conflict
         }),
       ),
-    ).rejects.toBeInstanceOf(FiscalCertificateIdentityConflictException);
+    ).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('DEC-003: unrelated fields (legalName, tradeName) are always updatable even with ACTIVE cert', async () => {
@@ -246,10 +275,25 @@ describe('UpdateCompanyHandler (TASK-006)', () => {
 
     // No identity fields passed — should succeed
     const result = await handler.execute(
-      makeCommand({ legalName: 'Updated Name SRL', tradeName: 'Updated Trade' }),
+      makeCommand({
+        legalName: 'Updated Name SRL',
+        tradeName: 'Updated Trade',
+      }),
     );
 
     expect(result).toBeDefined();
+  });
+
+  it.each([
+    ['reservation', { reservationCount: 1 }],
+    ['fiscal document', { documentCount: 1 }],
+  ] as const)('locks issuer identity when a %s exists', async (_label, counts) => {
+    const { handler, prisma } = createHandler(counts);
+
+    await expect(
+      handler.execute(makeCommand({ identificationNumber: '5555555555' })),
+    ).rejects.toMatchObject({ response: { code: 'ISSUER_IDENTITY_LOCKED' } });
+    expect(prisma.company.update).not.toHaveBeenCalled();
   });
 
   // ── Tenant isolation ──────────────────────────────────────────────────────────

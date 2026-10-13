@@ -54,7 +54,7 @@ export class UpsertCompanyFiscalProfileHandler {
   ) {}
 
   async execute(command: UpsertCompanyFiscalProfileCommand): Promise<CompanyFiscalProfileResult> {
-    if (command.role !== 'TENANT_ADMIN') {
+    if (!['TENANT_ADMIN', 'M2M_FISCAL_PROFILE'].includes(command.role)) {
       throw new ForbiddenException({ code: 'ADMIN_ROLE_REQUIRED' });
     }
 

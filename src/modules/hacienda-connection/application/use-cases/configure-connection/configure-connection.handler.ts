@@ -1,4 +1,9 @@
-import { Inject, Injectable, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { GetCompanyHandler } from '../../../../companies/application/use-cases/get-company/get-company.handler';
 import { AuditService, EventClass } from '../../../../audit/application/audit.service';
@@ -43,6 +48,9 @@ export class ConfigureConnectionHandler {
       command.companyId,
       command.environment,
     );
+    if (existing?.status === 'DISABLED') {
+      throw new UnprocessableEntityException({ code: 'HACIENDA_CONNECTION_DISABLED' });
+    }
     if (!command.username && !command.password)
       throw new UnprocessableEntityException({
         code: 'HACIENDA_CONNECTION_INSUFFICIENT_CREDENTIALS',
@@ -66,10 +74,16 @@ export class ConfigureConnectionHandler {
         });
       credentials = { username: command.username, password: command.password };
     }
-    const reference = `hacienda-conn/${command.companyId}/${command.environment}`;
+    // Credential rotations use immutable references. A losing concurrent write
+    // may leave an unreferenced secret, but can never replace the credential
+    // used by the canonical connection row.
+    const reference = `hacienda-conn/${command.companyId}/${command.environment}/${randomUUID()}`;
     await this.secrets.storeSecret(reference, JSON.stringify(credentials));
     const connection = this.buildConnection(command, existing, reference);
-    await this.repo.save(connection);
+    const saved = await this.repo.save(connection, existing?.updatedAt);
+    if (!saved) {
+      throw new ConflictException({ code: 'HACIENDA_CONNECTION_CONCURRENT_CONFLICT' });
+    }
     this.cache.invalidate(command.companyId, command.environment);
     this.audit.record({
       tenantId: command.tenantId,

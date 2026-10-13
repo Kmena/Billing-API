@@ -561,12 +561,6 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
       )
       .set('X-API-Key', apiKey.secret)
       .expect(403);
-    await request(context.app.getHttpServer())
-      .post(
-        `/api/v1/companies/${fixture.companyId}/fiscal-documents/PRODUCTION/invoices/${document.id}/submit`,
-      )
-      .set('X-API-Key', apiKey.secret)
-      .expect(409);
 
     const revoked = await createFiscalApiKey(
       context.prisma,
@@ -592,6 +586,31 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
       )
       .set('X-API-Key', noInvoiceScope.secret)
       .expect(403);
+  });
+
+  it('rejects a TEST key in PRODUCTION before fiscal mutation', async () => {
+    const { fixture, apiKey } = await setupFixture(context, ['invoices:write']);
+    const document = await createReadyToSubmitDocument(context, {
+      apiKeySecret: apiKey.secret,
+      companyId: fixture.companyId,
+      type: 'INVOICE',
+      idempotencyKey: 'f3-test-key-production-denial',
+    });
+
+    await request(context.app.getHttpServer())
+      .post(
+        `/api/v1/companies/${fixture.companyId}/fiscal-documents/PRODUCTION/invoices/${document.id}/submit`,
+      )
+      .set('X-API-Key', apiKey.secret)
+      .expect(403)
+      .expect(({ body }) => expect(body.error.code).toBe('API_KEY_ENVIRONMENT_NOT_AUTHORIZED'));
+
+    await expect(
+      context.prisma.fiscalDocument.findUniqueOrThrow({ where: { id: document.id } }),
+    ).resolves.toMatchObject({ status: 'READY_TO_SUBMIT' });
+    await expect(
+      context.prisma.fiscalSubmission.count({ where: { fiscalDocumentId: document.id } }),
+    ).resolves.toBe(0);
   });
 
   it('fails closed for missing signed XML artifact, missing/disabled connection and malformed provider response', async () => {
@@ -624,6 +643,7 @@ describe('F3 Fiscal Submission Continuity (E2E, PostgreSQL)', () => {
         `/api/v1/companies/${fixture.companyId}/fiscal-documents/SANDBOX/invoices/${noConnectionDocument.id}/submit`,
       )
       .set('X-API-Key', apiKey.secret)
-      .expect(409);
+      .expect(409)
+      .expect(({ body }) => expect(body.error.code).toBe('HACIENDA_CONNECTION_NOT_CONNECTED'));
   });
 });

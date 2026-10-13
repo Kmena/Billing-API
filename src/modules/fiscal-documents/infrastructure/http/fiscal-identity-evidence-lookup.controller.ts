@@ -1,4 +1,14 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, ParseEnumPipe, Post, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseEnumPipe,
+  Post,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiHeader, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { ApiKeyAuthGuard, ApiKeyRequest } from '../../../../api/guards/api-key-auth.guard';
@@ -23,7 +33,9 @@ export class FiscalIdentityEvidenceLookupController {
 
   @Post('identity-by-fiscal-evidence')
   @HttpCode(HttpStatus.OK)
-  @ApiOkResponse({ description: 'Verified pre-existing fiscal identity using canonical fiscal evidence.' })
+  @ApiOkResponse({
+    description: 'Verified pre-existing fiscal identity using canonical fiscal evidence.',
+  })
   async findByFiscalEvidence(
     @Request() request: ApiKeyRequest,
     @Param('companyId') companyId: string,

@@ -202,6 +202,9 @@ model Tenant {
   fiscalArtifacts           FiscalArtifact[]
   documentDeliveries        DocumentDelivery[]
   companyEconomicActivities CompanyEconomicActivity[]
+  fiscalIntegrationAssociations FiscalIntegrationAssociation[]
+  fiscalBranches            FiscalBranch[]
+  fiscalTerminals           FiscalTerminal[]
 
   @@map("tenants")
 }
@@ -241,6 +244,9 @@ model Company {
   fiscalArtifacts            FiscalArtifact[]
   documentDeliveries         DocumentDelivery[]
   economicActivities         CompanyEconomicActivity[]
+  fiscalIntegrationAssociation FiscalIntegrationAssociation?
+  fiscalBranches             FiscalBranch[]
+  fiscalTerminals            FiscalTerminal[]
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
@@ -331,11 +337,75 @@ model FiscalIssuancePoint {
   updatedAt    DateTime            @updatedAt @map("updated_at")
   tenant       Tenant              @relation(fields: [tenantId], references: [id])
   company      Company             @relation(fields: [companyId], references: [id])
+  branchId     String?             @map("branch_id") @db.Uuid
+  terminalId   String?             @map("terminal_id") @db.Uuid
+  branch       FiscalBranch?       @relation(fields: [branchId], references: [id])
+  terminal     FiscalTerminal?     @relation(fields: [terminalId], references: [id])
   documents    FiscalDocument[]
 
   @@unique([companyId, environment, branchCode, terminalCode])
   @@index([tenantId, companyId, environment, active])
+  @@index([branchId])
+  @@index([terminalId])
   @@map("fiscal_issuance_points")
+}
+
+model FiscalIntegrationAssociation {
+  id                 String   @id @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  companyId          String   @unique @map("company_id") @db.Uuid
+  provider           String   @default("INVENTORI") @db.VarChar(40)
+  externalCompanyKey String   @map("external_company_key") @db.VarChar(128)
+  profileVersion     String   @default("inventori-fiscal-v1") @map("profile_version") @db.VarChar(80)
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+  company            Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([tenantId, provider, externalCompanyKey])
+  @@index([tenantId, companyId])
+  @@map("fiscal_integration_associations")
+}
+
+model FiscalBranch {
+  id             String               @id @db.Uuid
+  tenantId       String               @map("tenant_id") @db.Uuid
+  companyId      String               @map("company_id") @db.Uuid
+  environment    HaciendaEnvironment
+  code           String               @db.Char(3)
+  name           String               @db.VarChar(120)
+  active         Boolean              @default(true)
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  company        Company              @relation(fields: [companyId], references: [id])
+  terminals      FiscalTerminal[]
+  issuancePoints FiscalIssuancePoint[]
+
+  @@unique([companyId, environment, code])
+  @@index([tenantId, companyId, environment, active])
+  @@map("fiscal_branches")
+}
+
+model FiscalTerminal {
+  id             String               @id @db.Uuid
+  tenantId       String               @map("tenant_id") @db.Uuid
+  companyId      String               @map("company_id") @db.Uuid
+  branchId       String               @map("branch_id") @db.Uuid
+  environment    HaciendaEnvironment
+  code           String               @db.Char(5)
+  name           String               @db.VarChar(120)
+  active         Boolean              @default(true)
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  company        Company              @relation(fields: [companyId], references: [id])
+  branch         FiscalBranch         @relation(fields: [branchId], references: [id])
+  issuancePoints FiscalIssuancePoint[]
+
+  @@unique([branchId, code])
+  @@index([tenantId, companyId, environment, active])
+  @@map("fiscal_terminals")
 }
 
 model FiscalSequence {
@@ -541,7 +611,10 @@ model FiscalIdempotencyKey {
   fiscalDocument   FiscalDocument?         @relation(fields: [fiscalDocumentId], references: [id])
   apiKey           ApiKey?                 @relation(fields: [apiKeyId], references: [id])
 
-  @@unique([tenantId, companyId, apiKeyId, operation, key])
+  // Logical fiscal idempotency survives API-key rotation. apiKeyId remains
+  // immutable audit metadata, not part of the reservation namespace.
+  @@unique([tenantId, companyId, operation, key], map: "fiscal_idempotency_keys_tenant_company_operation_key")
+  @@index([apiKeyId], map: "fiscal_idempotency_keys_api_key_idx")
   @@map("fiscal_idempotency_keys")
 }
 
@@ -598,6 +671,7 @@ model ApiKey {
   keyPrefix             String                 @unique @map("key_prefix") @db.VarChar(16)
   keyHash               String                 @map("key_hash") @db.VarChar(255)
   scopes                String[]
+  integrationProfile    String?                @map("integration_profile") @db.VarChar(80)
   status                ApiKeyStatus           @default(ACTIVE)
   expiresAt             DateTime?              @map("expires_at")
   lastUsedAt            DateTime?              @map("last_used_at")

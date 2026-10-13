@@ -105,6 +105,85 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
     expect(sequence.nextValue.toString()).toBe('2');
   });
 
+  it('CONC-002A preserves one identity across API-key rotation and conflicting retries', async () => {
+    const fixture = await createFiscalTenantFixture(context);
+    await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
+    await configureValidCompanyFiscalProfile(context, fixture);
+    await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
+    const originalKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
+      'invoices:write',
+    ]);
+    const rotatedKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
+      'invoices:write',
+    ]);
+    await authorizeApiKeyForCompany(context.prisma, originalKey.id, fixture.companyId);
+    await authorizeApiKeyForCompany(context.prisma, rotatedKey.id, fixture.companyId);
+    const payload = fiscalInvoicePayload(fixture.companyId);
+
+    const original = await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', originalKey.secret)
+      .set('Idempotency-Key', 'conc-002a-rotated')
+      .send(payload)
+      .expect(201);
+
+    const equivalent = await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', rotatedKey.secret)
+      .set('Idempotency-Key', 'conc-002a-rotated')
+      .send(payload)
+      .expect(201);
+    expect(equivalent.body.id).toBe(original.body.id);
+
+    const conflictingPayload = fiscalInvoicePayload(fixture.companyId);
+    conflictingPayload.lines[0].unitPrice = '2000.00000';
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', rotatedKey.secret)
+      .set('Idempotency-Key', 'conc-002a-rotated')
+      .send(conflictingPayload)
+      .expect(409)
+      .expect(({ body }) =>
+        expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST'),
+      );
+
+    const concurrent = await Promise.all(
+      [originalKey.secret, rotatedKey.secret].map((secret) =>
+        request(context.app.getHttpServer())
+          .post('/api/v1/invoices')
+          .set('X-API-Key', secret)
+          .set('Idempotency-Key', 'conc-002a-rotated')
+          .send(payload),
+      ),
+    );
+    expect(concurrent.map((response) => response.status)).toEqual([201, 201]);
+    expect(new Set(concurrent.map((response) => response.body.id))).toEqual(
+      new Set([original.body.id]),
+    );
+
+    const documents = await context.prisma.fiscalDocument.count({
+      where: {
+        tenantId: fixture.tenantId,
+        companyId: fixture.companyId,
+        idempotencyKey: 'conc-002a-rotated',
+      },
+    });
+    const reservations = await context.prisma.fiscalIdempotencyKey.findMany({
+      where: {
+        tenantId: fixture.tenantId,
+        companyId: fixture.companyId,
+        operation: 'fiscal-document.create.invoice',
+        key: 'conc-002a-rotated',
+      },
+    });
+    const sequence = await context.prisma.fiscalSequence.findFirstOrThrow({
+      where: { tenantId: fixture.tenantId, companyId: fixture.companyId, documentType: 'INVOICE' },
+    });
+    expect(documents).toBe(1);
+    expect(reservations).toHaveLength(1);
+    expect(reservations[0].apiKeyId).toBe(originalKey.id);
+    expect(sequence.nextValue.toString()).toBe('2');
+  });
   it('CONC-003 conflicts same canonical key with different payload without duplicate issuance', async () => {
     const fixture = await createFiscalTenantFixture(context);
     await createEnabledHaciendaConnection(context.prisma, fixture.tenantId, fixture.companyId);
@@ -204,18 +283,35 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
     await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE', 'SANDBOX');
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE', 'PRODUCTION');
-    const apiKey = await createFiscalApiKey(context.prisma, fixture.tenantId, ['invoices:write']);
-    await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
+    const sandboxKey = await createFiscalApiKey(context.prisma, fixture.tenantId, [
+      'invoices:write',
+    ]);
+    const productionKey = await createFiscalApiKey(
+      context.prisma,
+      fixture.tenantId,
+      ['invoices:write'],
+      'ACTIVE',
+      'LIVE',
+    );
+    await authorizeApiKeyForCompany(context.prisma, sandboxKey.id, fixture.companyId);
+    await authorizeApiKeyForCompany(context.prisma, productionKey.id, fixture.companyId);
 
     const sandbox = await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
-      .set('X-API-Key', apiKey.secret)
+      .set('X-API-Key', sandboxKey.secret)
       .set('Idempotency-Key', 'conc-005-sandbox')
       .send(fiscalInvoicePayload(fixture.companyId, 'SANDBOX'))
       .expect(201);
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', sandboxKey.secret)
+      .set('Idempotency-Key', 'conc-005-test-key-production-denied')
+      .send(fiscalInvoicePayload(fixture.companyId, 'PRODUCTION'))
+      .expect(403)
+      .expect(({ body }) => expect(body.error.code).toBe('API_KEY_ENVIRONMENT_NOT_AUTHORIZED'));
     const production = await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
-      .set('X-API-Key', apiKey.secret)
+      .set('X-API-Key', productionKey.secret)
       .set('Idempotency-Key', 'conc-005-production')
       .send(fiscalInvoicePayload(fixture.companyId, 'PRODUCTION'))
       .expect(201);

@@ -1,4 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../../../infrastructure/database/prisma.service';
 import { AuditService, EventClass } from '../../../../audit/application/audit.service';
 import { FiscalCertificateIdentityConflictException } from '../../../../fiscal-documents/domain/fiscal-xml/exceptions/fiscal-certificate.exceptions';
@@ -17,6 +23,7 @@ const CERT_TYPE_CODE_TO_PRISMA: Record<string, string> = {
 
 export interface UpdateCompanyCommand {
   readonly tenantId: string;
+  readonly role: string;
   readonly companyId: string;
   readonly actorUserId: string;
   readonly legalName?: string;
@@ -61,6 +68,10 @@ export class UpdateCompanyHandler {
   ) {}
 
   async execute(command: UpdateCompanyCommand): Promise<UpdateCompanyResult> {
+    if (!['TENANT_ADMIN', 'M2M_FISCAL_ISSUER'].includes(command.role)) {
+      throw new ForbiddenException({ code: 'TENANT_ADMIN_REQUIRED' });
+    }
+
     // Load current company — tenant-scoped
     const current = await this.prisma.company.findFirst({
       where: { id: command.companyId, tenantId: command.tenantId },
@@ -90,6 +101,10 @@ export class UpdateCompanyHandler {
       newIdentityNumber !== current.identificationNumber;
 
     if (identityWouldChange) {
+      await this.assertIssuerIdentityUnlocked({
+        tenantId: command.tenantId,
+        companyId: command.companyId,
+      });
       await this.assertNoCertificateIdentityConflict({
         tenantId: command.tenantId,
         companyId: command.companyId,
@@ -146,6 +161,36 @@ export class UpdateCompanyHandler {
       status: updated.status,
       updatedAt: updated.updatedAt,
     };
+  }
+
+  private async assertIssuerIdentityUnlocked(params: {
+    tenantId: string;
+    companyId: string;
+  }): Promise<void> {
+    const [activeCertificates, reservations, documents] = await Promise.all([
+      this.prisma.fiscalSigningCertificate.count({
+        where: { ...params, status: 'ACTIVE' },
+      }),
+      this.prisma.fiscalIdempotencyKey.count({ where: params }),
+      this.prisma.fiscalDocument.count({ where: params }),
+    ]);
+    if (activeCertificates + reservations + documents === 0) return;
+
+    this.audit.record({
+      tenantId: params.tenantId,
+      companyId: params.companyId,
+      action: 'company.identity-change-blocked-by-fiscal-lock',
+      eventClass: EventClass.SECURITY,
+      metadata: {
+        activeCertificatePresent: activeCertificates > 0,
+        reservationPresent: reservations > 0,
+        fiscalDocumentPresent: documents > 0,
+      },
+    });
+    throw new ConflictException({
+      code: 'ISSUER_IDENTITY_LOCKED',
+      message: 'Fiscal issuer identification requires a controlled replacement procedure.',
+    });
   }
 
   /**

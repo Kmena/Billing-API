@@ -1,8 +1,15 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../../infrastructure/database/prisma.service';
 import { ApiKeyNotFoundException } from '../../../domain/exceptions/api-key-not-found.exception';
 
+function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'P2002'
+  );
+}
 export interface AssignApiKeyCompanyCommand {
   readonly tenantId: string;
   readonly apiKeyId: string;
@@ -48,7 +55,7 @@ export class AssignApiKeyCompanyHandler {
       });
       return { created: true };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (isUniqueConstraintError(error)) {
         return { created: false };
       }
       throw error;

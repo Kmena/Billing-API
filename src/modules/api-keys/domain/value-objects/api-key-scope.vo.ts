@@ -1,4 +1,8 @@
 import { DomainException } from '../../../shared/domain/domain-exception';
+import {
+  INVENTORI_BOOTSTRAP_V1_SCOPES,
+  INVENTORI_FISCAL_V1_SCOPES,
+} from '../../../fiscal-onboarding/domain/inventori-fiscal-profile';
 
 /**
  * FR-012: Allowed API key scopes (exhaustive list).
@@ -15,6 +19,8 @@ export const ALLOWED_API_KEY_SCOPES = [
   // Hacienda credential management for trusted M2M fiscal onboarding clients.
   'fiscal-credentials:write',
   'fiscal-credentials:validate',
+  ...INVENTORI_BOOTSTRAP_V1_SCOPES,
+  ...INVENTORI_FISCAL_V1_SCOPES,
   // Fase 2+ stubs — reserved but not yet active
   'invoices:read',
   'invoices:write',

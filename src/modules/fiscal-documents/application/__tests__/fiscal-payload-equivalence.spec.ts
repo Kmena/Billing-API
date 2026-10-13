@@ -1,7 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { FiscalDocumentService, type CreateFiscalDocumentCommand } from '../fiscal-document.service';
+import {
+  FiscalDocumentService,
+  type CreateFiscalDocumentCommand,
+} from '../fiscal-document.service';
 import {
   canonicalFiscalPayloadHash,
   canonicalFiscalPayloadString,
@@ -12,14 +15,23 @@ import {
 const root = process.cwd();
 const fixture = JSON.parse(
   readFileSync(
-    join(root, 'docs', 'contracts', 'fixtures', 'fiscal-payload-equivalence.v1', 'inv-966-historical-sanitized.json'),
+    join(
+      root,
+      'docs',
+      'contracts',
+      'fixtures',
+      'fiscal-payload-equivalence.v1',
+      'inv-966-historical-sanitized.json',
+    ),
     'utf8',
   ),
 ) as { canonicalInput: Record<string, unknown>; expectedSha256: string };
 
 describe('fiscal payload equivalence v1', () => {
   it('matches the shared sanitized INV-966 historical vector exactly', () => {
-    expect(canonicalFiscalPayloadHash(fixture.canonicalInput as never)).toBe(fixture.expectedSha256);
+    expect(canonicalFiscalPayloadHash(fixture.canonicalInput as never)).toBe(
+      fixture.expectedSha256,
+    );
   });
 
   it('uses deterministic object ordering, decimal normalization, null normalization, and UTC dates', () => {

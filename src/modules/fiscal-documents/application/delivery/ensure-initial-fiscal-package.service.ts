@@ -147,7 +147,32 @@ export class EnsureInitialFiscalPackageService {
     if (!deliveryId) return; // Already delivered or cancelled
 
     // Enqueue delivery job
-    await this.jobQueue.publish(DELIVERY_JOB_NAME, { deliveryId }, { retryLimit: 3 });
+    try {
+      await this.jobQueue.publish(
+        DELIVERY_JOB_NAME,
+        { deliveryId },
+        {
+          retryLimit: 3,
+          retryDelay: 60,
+          singletonKey: `fiscal-delivery:${deliveryId}`,
+          singletonSeconds: 15 * 60,
+        },
+      );
+    } catch (error: unknown) {
+      // The committed QUEUED row is durable; recovery will republish it later.
+      await this.prisma.documentDelivery.updateMany({
+        where: { id: deliveryId, status: 'QUEUED' },
+        data: {
+          lastErrorCode: 'QUEUE_PUBLICATION_FAILED',
+          lastSanitizedError: String(error).substring(0, 500),
+          updatedAt: new Date(),
+        },
+      });
+      this.logger.warn({
+        msg: 'EnsureInitialPackage: queue publication deferred to recovery',
+        deliveryId,
+      });
+    }
 
     this.logger.log({
       msg: 'EnsureInitialPackage: delivery queued',

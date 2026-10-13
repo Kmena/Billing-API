@@ -41,6 +41,7 @@ import {
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import { ApiKeyAuthGuard } from '../../../../api/guards/api-key-auth.guard';
 import { ApiKeyThrottlerGuard } from '../../../../api/guards/api-key-throttler.guard';
 import { ScopeGuard } from '../../../../api/guards/scope.guard';
@@ -80,6 +81,7 @@ export class TaxpayerVerificationController {
   ) {}
 
   @Post('taxpayer-verification')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Trigger taxpayer verification via Hacienda /fe/ae (Tenant Admin)' })
   @ApiOkResponse({ type: TaxpayerVerificationResponseDto })
@@ -118,6 +120,7 @@ export class TaxpayerVerificationController {
   }
 
   @Patch('economic-activities/:code')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Enable or disable an economic activity for Billing (Tenant Admin)' })
   @ApiOkResponse({ type: EconomicActivityResponseDto })
@@ -137,6 +140,7 @@ export class TaxpayerVerificationController {
   }
 
   @Put('fiscal-profile/default-activity')
+  @UseGuards(TenantAdminGuard)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Set default economic activity for fiscal documents (Tenant Admin)' })
   @ApiOkResponse({ type: SetDefaultEconomicActivityResponseDto })

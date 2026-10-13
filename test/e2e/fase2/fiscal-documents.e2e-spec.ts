@@ -448,8 +448,19 @@ describe('Fiscal Documents (E2E)', () => {
       .set('Idempotency-Key', 'idem-replay')
       .send(payload)
       .expect(201);
-    expect(apiKeyBResponse.body.id).not.toBe(firstResponse.body.id);
-    expect(apiKeyBResponse.body.consecutive).not.toBe(firstResponse.body.consecutive);
+    expect(apiKeyBResponse.body.id).toBe(firstResponse.body.id);
+    expect(apiKeyBResponse.body.consecutive).toBe(firstResponse.body.consecutive);
+    expect(apiKeyBResponse.body.clave).toBe(firstResponse.body.clave);
+
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKeyB.secret)
+      .set('Idempotency-Key', 'idem-replay')
+      .send(changedPayload)
+      .expect(409)
+      .expect(({ body }) =>
+        expect(body.error.code).toBe('IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST'),
+      );
 
     const sameTextualKeyDocumentCount = await context.prisma.fiscalDocument.count({
       where: {
@@ -458,7 +469,7 @@ describe('Fiscal Documents (E2E)', () => {
         idempotencyKey: 'idem-replay',
       },
     });
-    expect(sameTextualKeyDocumentCount).toBe(3);
+    expect(sameTextualKeyDocumentCount).toBe(2);
   });
 
   async function expectDocumentAndSequenceCounts(

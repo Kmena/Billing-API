@@ -1,7 +1,29 @@
 version: '3.9'
 
+# Local development fiscal evidence is deliberately filesystem-backed. Keep the
+# provider, root and mount declaration shared so the API and worker cannot drift
+# in the supported Compose path. Production deployment configuration is not
+# defined by this development-only Compose file.
+x-local-fiscal-storage-environment: &local-fiscal-storage-environment
+  STORAGE_TYPE: local
+  LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
+  LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+  LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
+
+x-local-fiscal-storage-mount: &local-fiscal-storage-mount
+  ./storage:/var/lib/billing-artifacts
+
+# Fiscal credentials and PKCS#12 material use a separate encrypted filesystem
+# store. The key is supplied from an operator-managed host file and never lives
+# in the data volume or image. Both processes share the exact same mounts.
+x-local-secret-store-environment: &local-secret-store-environment
+  SECRET_PROVIDER: local-encrypted
+  LOCAL_SECRET_STORE_PATH: /var/lib/billing-secrets
+  LOCAL_SECRET_STORE_MASTER_KEY_PATH: /run/secrets/billing-local-secret-store.key
+  LOCAL_SECRET_STORE_REQUIRED_MARKER: .billing-secret-store-root
+
 # ─── Billing Development Stack ─────────────────────────────────────────────────
-# Services: billing-api + billing-worker + postgres + localstack
+# Services: billing-api + billing-worker + postgres + optional localstack
 # ADR-003: No Redis. Queue via pg-boss on the same PostgreSQL instance.
 
 services:
@@ -24,7 +46,8 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── LocalStack (S3 + SSM mocks for dev) ───────────────────────────────────────
+  # ── Optional LocalStack mocks for legacy/dev-only exercises ───────────────────
+  # Billing API/worker do not depend on this service for artifacts or secrets.
   localstack:
     image: localstack/localstack:3
     container_name: billing-localstack
@@ -33,11 +56,8 @@ services:
       SERVICES: s3,ssm
       DEFAULT_REGION: us-east-1
       AWS_DEFAULT_REGION: us-east-1
-      # PERSISTENCE=1: Pro-only feature in LocalStack Community 3.x.
-      # Setting it here signals intent and enables it automatically for Pro users.
-      # Community Edition: SSM state is in-memory only; lost on container restart.
-      # After LocalStack restart (Community): run `npm run dev:seed-ssm` then re-upload
-      # the fiscal certificate to restore readiness.
+      # PERSISTENCE=1 is Pro-only in LocalStack Community 3.x. Fiscal secret
+      # durability must never rely on this setting or this service.
       PERSISTENCE: 1
     ports:
       - '4566:4566'
@@ -61,9 +81,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
     environment:
+      <<: [*local-fiscal-storage-environment, *local-secret-store-environment]
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
@@ -72,15 +91,9 @@ services:
       JWT_REFRESH_EXPIRES_IN: 7d
       # CORS — must be an explicit origin in production; never use * here
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      STORAGE_TYPE: s3
-      AWS_S3_BUCKET: billing-documents
-      AWS_S3_ENDPOINT: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: ssm
-      SSM_PARAMETER_PREFIX: /billing/dev
-      AWS_SSM_ENDPOINT: http://localstack:4566
       FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
       FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
       FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
@@ -101,6 +114,10 @@ services:
       HACIENDA_AUTH_RETRY_5XX_DELAY_MS: ${HACIENDA_AUTH_RETRY_5XX_DELAY_MS:-2000}
     ports:
       - '3000:3000'
+    volumes:
+      - *local-fiscal-storage-mount
+      - ./secrets-storage:/var/lib/billing-secrets
+      - ${LOCAL_SECRET_STORE_MASTER_KEY_FILE:?LOCAL_SECRET_STORE_MASTER_KEY_FILE must point to the operator-managed key}:/run/secrets/billing-local-secret-store.key:ro
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
       interval: 30s
@@ -128,22 +145,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      localstack:
-        condition: service_healthy
     environment:
+      <<: [*local-fiscal-storage-environment, *local-secret-store-environment]
       NODE_ENV: production
       DATABASE_URL: postgresql://billing:billing_password@postgres:5432/billing_dev
       JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-in-production-32chars}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
-      STORAGE_TYPE: s3
-      AWS_S3_BUCKET: billing-documents
-      AWS_S3_ENDPOINT: http://localstack:4566
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
-      SECRET_PROVIDER: ssm
-      SSM_PARAMETER_PREFIX: /billing/dev
-      AWS_SSM_ENDPOINT: http://localstack:4566
       FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: ${FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED:-false}
       FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_START_AT:-}
       FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT: ${FISCAL_DELIVERY_STARTUP_RECOVERY_END_AT:-}
@@ -157,6 +167,10 @@ services:
       HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS: ${HACIENDA_AUTH_TOKEN_EXPIRY_SAFETY_MARGIN_MS:-30000}
       HACIENDA_AUTH_RETRY_5XX_COUNT: ${HACIENDA_AUTH_RETRY_5XX_COUNT:-1}
       HACIENDA_AUTH_RETRY_5XX_DELAY_MS: ${HACIENDA_AUTH_RETRY_5XX_DELAY_MS:-2000}
+    volumes:
+      - *local-fiscal-storage-mount
+      - ./secrets-storage:/var/lib/billing-secrets
+      - ${LOCAL_SECRET_STORE_MASTER_KEY_FILE:?LOCAL_SECRET_STORE_MASTER_KEY_FILE must point to the operator-managed key}:/run/secrets/billing-local-secret-store.key:ro
 
 volumes:
   postgres_data:

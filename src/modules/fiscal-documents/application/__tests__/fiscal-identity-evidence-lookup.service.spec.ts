@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   FiscalIdentityEvidenceLookupService,
   type FiscalIdentityEvidencePayload,
@@ -78,7 +83,9 @@ function makeReservation(overrides: Record<string, unknown> = {}) {
 function makePrisma(options: { authorized?: boolean; reservations?: unknown[] } = {}) {
   return {
     apiKeyCompany: {
-      findUnique: jest.fn().mockResolvedValue(options.authorized === false ? null : { apiKeyId: API_KEY_ID }),
+      findUnique: jest
+        .fn()
+        .mockResolvedValue(options.authorized === false ? null : { apiKeyId: API_KEY_ID }),
     },
     fiscalIdempotencyKey: {
       findMany: jest.fn().mockResolvedValue(options.reservations ?? [makeReservation()]),
@@ -128,7 +135,9 @@ describe('FiscalIdentityEvidenceLookupService', () => {
       equivalenceContractVersion: FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
       fiscalPayloadEquivalent: true,
     });
-    expect(prisma.fiscalIdempotencyKey.findMany.mock.calls[0][0].where).not.toHaveProperty('apiKeyId');
+    expect(prisma.fiscalIdempotencyKey.findMany.mock.calls[0][0].where).not.toHaveProperty(
+      'apiKeyId',
+    );
     expect(prisma.fiscalIdempotencyKey.create).not.toHaveBeenCalled();
     expect(prisma.fiscalIdempotencyKey.update).not.toHaveBeenCalled();
     expect(prisma.fiscalDocument.create).not.toHaveBeenCalled();
@@ -149,13 +158,18 @@ describe('FiscalIdentityEvidenceLookupService', () => {
     ['wrong environment', { environment: 'PRODUCTION' }],
   ])('fails closed on %s', async (_label, overrides) => {
     const service = new FiscalIdentityEvidenceLookupService(makePrisma() as never);
-    const scoped = _label === 'wrong operation' ? { ...overrides, scopes: ['invoices:read', 'tickets:read'] } : overrides;
+    const scoped =
+      _label === 'wrong operation'
+        ? { ...overrides, scopes: ['invoices:read', 'tickets:read'] }
+        : overrides;
     await expect(service.execute(command(scoped))).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('fails closed when historical candidates conflict', async () => {
     const service = new FiscalIdentityEvidenceLookupService(
-      makePrisma({ reservations: [makeReservation(), makeReservation({ fiscalDocumentId: 'other' })] }) as never,
+      makePrisma({
+        reservations: [makeReservation(), makeReservation({ fiscalDocumentId: 'other' })],
+      }) as never,
     );
     await expect(service.execute(command())).rejects.toBeInstanceOf(ConflictException);
   });
@@ -163,9 +177,9 @@ describe('FiscalIdentityEvidenceLookupService', () => {
   it('rejects missing or unverifiable evidence before reading historical reservations', async () => {
     const prisma = makePrisma();
     const service = new FiscalIdentityEvidenceLookupService(prisma as never);
-    await expect(service.execute(command({ fiscalPayload: { ...PAYLOAD, lines: undefined } }))).rejects.toBeInstanceOf(
-      BadRequestException,
-    );
+    await expect(
+      service.execute(command({ fiscalPayload: { ...PAYLOAD, lines: undefined } })),
+    ).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.fiscalIdempotencyKey.findMany).not.toHaveBeenCalled();
   });
 
@@ -179,10 +193,14 @@ describe('FiscalIdentityEvidenceLookupService', () => {
   });
 
   it('enforces tenant/company authorization and read scope', async () => {
-    const unauthorized = new FiscalIdentityEvidenceLookupService(makePrisma({ authorized: false }) as never);
+    const unauthorized = new FiscalIdentityEvidenceLookupService(
+      makePrisma({ authorized: false }) as never,
+    );
     await expect(unauthorized.execute(command())).rejects.toBeInstanceOf(ForbiddenException);
     const noScope = new FiscalIdentityEvidenceLookupService(makePrisma() as never);
-    await expect(noScope.execute(command({ scopes: [] }))).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(noScope.execute(command({ scopes: [] }))).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('is stable for concurrent read-only historical recovery', async () => {
@@ -196,8 +214,10 @@ describe('FiscalIdentityEvidenceLookupService', () => {
 
   it('rejects an unsupported evidence-contract version without changing v1 lookup behavior', async () => {
     const service = new FiscalIdentityEvidenceLookupService(makePrisma() as never);
-    await service.execute(command({ equivalenceContractVersion: 'unsupported.v1' })).catch((error) =>
-      expect(errorCode(error)).toBe('FISCAL_PAYLOAD_CONTRACT_VERSION_UNSUPPORTED'),
-    );
+    await service
+      .execute(command({ equivalenceContractVersion: 'unsupported.v1' }))
+      .catch((error) =>
+        expect(errorCode(error)).toBe('FISCAL_PAYLOAD_CONTRACT_VERSION_UNSUPPORTED'),
+      );
   });
 });

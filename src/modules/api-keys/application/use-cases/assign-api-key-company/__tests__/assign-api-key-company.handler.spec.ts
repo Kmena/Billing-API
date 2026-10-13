@@ -1,5 +1,4 @@
 import { NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { AssignApiKeyCompanyHandler } from '../assign-api-key-company.handler';
 import { ApiKeyNotFoundException } from '../../../../domain/exceptions/api-key-not-found.exception';
 
@@ -76,10 +75,8 @@ describe('AssignApiKeyCompanyHandler', () => {
   });
 
   it('is idempotent when the exact tenant-scoped binding already exists', async () => {
-    const duplicate = new Prisma.PrismaClientKnownRequestError('duplicate', {
-      code: 'P2002',
-      clientVersion: 'test',
-    });
+    const duplicate = Object.assign(new Error('duplicate'), { code: 'P2002' });
+
     const prisma = createPrisma({ createError: duplicate });
     const handler = new AssignApiKeyCompanyHandler(prisma as never);
 

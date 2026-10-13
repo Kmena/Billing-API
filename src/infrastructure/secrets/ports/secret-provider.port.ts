@@ -5,6 +5,12 @@ export interface SecretProvider {
    */
   readonly isDurable: boolean;
 
+  /** Stable, value-free provider identity for startup/runtime diagnostics. */
+  readonly providerId?: string;
+
+  /** Optional infrastructure preflight. Implementations must fail closed. */
+  ensureReady?(): Promise<void>;
+
   /**
    * Retrieves a secret by key.
    * @throws Error if the secret does not exist or cannot be retrieved.

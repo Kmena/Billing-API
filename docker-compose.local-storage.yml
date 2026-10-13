@@ -1,12 +1,13 @@
-# Opt-in local fiscal artifact storage for durable local development.
-# Use only with: docker compose -f docker-compose.yml -f docker-compose.local-storage.yml ...
-# This override is intentionally not part of the default LocalStack-based stack.
+# Compatibility override retained for operators that used it before durable
+# filesystem storage became the default in docker-compose.yml. It is now a
+# no-op by design: the normal local stack already carries this exact contract.
 services:
   billing-api:
     environment:
       STORAGE_TYPE: local
       LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
-      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:-local-signing-secret-dev-only}
+      LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
     volumes:
       - ./storage:/var/lib/billing-artifacts
 
@@ -14,6 +15,7 @@ services:
     environment:
       STORAGE_TYPE: local
       LOCAL_STORAGE_PATH: /var/lib/billing-artifacts
-      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:-local-signing-secret-dev-only}
+      LOCAL_STORAGE_REQUIRED_MARKER: .billing-fiscal-storage-root
+      LOCAL_STORAGE_SECRET: ${LOCAL_STORAGE_SECRET:?LOCAL_STORAGE_SECRET must be set in the gitignored .env file}
     volumes:
       - ./storage:/var/lib/billing-artifacts

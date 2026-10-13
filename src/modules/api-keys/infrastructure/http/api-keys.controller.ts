@@ -22,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../../../api/guards/jwt-auth.guard';
+import { TenantAdminGuard } from '../../../../api/guards/tenant-admin.guard';
 import { AuditService, EventClass } from '../../../audit/application/audit.service';
 import { CreateApiKeyHandler } from '../../application/use-cases/create-api-key/create-api-key.handler';
 import { ListApiKeysHandler } from '../../application/use-cases/list-api-keys/list-api-keys.handler';
@@ -36,7 +37,7 @@ import type { ApiKeyEnvironment } from '../../domain/entities/api-key.entity';
 @ApiTags('API Keys')
 @SkipThrottle()
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, TenantAdminGuard)
 @Controller('api-keys')
 export class ApiKeysController {
   constructor(
@@ -60,7 +61,8 @@ export class ApiKeysController {
       tenantId: req.user.tenantId,
       name: dto.name,
       environment: dto.environment as ApiKeyEnvironment,
-      scopes: dto.scopes,
+      scopes: dto.scopes ?? [],
+      integrationProfile: dto.integrationProfile,
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
     });
 
@@ -71,7 +73,11 @@ export class ApiKeysController {
       action: 'api-key.created',
       resource: `ApiKey:${result.id}`,
       eventClass: EventClass.SECURITY,
-      metadata: { environment: result.environment, scopeCount: result.scopes.length },
+      metadata: {
+        environment: result.environment,
+        scopeCount: result.scopes.length,
+        ...(result.integrationProfile ? { integrationProfile: result.integrationProfile } : {}),
+      },
     });
 
     // BR-001: secret is ONLY included in this 201 response
@@ -82,6 +88,7 @@ export class ApiKeysController {
       keyPrefix: result.keyPrefix,
       secret: result.secret,
       scopes: result.scopes,
+      integrationProfile: result.integrationProfile,
       status: result.status,
       expiresAt: result.expiresAt,
       createdAt: result.createdAt,
@@ -105,6 +112,7 @@ export class ApiKeysController {
       environment: item.environment,
       keyPrefix: item.keyPrefix,
       scopes: item.scopes,
+      integrationProfile: item.integrationProfile,
       status: item.status,
       expiresAt: item.expiresAt,
       lastUsedAt: item.lastUsedAt,

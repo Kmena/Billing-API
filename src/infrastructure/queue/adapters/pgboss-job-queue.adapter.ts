@@ -81,11 +81,29 @@ export class PgBossJobQueue implements JobQueuePort, OnModuleInit, OnModuleDestr
     });
   }
 
+  private async createQueueWithRetry(jobName: string): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await this.boss.createQueue(jobName);
+        return;
+      } catch (error: unknown) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? (error as { code?: unknown }).code
+            : undefined;
+        const retryable = code === '40P01' || code === '40001';
+        if (!retryable || attempt === maxAttempts) throw error;
+        this.logger.warn({ jobName, attempt, code }, 'pg-boss queue creation contention; retrying');
+        await new Promise<void>((resolve) => setTimeout(resolve, attempt * 25));
+      }
+    }
+  }
   private async ensureQueue(jobName: string): Promise<void> {
     const existing = this.ensuredQueues.get(jobName);
     if (existing) return existing;
 
-    const promise = this.boss.createQueue(jobName).catch((error: unknown) => {
+    const promise = this.createQueueWithRetry(jobName).catch((error: unknown) => {
       this.ensuredQueues.delete(jobName);
       throw error;
     });

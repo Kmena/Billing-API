@@ -36,7 +36,16 @@
     "test:hacienda-sandbox:unit": "jest --config ./test/hacienda-sandbox/jest-f4s.json --passWithNoTests --runInBand",
     "f4s:bootstrap-signing-certificate": "ts-node -r tsconfig-paths/register scripts/f4s-bootstrap-signing-certificate.ts",
     "dev:seed-ssm": "node scripts/dev-seed-localstack-ssm.mjs",
-    "dev:restore-cert": "node scripts/dev-restore-cert.mjs"
+    "dev:restore-cert": "node scripts/dev-restore-cert.mjs",
+    "storage:preflight": "node scripts/verify-local-fiscal-storage.mjs",
+    "storage:backup": "node scripts/backup-local-fiscal-artifacts.mjs",
+    "storage:restore": "node scripts/restore-local-fiscal-artifacts.mjs",
+    "secrets:init": "ts-node -r tsconfig-paths/register scripts/init-local-secret-store.ts",
+    "secrets:put": "ts-node -r tsconfig-paths/register scripts/put-local-secret.ts",
+    "secrets:migrate-hacienda": "ts-node -r tsconfig-paths/register scripts/migrate-local-hacienda-secrets.ts",
+    "secrets:verify": "ts-node -r tsconfig-paths/register scripts/verify-local-secret-store.ts",
+    "secrets:backup": "ts-node -r tsconfig-paths/register scripts/backup-local-secret-store.ts",
+    "secrets:restore": "ts-node -r tsconfig-paths/register scripts/restore-local-secret-store.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.623.0",
@@ -61,14 +70,14 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "helmet": "^8.3.0",
-    "joi": "^17.13.3",
+    "joi": "^17.13.8",
     "nestjs-pino": "^4.1.0",
     "node-forge": "^1.4.0",
     "nodemailer": "^10.0.10",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
-    "pdfkit": "^0.20.2",
     "pdfjs-dist": "^6.3.289",
+    "pdfkit": "^0.20.2",
     "pg-boss": "^10.1.3",
     "pino": "^9.3.2",
     "pino-http": "^10.3.0",
@@ -140,5 +149,14 @@
   },
   "prisma": {
     "schema": "prisma/schema.prisma"
+  },
+  "overrides": {
+    "body-parser": "1.20.6",
+    "file-type": "22.1.1",
+    "js-yaml": "4.3.2",
+    "lodash": "4.18.1",
+    "multer": "2.4.0",
+    "proxy-addr": "2.0.8",
+    "qs": "6.16.0"
   }
 }

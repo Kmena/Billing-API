@@ -364,7 +364,7 @@ describeIfDatabase('F4 PostgreSQL concurrency — real database', () => {
   });
 
   // ── E. Stale SENDING recovery ──────────────────────────────────────────────
-  describe('E. Stale SENDING recovery → RETRY_PENDING', () => {
+  describe('E. Stale SENDING recovery → MANUAL_REVIEW_REQUIRED', () => {
     let deliveryId: string;
 
     beforeEach(async () => {
@@ -389,7 +389,7 @@ describeIfDatabase('F4 PostgreSQL concurrency — real database', () => {
       await prisma.documentDelivery.deleteMany({ where: { id: deliveryId } });
     });
 
-    it('recovery transitions stale SENDING → RETRY_PENDING', async () => {
+    it('recovery quarantines stale SENDING when SMTP outcome is unknowable', async () => {
       const result = await prisma.documentDelivery.updateMany({
         where: {
           id: deliveryId,
@@ -397,16 +397,16 @@ describeIfDatabase('F4 PostgreSQL concurrency — real database', () => {
           updatedAt: { lt: new Date(Date.now() - 300_000) }, // stale > 5 min
         },
         data: {
-          status: 'RETRY_PENDING',
-          lastErrorCode: 'WORKER_CRASH_STALE_SENDING',
+          status: 'MANUAL_REVIEW_REQUIRED',
+          lastErrorCode: 'UNKNOWN_EXTERNAL_OUTCOME',
           updatedAt: new Date(),
         },
       });
       expect(result.count).toBe(1);
 
       const delivery = await prisma.documentDelivery.findUnique({ where: { id: deliveryId } });
-      expect(delivery?.status).toBe('RETRY_PENDING');
-      expect(delivery?.lastErrorCode).toBe('WORKER_CRASH_STALE_SENDING');
+      expect(delivery?.status).toBe('MANUAL_REVIEW_REQUIRED');
+      expect(delivery?.lastErrorCode).toBe('UNKNOWN_EXTERNAL_OUTCOME');
     });
   });
 

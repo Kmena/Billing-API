@@ -16,7 +16,9 @@ describe('FiscalIdentityEvidenceLookupController', () => {
       fiscalPayload: { currency: 'CRC', saleCondition: '01', lines: [] },
     };
 
-    await expect(controller.findByFiscalEvidence(request as never, 'company-id', 'SANDBOX', body as never)).resolves.toEqual({ fiscalDocumentId: 'document-id' });
+    await expect(
+      controller.findByFiscalEvidence(request as never, 'company-id', 'SANDBOX', body as never),
+    ).resolves.toEqual({ fiscalDocumentId: 'document-id' });
     expect(lookup.execute).toHaveBeenCalledWith({
       tenantId: 'tenant-id',
       companyId: 'company-id',

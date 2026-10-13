@@ -217,7 +217,9 @@ export class DeliveryWorkerService implements OnModuleInit {
           attemptId,
           attemptNumber,
           emailResult.outcome,
-          emailResult.sanitizedErrorCode,
+          emailResult.outcome === 'UNKNOWN'
+            ? 'UNKNOWN_EXTERNAL_OUTCOME'
+            : emailResult.sanitizedErrorCode,
           emailResult.sanitizedErrorMessage,
         );
       }
@@ -473,6 +475,7 @@ export class DeliveryWorkerService implements OnModuleInit {
   }
 
   private mapOutcomeToErrorClass(outcome: string, errorCode?: string): DeliveryErrorClass {
+    if (errorCode === 'UNKNOWN_EXTERNAL_OUTCOME') return 'UNKNOWN_EXTERNAL_OUTCOME';
     if (errorCode === 'ARTIFACT_HASH_MISMATCH') return 'ARTIFACT_HASH_MISMATCH';
     if (errorCode === 'ARTIFACT_MISSING') return 'ARTIFACT_MISSING';
     if (errorCode === 'PDF_INVALID_STRUCTURE') return 'ARTIFACT_CORRUPT';
