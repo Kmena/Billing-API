@@ -165,7 +165,7 @@ jobs:
         run: npm run test:e2e:disposable
         env:
           FISCAL_WORKER_ENABLE_IN_TESTS: 'true'
-          INVENTORI_BILLING_CLIENT_PATH: ${{ github.workspace }}/.ci/inventory-api/src/services/billing-api-client.service.js
+          INVENTORI_BILLING_CLIENT_PATH: ${{ github.workspace }}/.ci/inventory-api/inventory-api/src/services/billing-api-client.service.js
           JWT_SECRET: ci-e2e-jwt-secret-32-chars-minimum
           NODE_ENV: test
           SECRET_PROVIDER: env
