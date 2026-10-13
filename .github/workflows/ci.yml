@@ -134,6 +134,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check out pinned Inventori integration client
+        uses: actions/checkout@v4
+        with:
+          repository: Kmena/inventory-api
+          ref: edb1e05186d296e3699c71306913f16aee470d1e
+          path: .ci/inventory-api
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -158,6 +165,7 @@ jobs:
         run: npm run test:e2e:disposable
         env:
           FISCAL_WORKER_ENABLE_IN_TESTS: 'true'
+          INVENTORI_BILLING_CLIENT_PATH: ${{ github.workspace }}/.ci/inventory-api/src/services/billing-api-client.service.js
           JWT_SECRET: ci-e2e-jwt-secret-32-chars-minimum
           NODE_ENV: test
           SECRET_PROVIDER: env
