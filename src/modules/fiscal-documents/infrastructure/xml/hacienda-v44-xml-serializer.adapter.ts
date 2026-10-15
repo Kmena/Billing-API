@@ -35,7 +35,6 @@ const RECEIVER_ACTIVITY_CODE_LENGTH = 6;
  *         CodigoTarifaIVAType definition: "Cuando se trata del IVA las tarifas y
  *         códigos a utilizar son las siguientes"
  */
-const IVA_TAX_CODES = new Set(['01', '07']);
 
 /**
  * Tax codes whose full serialization this adapter currently supports.
@@ -59,6 +58,7 @@ interface FiscalXmlLineSnapshot {
   readonly cabysCode: string;
   readonly description: string;
   readonly unitMeasure: string;
+  readonly transactionType?: string;
   readonly quantity: string;
   readonly unitPrice: string;
   readonly discountAmount?: string;
@@ -190,7 +190,7 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       if (!isCanonicalHaciendaUnit(line.unitMeasure)) {
         throw new Error('FISCAL_XML_UNSUPPORTED_CATALOG:unitMeasure');
       }
-      this.appendLine(detail, line);
+      this.appendLine(detail, line, document.type);
     }
     detail.up();
 
@@ -304,58 +304,28 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     for (const line of lines) {
       const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
       const discount = ScaledDecimal.from(line.discountAmount ?? '0');
-      const tax = ScaledDecimal.from(line.taxAmount ?? '0');
-
+      const treatment = this.classifyLineTax(line);
+      const tax = ScaledDecimal.from(line.taxAmount!);
       totalDescuentos = totalDescuentos.add(discount);
 
       const category = classifyCabys(line.cabysCode);
-      const hasTax = !tax.isZero();
-
-      if (hasTax) {
-        if (category === 'SERVICE') {
-          servGravados = servGravados.add(gross);
-        } else {
-          mercGravadas = mercGravadas.add(gross);
-        }
-        totalImpuesto = totalImpuesto.add(tax);
-
-        if (!line.taxCode) {
-          // appendLine will throw FISCAL_XML_TAX_METADATA_REQUIRED.
-          // Skip group aggregation — serialization cannot complete.
-          continue;
-        }
-        if (!SUPPORTED_TAX_CODES.has(line.taxCode)) {
-          // appendLine will throw FISCAL_XML_UNSUPPORTED_TAX_CODE.
-          // Skip group aggregation — serialization cannot complete.
-          continue;
-        }
-
-        const isIvaTax = IVA_TAX_CODES.has(line.taxCode);
-
-        if (isIvaTax && !line.taxRateCode) {
-          // appendLine will throw FISCAL_XML_IVA_RATE_CODE_REQUIRED.
-          // Skip group aggregation — serialization cannot complete.
-          continue;
-        }
-
-        // IVA codes (01, 07): group key distinguishes each (Codigo, CodigoTarifaIVA) pair.
-        // Non-IVA codes:      group key is Codigo alone (no CodigoTarifaIVA semantics).
-        const key = isIvaTax ? `${line.taxCode}:${line.taxRateCode}` : line.taxCode;
-        const taxRateCode = isIvaTax ? line.taxRateCode : undefined;
-
-        const existing = taxGroups.get(key);
-        if (existing) {
-          existing.total = existing.total.add(tax);
-        } else {
-          taxGroups.set(key, { taxCode: line.taxCode, taxRateCode, total: tax });
-        }
+      if (treatment === 'EXEMPT') {
+        if (category === 'SERVICE') servExentos = servExentos.add(gross);
+        else mercExentas = mercExentas.add(gross);
       } else {
-        if (category === 'SERVICE') {
-          servExentos = servExentos.add(gross);
-        } else {
-          mercExentas = mercExentas.add(gross);
-        }
+        if (category === 'SERVICE') servGravados = servGravados.add(gross);
+        else mercGravadas = mercGravadas.add(gross);
       }
+      totalImpuesto = totalImpuesto.add(tax);
+      const key = `${line.taxCode}:${line.taxRateCode}`;
+      const existing = taxGroups.get(key);
+      if (existing) existing.total = existing.total.add(tax);
+      else
+        taxGroups.set(key, {
+          taxCode: line.taxCode!,
+          taxRateCode: line.taxRateCode,
+          total: tax,
+        });
     }
 
     const totalGravado = servGravados.add(mercGravadas);
@@ -378,6 +348,36 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       totalImpuesto,
       totalComprobante,
     };
+  }
+
+  private classifyLineTax(line: FiscalXmlLineSnapshot): 'EXEMPT' | 'TAXABLE' {
+    if (line.taxAmount === undefined || !line.taxCode) {
+      throw new Error('FISCAL_XML_TAX_METADATA_REQUIRED');
+    }
+    if (!SUPPORTED_TAX_CODES.has(line.taxCode)) {
+      throw new Error(`FISCAL_XML_UNSUPPORTED_TAX_CODE:${line.taxCode}`);
+    }
+    if (!line.taxRateCode || line.taxRate === undefined) {
+      throw new Error('FISCAL_XML_IVA_RATE_CODE_REQUIRED');
+    }
+    const tax = ScaledDecimal.from(line.taxAmount);
+    const rate = ScaledDecimal.from(line.taxRate);
+    if (line.taxCode === '01' && line.taxRateCode === '10') {
+      if (!tax.isZero() || !rate.isZero()) throw new Error('FISCAL_XML_EXEMPT_TAX_INCONSISTENT');
+      return 'EXEMPT';
+    }
+    if (tax.isZero()) {
+      if (line.taxRateCode !== '08' || line.taxCode !== '01' || rate.toString() !== '13.00000') {
+        // Zero rate, non-subject and exoneration need their own verified mappings.
+        throw new Error('FISCAL_XML_ZERO_TAX_TREATMENT_UNSUPPORTED');
+      }
+      const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
+      const net = gross.subtract(ScaledDecimal.from(line.discountAmount ?? '0'));
+      if (!net.multiply(rate).multiply(ScaledDecimal.from('0.01')).isZero()) {
+        throw new Error('FISCAL_XML_ZERO_TAX_AMOUNT_INCONSISTENT');
+      }
+    }
+    return 'TAXABLE';
   }
 
   private appendParty(
@@ -412,12 +412,17 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     node.up();
   }
 
-  private appendLine(parent: XMLBuilderNode, line: FiscalXmlLineSnapshot): void {
+  private appendLine(
+    parent: XMLBuilderNode,
+    line: FiscalXmlLineSnapshot,
+    documentType: string,
+  ): void {
     const quantity = ScaledDecimal.from(line.quantity);
     const unitPrice = ScaledDecimal.from(line.unitPrice);
     const gross = quantity.multiply(unitPrice);
     const discount = ScaledDecimal.from(line.discountAmount ?? '0');
-    const tax = ScaledDecimal.from(line.taxAmount ?? '0');
+    const treatment = this.classifyLineTax(line);
+    const tax = ScaledDecimal.from(line.taxAmount!);
     const subtotal = gross.subtract(discount);
     const total = subtotal.add(tax);
 
@@ -426,6 +431,19 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     node.ele('CodigoCABYS').txt(line.cabysCode).up();
     node.ele('Cantidad').txt(this.quantityDecimal(line.quantity)).up();
     node.ele('UnidadMedida').txt(line.unitMeasure).up();
+    if (line.transactionType !== undefined) {
+      if (documentType !== 'INVOICE') throw new Error('FISCAL_XML_TRANSACTION_TYPE_FE_ONLY');
+      if (!/^(0[1-9]|1[0-3])$/.test(line.transactionType)) {
+        throw new Error('FISCAL_XML_TRANSACTION_TYPE_INVALID');
+      }
+      if (
+        (line.transactionType === '07' && treatment !== 'EXEMPT') ||
+        (line.transactionType === '06' && treatment === 'EXEMPT')
+      ) {
+        throw new Error('FISCAL_XML_AFFILIATION_TREATMENT_MISMATCH');
+      }
+      node.ele('TipoTransaccion').txt(line.transactionType).up();
+    }
     node.ele('Detalle').txt(line.description).up();
     node.ele('PrecioUnitario').txt(this.decimal(line.unitPrice)).up();
     node.ele('MontoTotal').txt(this.decimal(gross.toString())).up();
@@ -433,34 +451,15 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       this.appendDiscount(node, line, discount, gross);
     }
     node.ele('SubTotal').txt(this.decimal(subtotal.toString())).up();
-    if (!tax.isZero()) {
-      if (!line.taxCode) {
-        throw new Error('FISCAL_XML_TAX_METADATA_REQUIRED');
-      }
-      if (!SUPPORTED_TAX_CODES.has(line.taxCode)) {
-        // Fail closed: produce no XML rather than incorrect XML.
-        // See SUPPORTED_TAX_CODES definition for what each code requires.
-        throw new Error(`FISCAL_XML_UNSUPPORTED_TAX_CODE:${line.taxCode}`);
-      }
-      const isIvaTax = IVA_TAX_CODES.has(line.taxCode);
-      if (isIvaTax && (!line.taxRateCode || !line.taxRate)) {
-        // IVA codes (01, 07) require CodigoTarifaIVA and Tarifa.
-        throw new Error('FISCAL_XML_IVA_RATE_CODE_REQUIRED');
-      }
-      node.ele('BaseImponible').txt(this.decimal(subtotal.toString())).up();
-      const taxNode = node.ele('Impuesto');
-      taxNode.ele('Codigo').txt(line.taxCode).up();
-      // CodigoTarifaIVA is ONLY emitted for IVA codes (01, 07).
-      // Emitting it for non-IVA codes would violate the v4.4 contract.
-      if (isIvaTax) {
-        taxNode.ele('CodigoTarifaIVA').txt(line.taxRateCode!).up();
-        taxNode.ele('Tarifa').txt(this.decimal(line.taxRate!)).up();
-      }
-      taxNode.ele('Monto').txt(this.decimal(tax.toString())).up();
-      taxNode.up();
-      node.ele('ImpuestoAsumidoEmisorFabrica').txt(this.decimal('0')).up();
-      node.ele('ImpuestoNeto').txt(this.decimal(tax.toString())).up();
-    }
+    node.ele('BaseImponible').txt(this.decimal(subtotal.toString())).up();
+    const taxNode = node.ele('Impuesto');
+    taxNode.ele('Codigo').txt(line.taxCode!).up();
+    taxNode.ele('CodigoTarifaIVA').txt(line.taxRateCode!).up();
+    taxNode.ele('Tarifa').txt(this.decimal(line.taxRate!)).up();
+    taxNode.ele('Monto').txt(this.decimal(tax.toString())).up();
+    taxNode.up();
+    node.ele('ImpuestoAsumidoEmisorFabrica').txt(this.decimal('0')).up();
+    node.ele('ImpuestoNeto').txt(this.decimal(tax.toString())).up();
     node.ele('MontoTotalLinea').txt(this.decimal(total.toString())).up();
     node.up();
   }

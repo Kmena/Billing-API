@@ -21,6 +21,7 @@ export class CreateFiscalLineDto {
   @ApiProperty() @Matches(/^\d{13}$/) cabysCode!: string;
   @ApiProperty() @IsString() @IsNotEmpty() description!: string;
   @ApiProperty() @IsString() @IsNotEmpty() unitMeasure!: string;
+  @ApiPropertyOptional() @IsOptional() @Matches(/^(0[1-9]|1[0-3])$/) transactionType?: string;
   @ApiProperty() @Matches(/^\d+(\.\d{1,5})?$/) quantity!: string;
   @ApiProperty() @Matches(/^\d+(\.\d{1,5})?$/) unitPrice!: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) discountAmount?: string;

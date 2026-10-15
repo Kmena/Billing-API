@@ -69,6 +69,66 @@ describe('fiscal payload equivalence v1', () => {
     );
   });
 
+  it('binds optional affiliation transaction type without changing legacy hashes', () => {
+    const base = fixture.canonicalInput as Record<string, any>;
+    expect(canonicalFiscalPayloadHash(base as never)).toBe(fixture.expectedSha256);
+    const affiliation = {
+      ...base,
+      lines: [{ ...base.lines[0], transactionType: '07' }],
+    };
+    expect(canonicalFiscalPayloadHash(affiliation as never)).not.toBe(fixture.expectedSha256);
+    expect(canonicalFiscalPayloadString(affiliation as never)).toContain('"transactionType":"07"');
+  });
+
+  it('accepts explicit exempt affiliation and rejects inconsistent tax metadata', () => {
+    const service = new FiscalDocumentService({} as never, {} as never);
+    const base = {
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      companyId: '22222222-2222-4222-8222-222222222222',
+      environment: 'SANDBOX' as const,
+      type: 'INVOICE' as const,
+      apiKeyId: '33333333-3333-4333-8333-333333333333',
+      idempotencyKey: 'synthetic-exempt-affiliation',
+      receiver: {
+        name: 'Synthetic Receiver',
+        identificationType: 'JURIDICA',
+        identificationNumber: '3101000001',
+        email: 'receiver@example.test',
+      },
+      currency: 'CRC',
+      saleCondition: '01',
+      paymentMethod: '01',
+      lines: [
+        {
+          lineNumber: 1,
+          cabysCode: '8313100000100',
+          description: 'Synthetic exempt affiliation',
+          unitMeasure: 'Sp',
+          transactionType: '07',
+          quantity: '1',
+          unitPrice: '1000',
+          taxAmount: '0',
+          taxCode: '01',
+          taxRateCode: '10',
+          taxRate: '0',
+        },
+      ],
+    };
+    expect(() => (service as any).validateCreateCommand(base)).not.toThrow();
+    expect(() =>
+      (service as any).validateCreateCommand({
+        ...base,
+        lines: [{ ...base.lines[0], taxRateCode: '08' }],
+      }),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      (service as any).validateCreateCommand({
+        ...base,
+        lines: [{ ...base.lines[0], taxCode: undefined }],
+      }),
+    ).toThrow(BadRequestException);
+  });
+
   it('preserves fiscal line order as evidence', () => {
     const base = fixture.canonicalInput as Record<string, any>;
     const twoLines = {

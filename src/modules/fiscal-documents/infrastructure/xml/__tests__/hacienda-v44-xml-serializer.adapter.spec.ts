@@ -66,6 +66,10 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           unitMeasure: 'Sp',
           quantity: '1.00000',
           unitPrice: '1000.00000',
+          taxAmount: '130.00000',
+          taxCode: '01',
+          taxRateCode: '08',
+          taxRate: '13.00000',
         },
       ],
     });
@@ -230,7 +234,7 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
     expect(result.xml).toContain('<TotalComprobante>1695.00000</TotalComprobante>');
   });
 
-  it('emits TotalServExentos for SERVICE lines with no tax and omits TotalServGravados', () => {
+  it('emits TotalServExentos for an explicitly exempt SERVICE line', () => {
     const snapshot = {
       ...createFiscalXmlSnapshot('INVOICE'),
       lines: [
@@ -241,7 +245,11 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           unitMeasure: 'Sp',
           quantity: '1.00000',
           unitPrice: '1000.00000',
-          // No taxAmount — exempt line
+          transactionType: '07',
+          taxAmount: '0.00000',
+          taxCode: '01',
+          taxRateCode: '10',
+          taxRate: '0.00000',
         },
       ],
     };
@@ -250,7 +258,10 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
 
     expect(result.xml).toContain('<TotalServExentos>1000.00000</TotalServExentos>');
     expect(result.xml).not.toContain('<TotalServGravados>');
-    expect(result.xml).not.toContain('<TotalDesgloseImpuesto>');
+    expect(result.xml).toContain('<TipoTransaccion>07</TipoTransaccion>');
+    expect(result.xml).toContain('<CodigoTarifaIVA>10</CodigoTarifaIVA>');
+    expect(result.xml).toContain('<Monto>0.00000</Monto>');
+    expect(result.xml).toContain('<TotalDesgloseImpuesto>');
     expect(result.xml).not.toContain('<TotalImpuesto>');
     expect(result.xml).toContain('<TotalExento>1000.00000</TotalExento>');
     expect(result.xml).toContain('<TotalVenta>1000.00000</TotalVenta>');

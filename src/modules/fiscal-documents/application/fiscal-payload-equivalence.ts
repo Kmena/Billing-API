@@ -103,7 +103,7 @@ export function stableStringify(value: CanonicalJson): string {
 }
 
 function canonicalLine(line: FiscalDocumentLineInput): CanonicalJson {
-  return {
+  const value: { [key: string]: CanonicalJson } = {
     lineNumber: normalizeInteger(line.lineNumber, 'lineNumber'),
     cabysCode: requireText(line.cabysCode, 'cabysCode'),
     description: requireText(line.description, 'description'),
@@ -119,6 +119,11 @@ function canonicalLine(line: FiscalDocumentLineInput): CanonicalJson {
     taxRateCode: normalizeOptionalText(line.taxRateCode),
     taxRate: normalizeOptionalDecimal(line.taxRate),
   };
+  // Absent transactionType preserves the v1 hash of existing SALE payloads.
+  if (line.transactionType !== undefined) {
+    value.transactionType = requireText(line.transactionType, 'transactionType');
+  }
+  return value;
 }
 
 function normalizeJsonValue(value: unknown, path: string): CanonicalJson {

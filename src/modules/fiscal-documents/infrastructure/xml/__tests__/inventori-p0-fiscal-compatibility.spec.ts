@@ -41,13 +41,123 @@ function expectXsdValid(xml: string): void {
   ).toEqual({ isValid: true, schemaVersion: 'v4.4', errors: [] });
 }
 
-function withDummySignature(xml: string): string {
+function withDummySignature(xml: string, root = 'FacturaElectronica'): string {
   const signature =
     '<ds:Signature><ds:SignedInfo><ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/><ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/><ds:Reference URI=""><ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><ds:DigestValue>YWJjZA==</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>YWJjZA==</ds:SignatureValue></ds:Signature>';
-  return xml.replace('</FacturaElectronica>', `${signature}</FacturaElectronica>`);
+  return xml.replace(`</${root}>`, `${signature}</${root}>`);
 }
 
 describe('Inventori P0 fiscal compatibility — Hacienda v4.4 XML', () => {
+  it('preserves explicit exempt affiliation code 07 and IVA tariff 10 in XSD-valid FE', () => {
+    const result = serializer.serialize(
+      invoice({
+        lines: [
+          line({
+            transactionType: '07',
+            unitPrice: '250.00000',
+            taxAmount: '0.00000',
+            taxCode: '01',
+            taxRateCode: '10',
+            taxRate: '0.00000',
+          }),
+        ],
+      }),
+    );
+    expect(result.xml).toContain('<TipoTransaccion>07</TipoTransaccion>');
+    expect(result.xml).toContain(
+      '<Impuesto><Codigo>01</Codigo><CodigoTarifaIVA>10</CodigoTarifaIVA>',
+    );
+    expect(result.xml).toContain('<Monto>0.00000</Monto>');
+    expect(result.xml).toContain('<TotalServExentos>250.00000</TotalServExentos>');
+    expect(result.xml).toContain('<TotalComprobante>250.00000</TotalComprobante>');
+    expect(result.xml).not.toContain('<Exoneracion>');
+    expectXsdValid(result.xml);
+  });
+
+  it('preserves exempt IVA metadata in XSD-valid TE and rejects FE-only transaction type', () => {
+    const exempt = line({
+      taxAmount: '0.00000',
+      taxCode: '01',
+      taxRateCode: '10',
+      taxRate: '0.00000',
+    });
+    const ticket = serializer.serialize({
+      ...createFiscalXmlSnapshot('TICKET'),
+      lines: [exempt],
+    });
+    expect(ticket.xml).toContain('<CodigoTarifaIVA>10</CodigoTarifaIVA>');
+    expect(ticket.xml).not.toContain('<TipoTransaccion>');
+    expect(
+      validator.validate({
+        documentType: 'TICKET',
+        rootElement: 'TiqueteElectronico',
+        namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/tiqueteElectronico',
+        schemaVersion: 'v4.4',
+        xml: withDummySignature(ticket.xml, 'TiqueteElectronico'),
+      }).isValid,
+    ).toBe(true);
+    expect(() =>
+      serializer.serialize({
+        ...createFiscalXmlSnapshot('TICKET'),
+        lines: [{ ...exempt, transactionType: '07' }],
+      }),
+    ).toThrow('FISCAL_XML_TRANSACTION_TYPE_FE_ONLY');
+  });
+
+  it('keeps exempt and taxable service lines separate in one FE summary', () => {
+    const result = serializer.serialize(
+      invoice({
+        lines: [
+          line({
+            lineNumber: 1,
+            transactionType: '07',
+            unitPrice: '250.00000',
+            taxAmount: '0.00000',
+            taxRateCode: '10',
+            taxRate: '0.00000',
+          }),
+          line({ lineNumber: 2, unitPrice: '1000.00000' }),
+        ],
+      }),
+    );
+    expect(result.xml).toContain('<TotalServExentos>250.00000</TotalServExentos>');
+    expect(result.xml).toContain('<TotalServGravados>1000.00000</TotalServGravados>');
+    expect(result.xml).toContain('<TotalImpuesto>130.00000</TotalImpuesto>');
+    expect(result.xml).toContain('<TotalComprobante>1380.00000</TotalComprobante>');
+    expect(result.xml.match(/<CodigoTarifaIVA>10<\/CodigoTarifaIVA>/g)).toHaveLength(2);
+    expectXsdValid(result.xml);
+  });
+
+  it('rejects missing and ambiguous zero-tax metadata instead of inferring exemption', () => {
+    expect(() =>
+      serializer.serialize(
+        invoice({
+          lines: [
+            line({
+              taxAmount: undefined,
+              taxCode: undefined,
+              taxRateCode: undefined,
+              taxRate: undefined,
+            }),
+          ],
+        }),
+      ),
+    ).toThrow('FISCAL_XML_TAX_METADATA_REQUIRED');
+    expect(() =>
+      serializer.serialize(
+        invoice({
+          lines: [
+            line({
+              taxAmount: '0.00000',
+              taxCode: '01',
+              taxRateCode: '11',
+              taxRate: '0.00000',
+            }),
+          ],
+        }),
+      ),
+    ).toThrow('FISCAL_XML_ZERO_TAX_TREATMENT_UNSUPPORTED');
+  });
   it('keeps zero-discount behavior unchanged', () => {
     const result = serializer.serialize(invoice());
 

@@ -44,6 +44,7 @@ export interface FiscalDocumentLineInput {
   readonly cabysCode: string;
   readonly description: string;
   readonly unitMeasure: string;
+  readonly transactionType?: string;
   readonly quantity: string;
   readonly unitPrice: string;
   readonly discountAmount?: string;
@@ -626,12 +627,52 @@ export class FiscalDocumentService {
       ) {
         throw new BadRequestException({ code: 'INVALID_LINE_AMOUNT' });
       }
-      if (ScaledDecimal.from(line.taxAmount ?? '0').toString() !== '0.00000') {
-        if (!line.taxCode || !line.taxRateCode || !line.taxRate) {
-          throw new BadRequestException({ code: 'FISCAL_TAX_METADATA_REQUIRED' });
+      if (
+        line.taxAmount === undefined ||
+        !line.taxCode ||
+        !line.taxRateCode ||
+        line.taxRate === undefined
+      ) {
+        throw new BadRequestException({ code: 'FISCAL_TAX_METADATA_REQUIRED' });
+      }
+      if (!/^\d{2}$/.test(line.taxCode) || !/^\d{2}$/.test(line.taxRateCode)) {
+        throw new BadRequestException({ code: 'INVALID_FISCAL_TAX_METADATA' });
+      }
+      const zeroTax = ScaledDecimal.from(line.taxAmount).isZero();
+      const zeroRate = ScaledDecimal.from(line.taxRate).isZero();
+      if (line.taxRateCode === '10' && (line.taxCode !== '01' || !zeroTax || !zeroRate)) {
+        throw new BadRequestException({ code: 'FISCAL_EXEMPT_TAX_INCONSISTENT' });
+      }
+      if (zeroTax && line.taxRateCode !== '10') {
+        if (
+          line.taxCode !== '01' ||
+          line.taxRateCode !== '08' ||
+          ScaledDecimal.from(line.taxRate).toString() !== '13.00000'
+        ) {
+          throw new BadRequestException({ code: 'FISCAL_ZERO_TAX_TREATMENT_UNSUPPORTED' });
         }
-        if (!/^\d{2}$/.test(line.taxCode) || !/^\d{2}$/.test(line.taxRateCode)) {
-          throw new BadRequestException({ code: 'INVALID_FISCAL_TAX_METADATA' });
+        const gross = ScaledDecimal.from(line.quantity).multiply(
+          ScaledDecimal.from(line.unitPrice),
+        );
+        const net = gross.subtract(ScaledDecimal.from(line.discountAmount ?? '0'));
+        if (
+          !net
+            .multiply(ScaledDecimal.from(line.taxRate))
+            .multiply(ScaledDecimal.from('0.01'))
+            .isZero()
+        ) {
+          throw new BadRequestException({ code: 'FISCAL_ZERO_TAX_AMOUNT_INCONSISTENT' });
+        }
+      }
+      if (line.transactionType !== undefined) {
+        if (command.type !== 'INVOICE' || !/^(0[1-9]|1[0-3])$/.test(line.transactionType)) {
+          throw new BadRequestException({ code: 'FISCAL_TRANSACTION_TYPE_INVALID' });
+        }
+        if (
+          (line.transactionType === '07' && line.taxRateCode !== '10') ||
+          (line.transactionType === '06' && line.taxRateCode === '10')
+        ) {
+          throw new BadRequestException({ code: 'FISCAL_AFFILIATION_TREATMENT_MISMATCH' });
         }
       }
       this.validateLineDiscount(line);
