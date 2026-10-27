@@ -20,6 +20,29 @@ export const HACIENDA_V44_TIQUETE_ELECTRONICO = {
   sha256: 'aaa273b368997d47214c92455c22b851cb5ab6ef105dc571233268c1ef5fd6c7',
 } as const;
 
+/** Archived v4.4 XSD copies for synthetic W3-A tests; current official CDN bytes remain a release gate. */
+export const HACIENDA_V44_NOTA_CREDITO_LAB = {
+  documentType: 'CREDIT_NOTE',
+  rootElement: 'NotaCreditoElectronica',
+  namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaCreditoElectronica',
+  xsdFileName: 'NotaCreditoElectronica.xsd',
+  sourceUrl:
+    'https://apis.gometa.org/4.4/hacienda/ATV/ComprobanteElectronico/docs/esquemas/2024/v4.4/NotaCreditoElectronica_V4.4.xsd',
+  fileSizeBytes: 121919,
+  sha256: '3a0142010e59126b22d42f736a0f54af38f473d59564e311deca9ee4ccc824a4',
+} as const;
+
+export const HACIENDA_V44_NOTA_DEBITO_LAB = {
+  documentType: 'DEBIT_NOTE',
+  rootElement: 'NotaDebitoElectronica',
+  namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaDebitoElectronica',
+  xsdFileName: 'NotaDebitoElectronica.xsd',
+  sourceUrl:
+    'https://apis.gometa.org/4.4/hacienda/ATV/ComprobanteElectronico/docs/esquemas/2024/v4.4/NotaDebitoElectronica_V4.4.xsd',
+  fileSizeBytes: 121937,
+  sha256: 'f92bf9d4b83f2da9892b5658f8b4e39347ced871bd15c03b5d6437de7bc4fe94',
+} as const;
+
 export const HACIENDA_V44_XADES_CONTRACT = {
   profile: 'XAdES-EPES',
   packaging: 'ENVELOPED',

@@ -42,6 +42,9 @@ export interface AuthenticatedUser {
 
 export interface FiscalDocumentLineInput {
   readonly lineNumber: number;
+  /** Stored only in corrective snapshots; never serialized as a Hacienda field. */
+  readonly sourceLineNumber?: number;
+  readonly commercialReference?: string;
   readonly cabysCode: string;
   readonly description: string;
   readonly unitMeasure: string;
@@ -309,6 +312,25 @@ export class FiscalDocumentService {
     return this.createDocumentCore(tx, command, requestHash, null, origin);
   }
 
+  async createCorrectiveDocumentV3LabInTransaction(
+    tx: PrismaTransactionClient,
+    command: CreateFiscalDocumentCommand,
+    requestHash: string,
+    origin: { consumerId: string; associationId: string },
+    correction: { sourceFiscalDocumentId: string; referenceSnapshot: Record<string, unknown> },
+  ) {
+    if (
+      process.env.NODE_ENV !== 'test' ||
+      command.environment !== 'SANDBOX' ||
+      !['CREDIT_NOTE', 'DEBIT_NOTE'].includes(command.type) ||
+      !command.receiver
+    ) {
+      throw new ForbiddenException({ code: 'W3_A_LAB_ONLY' });
+    }
+    this.validateFiscalContent(command);
+    return this.createDocumentCore(tx, command, requestHash, null, origin, correction);
+  }
+
   validateV2LabCommand(command: CreateFiscalDocumentCommand): void {
     if (
       process.env.NODE_ENV !== 'test' ||
@@ -326,6 +348,7 @@ export class FiscalDocumentService {
     requestHash: string,
     idempotencyKey: string | null,
     origin?: { consumerId: string; associationId: string },
+    correction?: { sourceFiscalDocumentId: string; referenceSnapshot: Record<string, unknown> },
   ) {
     const company = await tx.company.findFirst({
       where: { id: command.companyId, tenantId: command.tenantId, status: 'ACTIVE' },
@@ -461,6 +484,12 @@ export class FiscalDocumentService {
         totals: totals as never,
         idempotencyKey,
         requestHash,
+        ...(correction
+          ? {
+              sourceFiscalDocumentId: correction.sourceFiscalDocumentId,
+              referenceSnapshot: correction.referenceSnapshot as never,
+            }
+          : {}),
         ...(origin
           ? { originConsumerId: origin.consumerId, originAssociationId: origin.associationId }
           : {}),

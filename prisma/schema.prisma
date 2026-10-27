@@ -95,6 +95,8 @@ enum HaciendaEnvironment {
 enum FiscalDocumentType {
   INVOICE
   TICKET
+  CREDIT_NOTE
+  DEBIT_NOTE
 }
 
 enum FiscalDocumentStatus {
@@ -562,6 +564,8 @@ model FiscalDocument {
   totals                       Json
   idempotencyKey               String?                @map("idempotency_key") @db.VarChar(255)
   requestHash                  String?                @map("request_hash") @db.Char(64)
+  sourceFiscalDocumentId       String?                @map("source_fiscal_document_id") @db.Uuid
+  referenceSnapshot            Json?                  @map("reference_snapshot")
   disposedAt                   DateTime?              @map("disposed_at")
   disposedBy                   String?                @map("disposed_by") @db.VarChar(255)
   dispositionReason            String?                @map("disposition_reason") @db.VarChar(500)
@@ -578,6 +582,8 @@ model FiscalDocument {
   documentDeliveries           DocumentDelivery[]
   supersededByFiscalDocument   FiscalDocument?        @relation("FiscalDocumentSupersession", fields: [supersededByFiscalDocumentId], references: [id], onUpdate: Cascade, onDelete: SetNull, map: "fiscal_documents_superseded_by_fkey")
   supersededDocuments          FiscalDocument[]       @relation("FiscalDocumentSupersession")
+  sourceFiscalDocument         FiscalDocument?        @relation("FiscalDocumentCorrections", fields: [sourceFiscalDocumentId], references: [id], onDelete: Restrict)
+  correctiveDocuments          FiscalDocument[]       @relation("FiscalDocumentCorrections")
   originConsumerId             String?                @map("origin_consumer_id") @db.Uuid
   originAssociationId          String?                @map("origin_association_id") @db.Uuid
   originConsumer               FiscalConsumer?        @relation("V2OriginConsumer", fields: [originConsumerId, tenantId], references: [id, tenantId])
@@ -589,6 +595,7 @@ model FiscalDocument {
   @@index([tenantId, companyId, status])
   @@index([tenantId, companyId, idempotencyKey])
   @@index([supersededByFiscalDocumentId], map: "fiscal_documents_superseded_by_idx")
+  @@index([tenantId, companyId, sourceFiscalDocumentId], map: "fiscal_documents_corrections_source_idx")
   @@index([tenantId, originAssociationId, createdAt(sort: Desc)], map: "fiscal_documents_v2_origin_idx")
   @@map("fiscal_documents")
 }

@@ -9,6 +9,8 @@ import {
   HACIENDA_V44_FACTURA_ELECTRONICA,
   HACIENDA_V44_SCHEMA_VERSION,
   HACIENDA_V44_TIQUETE_ELECTRONICO,
+  HACIENDA_V44_NOTA_CREDITO_LAB,
+  HACIENDA_V44_NOTA_DEBITO_LAB,
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
 import {
   FiscalXmlGenerationResult,
@@ -54,10 +56,7 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
     const blockedInput = this.blockedUnsafeXml(generatedXml.xml);
     if (blockedInput) return this.invalid(blockedInput);
 
-    const schemaAsset =
-      generatedXml.documentType === 'INVOICE'
-        ? HACIENDA_V44_FACTURA_ELECTRONICA
-        : HACIENDA_V44_TIQUETE_ELECTRONICO;
+    const schemaAsset = this.asset(generatedXml.documentType);
     const schemaPath = this.schemaPath(schemaAsset.xsdFileName);
     const checksumIssue = this.verifySchemaChecksum(schemaPath, schemaAsset.sha256);
     if (checksumIssue) return this.invalid(checksumIssue);
@@ -79,10 +78,7 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
   compileSchema(
     documentType: FiscalXmlGenerationResult['documentType'],
   ): FiscalXmlValidationResult {
-    const schemaAsset =
-      documentType === 'INVOICE'
-        ? HACIENDA_V44_FACTURA_ELECTRONICA
-        : HACIENDA_V44_TIQUETE_ELECTRONICO;
+    const schemaAsset = this.asset(documentType);
     const schemaPath = this.schemaPath(schemaAsset.xsdFileName);
     const checksumIssue = this.verifySchemaChecksum(schemaPath, schemaAsset.sha256);
     if (checksumIssue) return this.invalid(checksumIssue);
@@ -90,6 +86,19 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
     if (payload.valid)
       return { isValid: true, schemaVersion: HACIENDA_V44_SCHEMA_VERSION, errors: [] };
     return this.invalid(this.normalizeEngineErrors(payload.errors));
+  }
+
+  private asset(documentType: FiscalXmlGenerationResult['documentType']) {
+    switch (documentType) {
+      case 'INVOICE':
+        return HACIENDA_V44_FACTURA_ELECTRONICA;
+      case 'TICKET':
+        return HACIENDA_V44_TIQUETE_ELECTRONICO;
+      case 'CREDIT_NOTE':
+        return HACIENDA_V44_NOTA_CREDITO_LAB;
+      case 'DEBIT_NOTE':
+        return HACIENDA_V44_NOTA_DEBITO_LAB;
+    }
   }
 
   private runValidator(args: string[]): EngineValidationPayload {

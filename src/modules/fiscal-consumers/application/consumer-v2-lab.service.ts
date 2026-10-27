@@ -108,6 +108,9 @@ export class ConsumerV2LabService {
   /** Synthetic-only reservation; no fiscal payload, document or consecutive is created. */
   reserveSyntheticLab(command: ConsumerV2OperationCommand) {
     this.validateOperation(command);
+    if (command.operation !== 'CREATE_INVOICE') {
+      throw new BadRequestException({ code: 'CONSUMER_OPERATION_INVALID' });
+    }
     return this.repository.reserveSyntheticLab(command);
   }
 
@@ -122,7 +125,7 @@ export class ConsumerV2LabService {
 
   private validateOperation(command: ConsumerV2OperationCommand): void {
     if (
-      command.operation !== 'CREATE_INVOICE' ||
+      !['CREATE_INVOICE', 'CREATE_CREDIT_NOTE', 'CREATE_DEBIT_NOTE'].includes(command.operation) ||
       !command.idempotencyKey ||
       command.idempotencyKey.length > 128 ||
       command.idempotencyKey.trim() !== command.idempotencyKey ||

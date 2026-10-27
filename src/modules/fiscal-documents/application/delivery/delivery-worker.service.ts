@@ -152,6 +152,9 @@ export class DeliveryWorkerService implements OnModuleInit {
     });
 
     try {
+      if (doc.type !== 'INVOICE' && doc.type !== 'TICKET') {
+        throw new Error('DELIVERY_DOCUMENT_TYPE_UNSUPPORTED');
+      }
       const attachments = await this.buildAttachments(delivery, doc);
       const emailResult = await this.emailPort.sendEmail({
         to: delivery.recipient,
@@ -266,9 +269,12 @@ export class DeliveryWorkerService implements OnModuleInit {
       companyId: string;
       clave: string;
       consecutive: string;
-      type: 'INVOICE' | 'TICKET';
+      type: 'INVOICE' | 'TICKET' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
     },
   ): Promise<EmailAttachment[]> {
+    if (doc.type !== 'INVOICE' && doc.type !== 'TICKET') {
+      throw new Error('DELIVERY_DOCUMENT_TYPE_UNSUPPORTED');
+    }
     const attachments: EmailAttachment[] = [];
 
     if (delivery.kind === 'INITIAL_DOCUMENT') {

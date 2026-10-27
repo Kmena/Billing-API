@@ -1,0 +1,45 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { CONSUMER_V2_LAB_SCOPES } from '../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
+import { W3_A_LAB_HASH_VERSION } from '../../src/modules/fiscal-intent-v2/w3-a-correction-projection';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const yaml = require('js-yaml') as { load(input: string): unknown };
+
+describe('W3-A corrective laboratory contract', () => {
+  it('pins scopes, hash, status lookup and isolation from AppModule', () => {
+    const contract = yaml.load(
+      readFileSync(
+        join(process.cwd(), 'docs/contracts/billing-w3-a-corrective-lab.v2.openapi.yaml'),
+        'utf8',
+      ),
+    ) as {
+      'x-status': string;
+      'x-hash-version': string;
+      servers: Array<{ url: string }>;
+      paths: Record<
+        string,
+        Record<string, { 'x-required-scope': string; responses: Record<string, unknown> }>
+      >;
+    };
+    expect(contract['x-status']).toBe('lab-only-inactive-in-product');
+    expect(contract['x-hash-version']).toBe(W3_A_LAB_HASH_VERSION);
+    expect(contract.servers[0].url).toBe('/api/v2/lab');
+    const root = '/companies/{companyId}/fiscal-documents/{environment}';
+    for (const [path, scope] of [
+      ['credit-notes', 'fiscal-v2:credit-notes:create'],
+      ['debit-notes', 'fiscal-v2:debit-notes:create'],
+    ]) {
+      const operation = contract.paths[`${root}/${path}`].post;
+      expect(operation['x-required-scope']).toBe(scope);
+      expect(CONSUMER_V2_LAB_SCOPES).toContain(scope);
+      for (const code of ['200', '201', '202', '401', '403', '404', '409', '422'])
+        expect(operation.responses).toHaveProperty(code);
+    }
+    expect(contract.paths[`${root}/corrective-notes/lookup`].post['x-required-scope']).toBe(
+      'fiscal-v2:operations:read',
+    );
+    expect(readFileSync(join(process.cwd(), 'src/app.module.ts'), 'utf8')).not.toContain(
+      'W3AFiscalLabModule',
+    );
+  });
+});

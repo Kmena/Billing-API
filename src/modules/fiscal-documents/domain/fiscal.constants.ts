@@ -7,6 +7,8 @@ export const DEFAULT_TERMINAL_CODE = '00001';
 export const FISCAL_DOCUMENT_CODES = {
   INVOICE: '01',
   TICKET: '04',
+  CREDIT_NOTE: '03',
+  DEBIT_NOTE: '02',
 } as const;
 
 export const ALLOWED_CURRENCY_CODES = ['CRC', 'USD'] as const;

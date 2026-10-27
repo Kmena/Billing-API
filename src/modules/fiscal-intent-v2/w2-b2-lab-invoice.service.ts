@@ -18,6 +18,7 @@ import { PrepareFiscalXmlService } from '../fiscal-documents/application/fiscal-
 import { FISCAL_XML_ERROR } from '../fiscal-documents/domain/fiscal-xml/fiscal-xml.errors';
 import { ConsumerV2Principal } from '../fiscal-consumers/infrastructure/http/consumer-v2.guard';
 import { PrismaConsumerV2Repository } from '../fiscal-consumers/infrastructure/persistence/prisma-consumer-v2.repository';
+import { ConsumerV2Scope } from '../fiscal-consumers/domain/consumer-v2.policy';
 import { projectW2BInvoiceLab, W2B_LAB_HASH_VERSION } from './w2-b-lab-projection';
 
 type Tx = PrismaTransactionClient;
@@ -25,6 +26,15 @@ const CREATE_SCOPE = 'fiscal-v2:invoices:create' as const;
 const READ_SCOPE = 'fiscal-v2:operations:read' as const;
 const OPERATION = 'CREATE_INVOICE' as const;
 const XML_LEASE_MS = 5 * 60_000;
+
+export interface LabFiscalOperationSpec {
+  operation: 'CREATE_INVOICE' | 'CREATE_CREDIT_NOTE' | 'CREATE_DEBIT_NOTE';
+  scope: ConsumerV2Scope;
+  hashVersion: string;
+  requestHash: string;
+  abortOnBusinessError?: boolean;
+  createDocument: (tx: Tx) => Promise<{ id: string }>;
+}
 
 export interface W2B2CreateInput {
   principal: ConsumerV2Principal;
@@ -87,7 +97,34 @@ export class W2B2LabInvoiceService {
       lines: projection.lines,
     };
     this.documents.validateV2LabCommand(command);
-    const reservation = await this.reserve(input, projection.requestHash);
+    return this.executePrepared(input, {
+      operation: OPERATION,
+      scope: CREATE_SCOPE,
+      hashVersion: W2B_LAB_HASH_VERSION,
+      requestHash: projection.requestHash,
+      createDocument: (tx) =>
+        this.documents.createDocumentV2LabInTransaction(tx, command, projection.requestHash, {
+          consumerId: p.consumerId,
+          associationId: p.associationId,
+        }),
+    });
+  }
+
+  /** Shared laboratory reservation, allocation, XML and recovery engine for W2/W3. */
+  async executePrepared(input: W2B2CreateInput, spec: LabFiscalOperationSpec) {
+    this.assertLab(input.principal);
+    if (
+      !input.idempotencyKey ||
+      input.idempotencyKey.length > 128 ||
+      input.idempotencyKey.trim() !== input.idempotencyKey ||
+      !/^[\x21-\x7e]+$/.test(input.idempotencyKey) ||
+      !/^[a-z][a-z\d.-]*$/.test(spec.hashVersion) ||
+      !/^[a-f\d]{64}$/.test(spec.requestHash)
+    ) {
+      throw new BadRequestException({ code: 'FISCAL_OPERATION_IDENTITY_INVALID' });
+    }
+    const p = input.principal;
+    const reservation = await this.reserve(input, spec);
     if (this.interruptAfterReserve) {
       this.interruptAfterReserve = false;
       throw new ServiceUnavailableException({ code: 'W2_B2_LAB_INTERRUPTED_AFTER_RESERVATION' });
@@ -97,12 +134,12 @@ export class W2B2LabInvoiceService {
     try {
       const result = await this.prisma.$transaction(
         async (tx) => {
-          await this.consumers.assertPrincipalForScope(tx, p, CREATE_SCOPE);
+          await this.consumers.assertPrincipalForScope(tx, p, spec.scope);
           await tx.$queryRaw`SELECT id FROM fiscal_idempotency_keys_v2 WHERE id = ${reservation.id}::uuid FOR UPDATE`;
           const current = await tx.fiscalIdempotencyKeyV2.findUniqueOrThrow({
             where: { id: reservation.id },
           });
-          this.assertSameReservation(current, input, projection.requestHash);
+          this.assertSameReservation(current, input, spec);
           if (current.state === 'ABORTED_BEFORE_ALLOCATION') {
             throw new ConflictException({ code: 'FISCAL_OPERATION_ABORTED' });
           }
@@ -121,12 +158,7 @@ export class W2B2LabInvoiceService {
             if (!owned) throw new ConflictException({ code: 'FISCAL_OPERATION_INTEGRITY_ERROR' });
             return { documentId: owned.id, created: false };
           }
-          const document = await this.documents.createDocumentV2LabInTransaction(
-            tx,
-            command,
-            projection.requestHash,
-            { consumerId: p.consumerId, associationId: p.associationId },
-          );
+          const document = await spec.createDocument(tx);
           await tx.fiscalIdempotencyKeyV2.update({
             where: { id: current.id },
             data: {
@@ -136,7 +168,7 @@ export class W2B2LabInvoiceService {
               version: { increment: 1 },
             },
           });
-          await this.audit(tx, input, current.id, 'fiscal-v2.document.created', document.id);
+          await this.audit(tx, input, spec, current.id, 'fiscal-v2.document.created', document.id);
           return { documentId: document.id, created: true };
         },
         { maxWait: 30000, timeout: 30000 },
@@ -144,9 +176,18 @@ export class W2B2LabInvoiceService {
       created = result.created;
       documentId = result.documentId;
     } catch (error) {
-      if (!(error instanceof ConflictException) && !(error instanceof ForbiddenException)) {
+      if (
+        spec.abortOnBusinessError &&
+        (error instanceof BadRequestException ||
+          error instanceof NotFoundException ||
+          error instanceof ConflictException ||
+          error instanceof UnprocessableEntityException)
+      ) {
+        await this.abortBeforeAllocation(input, spec, reservation.id);
+      } else if (!(error instanceof ConflictException) && !(error instanceof ForbiddenException)) {
         await this.markRecovery(
           input,
+          spec,
           reservation.id,
           null,
           'fiscal-v2.creation.recovery-required',
@@ -159,6 +200,7 @@ export class W2B2LabInvoiceService {
       this.interruptAfterDocument = false;
       await this.markRecovery(
         input,
+        spec,
         reservation.id,
         documentId,
         'fiscal-v2.document.recovery-required',
@@ -166,14 +208,21 @@ export class W2B2LabInvoiceService {
       throw new ServiceUnavailableException({ code: 'W2_B2_LAB_INTERRUPTED_AFTER_DOCUMENT' });
     }
 
-    const claim = await this.claimXml(input, reservation.id, documentId);
+    const claim = await this.claimXml(input, spec, reservation.id, documentId);
     if (claim === 'TERMINAL') {
       throw new UnprocessableEntityException({ code: 'FISCAL_OPERATION_TERMINAL' });
     }
     if (claim === 'BUSY')
-      return this.operation(input, reservation.id, documentId, 202, 'RECOVERY_REQUIRED');
+      return this.operation(input, spec, reservation.id, documentId, 202, 'RECOVERY_REQUIRED');
     if (claim === 'READY')
-      return this.operation(input, reservation.id, documentId, created ? 201 : 200, 'COMMITTED');
+      return this.operation(
+        input,
+        spec,
+        reservation.id,
+        documentId,
+        created ? 201 : 200,
+        'COMMITTED',
+      );
     try {
       await this.prepareXml.executeV2Lab({
         tenantId: p.tenantId,
@@ -184,19 +233,30 @@ export class W2B2LabInvoiceService {
         documentId,
         actor: p.apiKeyId,
       });
-      await this.finishXml(input, reservation.id, documentId, 'COMMITTED');
-      return this.operation(input, reservation.id, documentId, created ? 201 : 200, 'COMMITTED');
+      await this.finishXml(input, spec, reservation.id, documentId, 'COMMITTED');
+      return this.operation(
+        input,
+        spec,
+        reservation.id,
+        documentId,
+        created ? 201 : 200,
+        'COMMITTED',
+      );
     } catch (error) {
       if (this.isTerminalXmlFailure(error)) {
-        await this.finishXml(input, reservation.id, documentId, 'FAILED_TERMINAL');
+        await this.finishXml(input, spec, reservation.id, documentId, 'FAILED_TERMINAL');
         throw new UnprocessableEntityException({ code: 'FISCAL_OPERATION_TERMINAL' });
       }
-      await this.finishXml(input, reservation.id, documentId, 'RECOVERY_REQUIRED');
-      return this.operation(input, reservation.id, documentId, 202, 'RECOVERY_REQUIRED');
+      await this.finishXml(input, spec, reservation.id, documentId, 'RECOVERY_REQUIRED');
+      return this.operation(input, spec, reservation.id, documentId, 202, 'RECOVERY_REQUIRED');
     }
   }
 
-  async getDocument(principal: ConsumerV2Principal, documentId: string) {
+  async getDocument(
+    principal: ConsumerV2Principal,
+    documentId: string,
+    allowedTypes?: Array<'CREDIT_NOTE' | 'DEBIT_NOTE'>,
+  ) {
     this.assertLab(principal);
     return this.prisma.$transaction(async (tx) => {
       await this.consumers.assertPrincipalForScope(tx, principal, READ_SCOPE);
@@ -208,6 +268,7 @@ export class W2B2LabInvoiceService {
           environment: 'SANDBOX',
           originConsumerId: principal.consumerId,
           originAssociationId: principal.associationId,
+          ...(allowedTypes ? { type: { in: allowedTypes } } : {}),
         },
         select: { id: true, status: true, clave: true, consecutive: true },
       });
@@ -222,30 +283,31 @@ export class W2B2LabInvoiceService {
     }
   }
 
-  private async reserve(input: W2B2CreateInput, hash: string) {
+  private async reserve(input: W2B2CreateInput, spec: LabFiscalOperationSpec) {
     const p = input.principal;
     return this.prisma.$transaction(
       async (tx) => {
-        await this.consumers.assertPrincipalForScope(tx, p, CREATE_SCOPE);
+        await this.consumers.assertPrincipalForScope(tx, p, spec.scope);
         const id = randomUUID();
         const inserted = await tx.$executeRaw`
         INSERT INTO fiscal_idempotency_keys_v2
           (id, tenant_id, association_id, environment, operation, key,
            request_hash_version, request_hash, state, first_api_key_id, updated_at)
         VALUES (${id}::uuid, ${p.tenantId}::uuid, ${p.associationId}::uuid,
-          'SANDBOX'::"HaciendaEnvironment", ${OPERATION}, ${input.idempotencyKey},
-          ${W2B_LAB_HASH_VERSION}, ${hash}, 'RESERVED', ${p.apiKeyId}::uuid, now())
+          'SANDBOX'::"HaciendaEnvironment", ${spec.operation}, ${input.idempotencyKey},
+          ${spec.hashVersion}, ${spec.requestHash}, 'RESERVED', ${p.apiKeyId}::uuid, now())
         ON CONFLICT (association_id, environment, operation, key) DO NOTHING`;
         const row = await tx.fiscalIdempotencyKeyV2.findFirstOrThrow({
           where: {
             associationId: p.associationId,
             environment: 'SANDBOX',
-            operation: OPERATION,
+            operation: spec.operation,
             key: input.idempotencyKey,
           },
         });
-        this.assertSameReservation(row, input, hash);
-        if (inserted === 1) await this.audit(tx, input, row.id, 'fiscal-v2.operation.reserved');
+        this.assertSameReservation(row, input, spec);
+        if (inserted === 1)
+          await this.audit(tx, input, spec, row.id, 'fiscal-v2.operation.reserved');
         return row;
       },
       { maxWait: 30000, timeout: 30000 },
@@ -262,23 +324,28 @@ export class W2B2LabInvoiceService {
       requestHash: string;
     },
     input: W2B2CreateInput,
-    hash: string,
+    spec: LabFiscalOperationSpec,
   ): void {
     if (
       row.associationId !== input.principal.associationId ||
       row.environment !== 'SANDBOX' ||
-      row.operation !== OPERATION ||
+      row.operation !== spec.operation ||
       row.key !== input.idempotencyKey ||
-      row.requestHashVersion !== W2B_LAB_HASH_VERSION ||
-      row.requestHash !== hash
+      row.requestHashVersion !== spec.hashVersion ||
+      row.requestHash !== spec.requestHash
     ) {
       throw new ConflictException({ code: 'IDEMPOTENCY_PAYLOAD_CONFLICT' });
     }
   }
 
-  private async claimXml(input: W2B2CreateInput, reservationId: string, documentId: string) {
+  private async claimXml(
+    input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
+    reservationId: string,
+    documentId: string,
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      await this.consumers.assertPrincipalForScope(tx, input.principal, CREATE_SCOPE);
+      await this.consumers.assertPrincipalForScope(tx, input.principal, spec.scope);
       await tx.$queryRaw`SELECT id FROM fiscal_idempotency_keys_v2 WHERE id = ${reservationId}::uuid FOR UPDATE`;
       const row = await tx.fiscalIdempotencyKeyV2.findUniqueOrThrow({
         where: { id: reservationId },
@@ -296,7 +363,14 @@ export class W2B2LabInvoiceService {
             where: { id: reservationId },
             data: { state: 'COMMITTED', leaseExpiresAt: null, version: { increment: 1 } },
           });
-          await this.audit(tx, input, reservationId, 'fiscal-v2.operation.reconciled', documentId);
+          await this.audit(
+            tx,
+            input,
+            spec,
+            reservationId,
+            'fiscal-v2.operation.reconciled',
+            documentId,
+          );
         }
         return 'READY' as const;
       }
@@ -310,13 +384,14 @@ export class W2B2LabInvoiceService {
           version: { increment: 1 },
         },
       });
-      await this.audit(tx, input, reservationId, 'fiscal-v2.xml.processing', documentId);
+      await this.audit(tx, input, spec, reservationId, 'fiscal-v2.xml.processing', documentId);
       return 'CLAIMED' as const;
     });
   }
 
   private async finishXml(
     input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
     reservationId: string,
     documentId: string,
     state: 'COMMITTED' | 'RECOVERY_REQUIRED' | 'FAILED_TERMINAL',
@@ -333,6 +408,7 @@ export class W2B2LabInvoiceService {
       await this.audit(
         tx,
         input,
+        spec,
         reservationId,
         state === 'COMMITTED'
           ? 'fiscal-v2.xml.ready'
@@ -346,6 +422,7 @@ export class W2B2LabInvoiceService {
 
   private async markRecovery(
     input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
     reservationId: string,
     documentId: string | null,
     action: string,
@@ -359,7 +436,36 @@ export class W2B2LabInvoiceService {
         },
         data: { state: 'RECOVERY_REQUIRED', leaseExpiresAt: null, version: { increment: 1 } },
       });
-      await this.audit(tx, input, reservationId, action, documentId ?? undefined);
+      await this.audit(tx, input, spec, reservationId, action, documentId ?? undefined);
+    });
+  }
+
+  private async abortBeforeAllocation(
+    input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
+    reservationId: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.fiscalIdempotencyKeyV2.updateMany({
+        where: {
+          id: reservationId,
+          fiscalDocumentId: null,
+          state: { in: ['RESERVED', 'RECOVERY_REQUIRED'] },
+        },
+        data: {
+          state: 'ABORTED_BEFORE_ALLOCATION',
+          leaseExpiresAt: null,
+          version: { increment: 1 },
+        },
+      });
+      if (updated.count)
+        await this.audit(
+          tx,
+          input,
+          spec,
+          reservationId,
+          'fiscal-v2.operation.aborted-before-allocation',
+        );
     });
   }
 
@@ -378,6 +484,7 @@ export class W2B2LabInvoiceService {
 
   private async operation(
     input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
     reservationId: string,
     documentId: string,
     httpStatus: 200 | 201 | 202,
@@ -385,7 +492,7 @@ export class W2B2LabInvoiceService {
   ) {
     const p = input.principal;
     const document = await this.prisma.$transaction(async (tx) => {
-      await this.consumers.assertPrincipalForScope(tx, p, CREATE_SCOPE);
+      await this.consumers.assertPrincipalForScope(tx, p, spec.scope);
       const owned = await tx.fiscalDocument.findFirst({
         where: {
           id: documentId,
@@ -415,6 +522,7 @@ export class W2B2LabInvoiceService {
   private audit(
     tx: Tx,
     input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
     reservationId: string,
     action: string,
     documentId?: string,
@@ -434,7 +542,8 @@ export class W2B2LabInvoiceService {
         metadata: {
           associationId: p.associationId,
           environment: p.environment,
-          requestHashVersion: W2B_LAB_HASH_VERSION,
+          requestHashVersion: spec.hashVersion,
+          operation: spec.operation,
           ...(documentId ? { documentId } : {}),
         },
       },

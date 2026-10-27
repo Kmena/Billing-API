@@ -201,6 +201,9 @@ export class AcceptedFiscalPackageResendService {
     const recipient = recipientResolution.recipient;
 
     try {
+      if (document.type !== 'INVOICE' && document.type !== 'TICKET') {
+        throw new Error('DELIVERY_DOCUMENT_TYPE_UNSUPPORTED');
+      }
       const pdfArtifact = await this.prisma.fiscalArtifact.findFirst({
         where: {
           tenantId: document.tenantId,

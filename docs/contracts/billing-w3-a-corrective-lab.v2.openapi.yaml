@@ -1,0 +1,179 @@
+openapi: 3.1.0
+info:
+  title: Billing W3-A synthetic corrective documents
+  version: 0.1.0-lab
+  description: >-
+    NC/ND for synthetic W2-B2 invoices in SANDBOX. W3AFiscalLabModule is absent
+    from AppModule and requires NODE_ENV=test. No Hacienda submission or
+    production entitlement is implied.
+x-status: lab-only-inactive-in-product
+x-hash-version: w3-a-corrective-lab.v1
+x-approval-gates: [ADR-BIL-011, ADR-BIL-012, ADR-BIL-014, ADR-BIL-016, DF-06]
+x-xsd-gate: Archived v4.4 mirror only; official current NC/ND XSD hashes require verification.
+servers:
+  - url: /api/v2/lab
+paths:
+  /companies/{companyId}/fiscal-documents/{environment}/credit-notes:
+    post:
+      operationId: createSyntheticCreditNoteW3A
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:credit-notes:create
+      parameters: [{ $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' },
+        { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreditNoteIntent' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '200': { $ref: '#/components/responses/Replay' }
+        '202': { $ref: '#/components/responses/Recoverable' }
+        '400': { description: Invalid structure, reference code or decimal format }
+        '401': { description: Missing, expired or revoked M2M key }
+        '403': { description: Scope, association or environment denied }
+        '404': { description: Original absent or outside authenticated origin }
+        '409': { description: Duplicate external ID, key conflict or overcorrection }
+        '422': { description: Original not accepted, pending fiscal policy or terminal XML failure }
+        '503': { description: Retryable interruption before response }
+  /companies/{companyId}/fiscal-documents/{environment}/debit-notes:
+    post:
+      operationId: createSyntheticDebitNoteW3A
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:debit-notes:create
+      parameters: [{ $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' },
+        { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DebitNoteIntent' }
+      responses:
+        '201': { $ref: '#/components/responses/Created' }
+        '200': { $ref: '#/components/responses/Replay' }
+        '202': { $ref: '#/components/responses/Recoverable' }
+        '400': { description: Invalid structure, reference code or decimal format }
+        '401': { description: Missing, expired or revoked M2M key }
+        '403': { description: Scope, association or environment denied }
+        '404': { description: Original absent or outside authenticated origin }
+        '409': { description: Duplicate external ID or idempotency conflict }
+        '422': { description: Original not accepted, pending fiscal policy or terminal XML failure }
+        '503': { description: Retryable interruption before response }
+  /companies/{companyId}/fiscal-documents/{environment}/corrective-notes/{documentId}:
+    get:
+      operationId: getSyntheticCorrectiveNoteW3A
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      parameters: [{ $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' },
+        { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }]
+      responses:
+        '200': { description: Own document status, clave and consecutive }
+        '404': { description: Absent or different origin }
+  /companies/{companyId}/fiscal-documents/{environment}/corrective-notes/lookup:
+    post:
+      operationId: lookupSyntheticCorrectiveOperationW3A
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      parameters: [{ $ref: '#/components/parameters/CompanyId' },
+        { $ref: '#/components/parameters/Environment' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [type, idempotencyKey, requestHash]
+              properties:
+                type: { type: string, enum: [CREDIT_NOTE, DEBIT_NOTE] }
+                idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+                requestHash: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: Committed, recoverable or terminal operation }
+        '202': { description: Reserved operation; retry with same key and payload }
+        '404': { description: Absent operation or mismatched hash }
+components:
+  securitySchemes:
+    ConsumerApiKey: { type: apiKey, in: header, name: X-API-Key }
+  parameters:
+    CompanyId: { name: companyId, in: path, required: true,
+      schema: { type: string, format: uuid } }
+    Environment: { name: environment, in: path, required: true,
+      schema: { type: string, const: SANDBOX } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true,
+      schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[!-~]+$' } }
+  responses:
+    Created: { description: One persisted document and signed local XML,
+      content: { application/json: { schema: { $ref: '#/components/schemas/LabOperation' } } } }
+    Replay: { description: Existing document for identical key and hash,
+      content: { application/json: { schema: { $ref: '#/components/schemas/LabOperation' } } } }
+    Recoverable: { description: XML processing remains recoverable,
+      headers: { Retry-After: { schema: { type: integer } } },
+      content: { application/json: { schema: { $ref: '#/components/schemas/LabOperation' } } } }
+  schemas:
+    LabOperation:
+      type: object
+      additionalProperties: false
+      required: [operationId, documentId, documentStatus, state, clave, consecutive, correlationId]
+      properties:
+        operationId: { type: string, format: uuid }
+        documentId: { type: string, format: uuid }
+        documentStatus: { type: string }
+        state: { type: string, enum: [COMMITTED, RECOVERY_REQUIRED] }
+        clave: { type: string, pattern: '^\d{50}$' }
+        consecutive: { type: string, pattern: '^\d{20}$' }
+        correlationId: { type: string, format: uuid }
+    CommonCorrection:
+      type: object
+      additionalProperties: false
+      required: [sourceDocumentId, mode, referenceReasonCode, reason, externalCorrectionId, correctionLines]
+      properties:
+        sourceDocumentId: { type: string, format: uuid }
+        mode: { type: string, enum: [TOTAL, PARTIAL, ADJUSTMENT] }
+        referenceReasonCode: { type: string, enum: ['01', '02'] }
+        reason: { type: string, minLength: 3, maxLength: 180 }
+        externalCorrectionId: { type: string, minLength: 1, maxLength: 128,
+          description: Opaque commercial identifier; unique per original in the lab. }
+        correctionLines:
+          type: array
+          maxItems: 1000
+          items: { $ref: '#/components/schemas/CorrectionLine' }
+    CreditNoteIntent:
+      allOf:
+        - { $ref: '#/components/schemas/CommonCorrection' }
+        - type: object
+          properties:
+            mode: { type: string, enum: [TOTAL, PARTIAL] }
+            correctionLines:
+              type: array
+              items: { $ref: '#/components/schemas/CreditLine' }
+      description: TOTAL requires empty correctionLines; PARTIAL requires at least one.
+    DebitNoteIntent:
+      allOf:
+        - { $ref: '#/components/schemas/CommonCorrection' }
+        - type: object
+          properties:
+            mode: { type: string, const: ADJUSTMENT }
+            referenceReasonCode: { type: string, const: '02' }
+            correctionLines:
+              type: array
+              minItems: 1
+              items: { $ref: '#/components/schemas/DebitLine' }
+    CorrectionLine:
+      type: object
+      additionalProperties: false
+      required: [sourceLineNumber]
+      properties:
+        sourceLineNumber: { type: integer, minimum: 1, maximum: 1000 }
+        quantity: { type: string, pattern: '^\d{1,13}(\.\d{1,3}|\.\d{1,3}00)?$' }
+        baseAmount: { type: string, pattern: '^\d{1,13}(\.\d{1,5})?$' }
+        commercialReference: { type: string, minLength: 1, maxLength: 128 }
+    CreditLine:
+      allOf: [{ $ref: '#/components/schemas/CorrectionLine' },
+        { type: object, required: [quantity], properties: { baseAmount: false } }]
+    DebitLine:
+      allOf: [{ $ref: '#/components/schemas/CorrectionLine' },
+        { type: object, required: [baseAmount], properties: { quantity: false } }]

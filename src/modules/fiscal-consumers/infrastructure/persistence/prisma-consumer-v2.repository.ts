@@ -24,6 +24,7 @@ import {
 import {
   evaluateConsumerV2Lookup,
   evaluateConsumerV2Replay,
+  ConsumerV2Operation,
 } from '../../domain/consumer-v2-idempotency.policy';
 import type { ConsumerV2Principal } from '../http/consumer-v2.guard';
 
@@ -461,7 +462,7 @@ export class PrismaConsumerV2Repository {
         reservation: reservation && {
           associationId: reservation.associationId,
           environment: reservation.environment,
-          operation: 'CREATE_INVOICE',
+          operation: reservation.operation as ConsumerV2Operation,
           idempotencyKey: reservation.key,
           requestHashVersion: reservation.requestHashVersion,
           requestHash: reservation.requestHash,
