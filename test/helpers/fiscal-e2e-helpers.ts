@@ -74,18 +74,18 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
 
   // READY_TO_SUBMIT intentionally launches INITIAL_DOCUMENT preparation in a
   // setImmediate hook. Under a loaded parallel E2E run that hook can commit a
-  // dependent artifact/delivery between the first child cleanup and the parent
-  // document delete. Retry only that FK window; once the parent is gone, the
+  // dependent artifact/delivery between any two cleanup statements. Retry
+  // only that FK window; once the parent is gone, the
   // production hook fails closed and cannot recreate fiscal state.
   let fiscalDocumentsDeleted = false;
   for (let attempt = 1; attempt <= 5; attempt += 1) {
-    await prisma.deliveryAttempt.deleteMany({ where: { delivery: tenantScope } });
-    await prisma.documentDelivery.deleteMany({ where: tenantScope });
-    await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
-    await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
-    await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
-    await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
     try {
+      await prisma.deliveryAttempt.deleteMany({ where: { delivery: tenantScope } });
+      await prisma.documentDelivery.deleteMany({ where: tenantScope });
+      await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
+      await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
+      await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
+      await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
       await prisma.fiscalDocument.deleteMany({ where: tenantScope });
       fiscalDocumentsDeleted = true;
       break;

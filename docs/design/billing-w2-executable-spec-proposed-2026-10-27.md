@@ -1,0 +1,54 @@
+# Billing W2 — especificación ejecutable propuesta para T06–T07
+
+**Corte de diseño:** 2026-10-27, base `ab65429`. **Estado:** DISEÑO TÉCNICO PROPUESTO; decisiones fiscales y ADR sin aprobar. La fase W2-A implementa únicamente su subconjunto estructural, sin habilitar rutas ni cambiar Inventori. El [OpenAPI de intención](../contracts/billing-fiscal-intent.v2.proposed.openapi.yaml) sigue `proposed-inactive`; sus ejemplos `pending-*` son fixtures de diseño y deben sustituirse antes de congelar un contrato operativo.
+
+## 1. Fuentes oficiales y límite de inferencia
+
+El [Anexo y Estructuras v4.4 de Hacienda](https://www.hacienda.go.cr/docs/ANEXOS_Y_ESTRUCTURAS_V4.4.pdf), consultado 2026-10-27, define `DetalleServicio/LineaDetalle` de 1 a 1.000 líneas con `NumeroLinea` 1–1.000 y `CodigoCABYS` (p. 26); `Descuento` de 0 a 5 por línea, descuentos sucesivos sobre base remanente (pp. 35–36); `Exoneracion` condicional con detalle documental (p. 44); `MedioPago` de 1 a 4 con excepciones expresas para condiciones de crédito (p. 55); `InformacionReferencia` de 0 a 10, obligatoria para determinados documentos (p. 57). La [actualización oficial v4.4](https://www.hacienda.go.cr/docs/ActualizacionAnexosyEstructurasVersion4.4CEv2.pdf) añade/ajusta códigos de referencia. La [API de recepción](https://www.hacienda.go.cr/docs/ComprobantesElectronicosAPI.html) distingue documento recibido de aceptación terminal. Estos son límites de estructura; no determinan la clasificación tributaria de una afiliación concreta. T07 debe fijar versión, fecha, descarga y SHA-256 del XSD/catálogos oficiales al corte de implementación; no descargar en runtime. Verificar vigencia nuevamente antes de una liberación.
+
+## 2. Contrato de intención fiscal v2
+
+**Ruta propuesta:** `POST /api/v2/companies/{companyId}/fiscal-documents/{environment}/invoices`; `X-API-Key` con scope futuro `fiscal-v2:invoices:create`, `Idempotency-Key` obligatoria y `X-Fiscal-Payload-Contract-Version: fiscal-payload.v2`. `companyId`/ambiente se cotejan contra binding del servidor. `consumerId`, `associationId` y tenant no se aceptan como autoridad desde el body. `201` crea identidad local, `200` es replay exacto, `409` conflicto antes de numerar y `202` recuperación incierta; ningún estado local significa aceptación de Hacienda.
+
+| Objeto | Campos obligatorios propuestos | Validación previa a reservar/numerar |
+|---|---|---|
+| Cabecera | `externalOperationId`, `policyVersion`, receptor, moneda, condición de venta, `paymentMethods[]`, `lines[]` | Referencias opacas acotadas, política aprobada del emisor, versión de contrato explícita, rechazar propiedades extra. `exchangeRate` solo según divisa/DF-04. |
+| Línea | `lineNumber`, descripción, CABYS, unidad, cantidad, precio unitario, modo precio, `discounts[]`, tratamiento, `taxes[]` | 1–1.000 líneas, número único 1–1.000 y orden canónico por número; cantidad positiva, precio no negativo, decimal exacto sin float, CABYS/unidad de catálogo fijado. Modo `INCLUSIVE` inhabilitado hasta DF-02/ADR-013. |
+| Descuento | Monto, código oficial y descripción cuando el código lo exige | Máximo cinco por línea; cada monto no negativo y no superior a base remanente; aplicar sucesivamente y registrar orden. Rechazar código o explicación inválidos. |
+| Tributo | Código, tarifa/código de tarifa, base, monto y soporte de exoneración cuando aplique | Lista ordenada y limitada por XSD/catálogo aprobado; no inferir tratamiento por monto cero; recalcular base/monto y suma. `exemptionDocument` genérico del borrador se reemplaza por estructura cerrada solo tras DF-03. |
+| Referencia comercial | `source` opaco: afiliación, período, asignación o pago del consumidor | Sólo procedencia/auditoría; no crea deuda, no decide impuesto y no se serializa en XML como nodo inventado. Cardinalidad y privacidad fijadas en ADR-013. |
+| Referencia fiscal | Tipo/código, documento, fecha y razón cuando el tipo documental la requiera | Modelo separado de referencia comercial; máximo 10 según anexo, validez por tipo/versión y motivo aprobados. No llenar automáticamente desde `source`. |
+
+**Respuesta:** identidad local, clave/consecutivo cuando ya asignados, estado documental, estado de envío, enlaces autorizados, hash/version del snapshot y correlación. Las lecturas por ID/XML/PDF usan origen persistido y la asociación autenticada. El contrato v1, sus 42 pares verbo/ruta y su idempotencia se mantienen byte a byte y semánticamente intactos.
+
+**Snapshot inmutable:** versión de contrato, asociación/origen, emisor/ambiente, `externalOperationId`, política fiscal aprobada del emisor, versión/hash de catálogos/XSD, fecha de emisión, receptor, condición, moneda/tasa, líneas en orden, descuentos/impuestos/bases, referencias fiscales, totales y procedencia comercial. Billing calcula `requestHashVersion=fiscal-payload.v2` desde una canonicalización estable de este snapshot; fijar ausencia frente a `null`, Unicode, escala decimal, orden de arrays y redondeo en golden vectors de ADR-013. Si cambia la versión, no comparar hashes de versiones distintas como equivalentes. La reserva W1 se confirma con la misma identidad local; timeout no crea otra.
+
+## 3. Cálculo y reglas de rechazo
+
+T06 implementará funciones puras: importe bruto `cantidad × precio`; descuentos secuenciales; base neta; cada impuesto según tratamiento aprobado; total de línea; agregados por categoría; total comprobante y conciliación de pago cuando corresponda. Cada paso usa decimal exacto y política de escala/redondeo versionada; no sumar importes redondeados de manera distinta a la aprobada. Una diferencia fuera de tolerancia aprobada se rechaza antes de reserva. Rechazar tratamiento/código/CABYS no aprobado, exoneración vencida/incompleta, soporte ajeno al emisor, cantidad no positiva, descuento superior a base, línea duplicada, total negativo, referencia improcedente y combinación no representable en XML. No ofrecer defaults fiscales sintéticos.
+
+## 4. Escenarios comerciales y fiscales: dos autoridades separadas
+
+Inventori o el consumidor de afiliaciones mantiene planes, cuotas, períodos, saldos, pagos, asignación y reversos. Billing recibe **una intención fiscal declarada y trazable**, valida su representabilidad/aplicabilidad aprobada, emite/sella el snapshot y conserva el estado de Hacienda. Billing nunca calcula deuda comercial ni decide qué cuota pagar.
+
+| Escenario | Hecho del consumidor | Intención a Billing y prueba requerida | Decisión pendiente |
+|---|---|---|---|
+| Dos medios de pago para una obligación | Dos pagos/asignaciones identificados por consumidor | Una intención con hasta cuatro `paymentMethods` si la condición fiscal los exige; suma conciliada al total según política; replay no duplica identidad. | DF-02: momento y condición del documento. |
+| Pago parcial de período | Saldo residual permanece en consumidor | Intención identifica período/asignación opacos; monto fiscal se fija por política aprobada; nuevo pago no modifica snapshot previo. | DF-02: factura al devengo, cobro, crédito, REP o anticipo; no asumir que cada parcial crea FE. |
+| Varias cuotas en una emisión | Consumidor agrupa períodos | Una línea por concepto/período cuando aprobado; números únicos y totales por categoría; no mezclar emisores/ambientes. | DP-02/DF-01: granularidad fiscal y fundamento por cuota. |
+| Cuota declarada exenta | Consumidor aporta concepto y evidencia | Billing exige política del emisor, CABYS/fundamento/estructura vigente; ausencia de impuesto no prueba exención. | DF-01/03: aplicabilidad, código y soporte. |
+| Cuota gravada más cuota exenta | Dos hechos separados | Líneas separadas, bases y totales de gravado/exento conciliados; XML/XSD y PDF reflejan clasificación aprobada. | DF-01/03 para ambos conceptos. |
+| Exoneración de receptor | Evidencia documental vigente | Modelo cerrado, vigencia, porcentaje/monto y autorización verificables; rechazar soporte vencido. | DF-03 y responsable tributario. |
+| Anticipo/excedente o reverso | Ledger comercial conserva saldo/reverso | No crear FE/NC/REP automáticamente por un evento comercial; referencia y tipo requieren intención aprobada. | DF-02, ADR-014 y W3/W4 según tipo. |
+
+## 5. Contratos de compatibilidad y secuencia futura
+
+El consumidor Inventori v1 no necesita migrar ni enviar los campos W2. W2 es un contrato nuevo bajo `/api/v2` con nuevos scopes; no se reutiliza DTO v1 ni se cambia su XML. Para W2, implementar por tareas: (1) congelar ADR-013/016 y DF aplicables; (2) OpenAPI cerrado/golden vectors y fixtures negativos; (3) validador/cálculo puro y catálogos fijados; (4) reserva/origen/numeración transaccional; (5) serializador FE, XSD/XAdES/PDF y artefactos; (6) regresión Inventori y DB descartable; (7) STAG por escenario en W6, con autorización independiente. Las fases posteriores requieren autorización separada.
+
+**Se puede implementar técnicamente tras autorización W2 sin DF tributaria:** estructura/validación de campos no fiscales, decimales exactos, canonicalización con fixtures sintéticos, aislamiento, snapshots y contrato de errores inactivo, catálogo normativo con hash, harness XSD. **No se puede habilitar o implementar una regla tributaria real sin DF/ADR:** clasificación de cuotas, tarifas/códigos, exención/exoneración, condición/pagos parciales/REP, precio incluido, tasa cambiaria y serialización fiscal para un emisor. La separación permite trabajo técnico, no emisión operativa.
+
+## 6. Corte de implementación W2-A estructural
+
+W2-A incorpora DTO estricto, 1–1.000 líneas ordenadas por `lineNumber`, hasta cinco descuentos sucesivos, cuatro medios de pago y diez referencias fiscales, referencias comerciales opacas y declaración de múltiples tributos. El límite de transporte de decimales (18 dígitos enteros, 10 fraccionarios) y de 20 tributos por línea evita entradas ilimitadas; **no fija escala, tasa, redondeo ni catálogo fiscal**. Se verifica cantidad positiva, fechas reales y orden del período, número de línea único y descuento no superior al bruto remanente mediante enteros exactos. Los totales estructurales separan bruto, descuento, neto e impuesto **declarado**; no validan la procedencia ni corrección del tributo.
+
+La canonicalización candidata `w2-a-structural.v1` normaliza decimales, fechas con zona y orden de líneas, preserva el orden de descuentos/impuestos/pagos/referencias y distingue campo ausente de `null`. Incluye el origen confiable de tenant, consumidor, asociación, emisor y ambiente. Tiene vector sintético SHA-256 fijado en pruebas y **no puede escribirse como hash de reserva fiscal `fiscal-payload.v2`**. ADR-BIL-013 debe resolver esa canonicalización final y el snapshot fiscal completo antes de W2-B. `INCLUSIVE` y `exemptionDocument` se rechazan; las decisiones DF-01–DF-06, DP-02, ADR-BIL-016 y catálogos vigentes permanecen pendientes. No existe controlador W2 ni ruta de emisión activada.

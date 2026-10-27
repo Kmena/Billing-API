@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Billing fiscal intent v2 (W2 proposal)
-  version: 0.1.0-proposed
+  version: 0.2.0-proposed
   description: >-
     Design artifact only. This invoice endpoint is NOT part of W1 implementation.
     It cannot accept production traffic until ADR-BIL-013, DP-02 and applicable
@@ -10,6 +10,22 @@ info:
 x-status: proposed-inactive
 x-activation-wave: W2-after-fiscal-approval
 x-tax-decision-gates: [ADR-BIL-013, DP-02, DF-01, DF-02, DF-03, DF-04, DF-05, DF-06]
+x-w2-a-structural-implementation:
+  routesRegistered: false
+  fiscalIssuanceEnabled: false
+  hashVersion: w2-a-structural.v1
+  hashUse: synthetic-comparison-only
+  finalFiscalHashRequires: ADR-BIL-013
+  decimalTransportCap: { integerDigits: 18, fractionalDigits: 10 }
+  opaqueTextPattern: '^\S(?:.*\S)?$'
+  normalizedLineOrder: lineNumber-ascending
+  preservedArrayOrder: [discounts, taxes, paymentMethods, fiscalReferences]
+  absentDistinctFromNull: true
+  priceInputModesAccepted: [EXCLUSIVE]
+  exemptionDocumentAccepted: false
+  taxCodesValidated: false
+  taxArithmeticValidated: false
+  structuralTotals: [gross, discounts, net, declaredTax, totalBeforeFiscalPolicy]
 servers:
   - url: /api/v2
 paths:
@@ -125,18 +141,24 @@ components:
   schemas:
     Decimal:
       type: string
-      pattern: '^-?[0-9]+(\.[0-9]+)?$'
-      description: Exact base-10 decimal string. Final scale and rounding await fiscal approval.
+      pattern: '^\d{1,18}(?:\.\d{1,10})?$'
+      description: W2-A technical transport bound, not an approved fiscal scale or rounding rule. No exponent or sign.
+    Quantity:
+      type: string
+      pattern: '^(?!0+(?:\.0+)?$)\d{1,18}(?:\.\d{1,10})?$'
+      description: Positive exact transport decimal; final fiscal precision awaits ADR-BIL-013.
     SourceReference:
       type: object
       additionalProperties: false
       description: >-
         Opaque audit provenance owned by the consumer; never serialized as
         an invented fiscal XML node and never used by Billing to calculate debt.
+      minProperties: 1
       properties:
-        affiliationId: { type: string, minLength: 1 }
-        periodId: { type: string, minLength: 1 }
-        allocationId: { type: string, minLength: 1 }
+        affiliationId: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        periodId: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        allocationId: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        paymentId: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$', description: Opaque commercial provenance; never an XML fiscal reference by itself. }
     ServicePeriod:
       type: object
       additionalProperties: false
@@ -149,79 +171,108 @@ components:
       additionalProperties: false
       required: [identificationType, identificationNumber, name]
       properties:
-        identificationType: { type: string, description: Code subject to applicable fiscal validation. }
-        identificationNumber: { type: string }
-        name: { type: string }
-        email: { type: string, format: email }
+        identificationType: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Code subject to applicable fiscal validation. }
+        identificationNumber: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$' }
+        name: { type: string, minLength: 1, maxLength: 200, pattern: '^\S(?:.*\S)?$' }
+        email: { type: string, format: email, maxLength: 254 }
     Discount:
       type: object
       additionalProperties: false
       required: [amount, reasonCode]
       properties:
         amount: { $ref: '#/components/schemas/Decimal' }
-        reasonCode: { type: string, description: Fiscal code requires approved mapping. }
-        reason: { type: string }
+        reasonCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Fiscal code requires approved mapping. }
+        reason: { type: string, minLength: 1, maxLength: 200, pattern: '^\S(?:.*\S)?$' }
     DeclaredTax:
       type: object
       additionalProperties: false
       required: [code, rateCode, rate, base, amount]
       properties:
-        code: { type: string, description: No code approved by this proposal. }
-        rateCode: { type: string }
+        code: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: No code approved by this proposal. }
+        rateCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$' }
         rate: { $ref: '#/components/schemas/Decimal' }
         base: { $ref: '#/components/schemas/Decimal' }
         amount: { $ref: '#/components/schemas/Decimal' }
-        exemptionDocument: { type: object, additionalProperties: true, description: Shape blocked by DF decisions. }
+      description: Exemption documentation is rejected by W2-A until DF-03 defines a closed schema.
     FiscalLine:
       type: object
       additionalProperties: false
       required: [lineNumber, description, cabysCode, unitCode, quantity, unitPrice, priceInputMode, discounts, taxTreatment, taxes]
       properties:
-        lineNumber: { type: integer, minimum: 1 }
+        lineNumber: { type: integer, minimum: 1, maximum: 1000, description: Must be unique within the invoice; server rejects duplicates before reservation. }
         source: { $ref: '#/components/schemas/SourceReference' }
         servicePeriod: { $ref: '#/components/schemas/ServicePeriod' }
-        description: { type: string, minLength: 1 }
-        cabysCode: { type: string, description: Validate against catalog applicable on issue date. }
-        unitCode: { type: string, description: Exact code/mapping subject to tax validation. }
-        quantity: { $ref: '#/components/schemas/Decimal' }
+        description: { type: string, minLength: 1, maxLength: 500, pattern: '^\S(?:.*\S)?$' }
+        cabysCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Validate against catalog applicable on issue date. }
+        unitCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Exact code/mapping subject to tax validation. }
+        quantity: { $ref: '#/components/schemas/Quantity' }
         unitPrice: { $ref: '#/components/schemas/Decimal' }
         priceInputMode:
           type: string
           enum: [EXCLUSIVE, INCLUSIVE]
           description: INCLUSIVE is disabled until an approved decomposition rule exists.
+          x-w2-a-accepted: [EXCLUSIVE]
         discounts:
           type: array
+          maxItems: 5
           items: { $ref: '#/components/schemas/Discount' }
         taxTreatment:
           type: string
+          minLength: 1
+          maxLength: 64
+          pattern: '^\S(?:.*\S)?$'
           description: Declared intent; allowed values, evidence and fiscal mapping await DF decisions.
         taxes:
           type: array
+          maxItems: 20
+          description: Technical W2-A abuse bound; applicable tax combinations await DF-03.
           items: { $ref: '#/components/schemas/DeclaredTax' }
     PaymentMethod:
       type: object
       additionalProperties: false
       required: [code, amount]
       properties:
-        code: { type: string, description: Requires fiscal catalog validation. }
+        code: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Requires fiscal catalog validation. }
         amount: { $ref: '#/components/schemas/Decimal' }
+    FiscalReference:
+      type: object
+      additionalProperties: false
+      description: >-
+        Proposed mapping to Hacienda InformacionReferencia. Codes, required
+        fields and applicability depend on document type and approved policy;
+        this is separate from commercial SourceReference.
+      required: [documentTypeCode, issuedAt]
+      properties:
+        documentTypeCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$' }
+        documentNumber: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        issuedAt: { type: string, format: date-time, description: Timezone required in W2-A. }
+        reasonCode: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$' }
+        reason: { type: string, minLength: 1, maxLength: 200, pattern: '^\S(?:.*\S)?$' }
     InvoiceIntent:
       type: object
       additionalProperties: false
       required: [externalOperationId, policyVersion, receiver, currency, saleCondition, paymentMethods, lines]
       properties:
-        externalOperationId: { type: string, minLength: 1, maxLength: 128 }
-        policyVersion: { type: string, minLength: 1, description: Approved issuer policy reference; not a Billing-created tax rule. }
+        externalOperationId: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        policyVersion: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$', description: Approved issuer policy reference; not a Billing-created tax rule. }
         receiver: { $ref: '#/components/schemas/Receiver' }
-        currency: { type: string, description: Catalog validation and currency decisions pending. }
-        exchangeRate: { type: [string, 'null'], description: Exact decimal if applicable; currency rule pending. }
-        saleCondition: { type: string, description: Catalog validation pending. }
+        currency: { type: string, pattern: '^[A-Z]{3}$', description: Catalog validation and currency decisions pending. }
+        exchangeRate: { type: [string, 'null'], pattern: '^\d{1,18}(?:\.\d{1,10})?$', description: Exact transport decimal if applicable; currency rule pending. }
+        saleCondition: { type: string, minLength: 1, maxLength: 64, pattern: '^\S(?:.*\S)?$', description: Catalog validation pending. }
+        fiscalReferences:
+          type: array
+          maxItems: 10
+          description: Optional for FE only when the approved fiscal scenario permits it; mandatory for certain document types.
+          items: { $ref: '#/components/schemas/FiscalReference' }
         paymentMethods:
           type: array
+          maxItems: 4
+          description: Minimum cardinality depends on approved sale condition; the official annex has credit exceptions.
           items: { $ref: '#/components/schemas/PaymentMethod' }
         lines:
           type: array
           minItems: 1
+          maxItems: 1000
           items: { $ref: '#/components/schemas/FiscalLine' }
     InvoiceOperation:
       type: object
