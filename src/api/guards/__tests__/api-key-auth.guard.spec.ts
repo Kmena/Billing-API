@@ -1,8 +1,9 @@
 import { ExecutionContext, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ApiKeyAuthGuard } from '../api-key-auth.guard';
 import { ApiKey } from '../../../modules/api-keys/domain/entities/api-key.entity';
+import { BILLING_CONSUMER_V2_PROFILE } from '../../../modules/fiscal-consumers/domain/consumer-v2.policy';
 
-const apiKey = (environment: 'TEST' | 'LIVE') =>
+const apiKey = (environment: 'TEST' | 'LIVE', integrationProfile?: string) =>
   ApiKey.reconstruct({
     id: '00000000-0000-0000-0000-000000000001',
     tenantId: '00000000-0000-0000-0000-000000000010',
@@ -11,6 +12,7 @@ const apiKey = (environment: 'TEST' | 'LIVE') =>
     keyPrefix: 'wave1001',
     keyHash: 'not-used-by-this-guard-test',
     scopes: ['invoices:write'],
+    integrationProfile,
     status: 'ACTIVE',
     createdAt: new Date('2026-10-09T00:00:00.000Z'),
     updatedAt: new Date('2026-10-09T00:00:00.000Z'),
@@ -120,5 +122,33 @@ describe('ApiKeyAuthGuard fiscal authorization policy', () => {
     await expect(activation).rejects.toMatchObject({
       response: expect.objectContaining({ code: 'FISCAL_IDENTITY_NOT_FOUND' }),
     });
+  });
+
+  it.each([
+    '/api/v1/companies/x/fiscal-documents/SANDBOX/invoices',
+    '/api/v1/fiscal-documents/document-id',
+  ])('rejects a v2 profile on legacy route %s before company lookup', async (originalUrl) => {
+    validateApiKeyHandler.execute.mockResolvedValue({
+      apiKey: apiKey('TEST', BILLING_CONSUMER_V2_PROFILE),
+    });
+    const { context, request } = contextFor({ originalUrl });
+
+    await expect(guard.canActivate(context)).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'INTEGRATION_PROFILE_NOT_AUTHORIZED' }),
+    });
+    expect(prisma.company.findFirst).not.toHaveBeenCalled();
+    expect(request.user).toBeUndefined();
+  });
+
+  it('continues to allow the existing Inventori profile', async () => {
+    validateApiKeyHandler.execute.mockResolvedValue({
+      apiKey: apiKey('TEST', 'inventori-fiscal-v1'),
+    });
+    const { context } = contextFor({
+      params: { companyId: '00000000-0000-0000-0000-000000000020', environment: 'SANDBOX' },
+      originalUrl: '/api/v1/companies/x/fiscal-documents/SANDBOX/invoices',
+    });
+
+    await expect(guard.canActivate(context)).resolves.toBe(true);
   });
 });

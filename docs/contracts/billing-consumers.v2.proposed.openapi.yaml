@@ -4,10 +4,15 @@ info:
   version: 0.1.0-proposed
   description: >-
     Draft W1 contract. No operation in this document is deployed or approved.
-    ADR-BIL-011, ADR-BIL-012 and DP-01 are pending. Existing /api/v1
-    contracts for Inventori remain unchanged.
+    ADR-BIL-011 and ADR-BIL-012 criteria are authorized only for isolated,
+    no-DDL design and tests; formal ADR approval and DP-01 remain pending.
+    Existing /api/v1 contracts for Inventori remain unchanged.
 x-status: proposed
 x-activation-wave: W1-after-approval
+x-credential-policy:
+  steadyActiveKeysPerAssociation: 1
+  maximumActiveKeysDuringRotation: 2
+  rotationIntervalDaysInitialReference: 90
 servers:
   - url: /api/v2
 security: []
@@ -78,9 +83,10 @@ paths:
       tags: [Consumer administration]
       summary: Issue or rotate one association-bound M2M credential
       description: >-
-        The raw secret is returned only in the 201 response. A rotation issues a
-        new key with a bounded overlap; expiry and overlap policy require
-        ADR-BIL-011 approval. No existing v1 key is converted implicitly.
+        The raw secret is returned only in the 201 response. One key is active
+        per association in steady state, with at most two during an explicitly
+        bounded rotation. The 90-day reference interval is configurable.
+        No existing v1 key is converted implicitly.
       operationId: createFiscalConsumerKeyV2
       security: [{ AdminJwt: [] }]
       parameters:
@@ -148,7 +154,7 @@ paths:
       description: >-
         Safe read-only POST. Idempotency key is in the body to avoid URL logs;
         response is never cacheable. The server binds lookup to the authenticated
-        association and compares optional client evidence with the versioned
+        association and compares required client evidence with the versioned
         server hash already stored for that operation. It
         never allocates a consecutive number or creates a document.
       operationId: lookupFiscalOperationV2
@@ -199,7 +205,7 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
-      description: Hashed at rest; bound to one consumer association and environment.
+      description: Hashed at rest; billing-consumer-v2 profile bound to one association and environment.
   parameters:
     ConsumerId:
       name: consumerId
@@ -232,9 +238,9 @@ components:
       additionalProperties: false
       required: [provider, externalConsumerKey, externalCompanyKey, companyId, environment, profileVersion]
       properties:
-        provider: { type: string, minLength: 1, maxLength: 64 }
-        externalConsumerKey: { type: string, minLength: 1, maxLength: 128 }
-        externalCompanyKey: { type: string, minLength: 1, maxLength: 128 }
+        provider: { type: string, minLength: 2, maxLength: 64, pattern: '^[A-Z][A-Z0-9_]{1,63}$' }
+        externalConsumerKey: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        externalCompanyKey: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
         companyId: { type: string, format: uuid }
         environment: { type: string, enum: [SANDBOX, PRODUCTION] }
         profileVersion: { type: string, const: fiscal-consumer-v2 }
@@ -271,21 +277,22 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [fiscal-readiness:read, fiscal-operations:read, invoices:create, invoices:read, fiscal-documents:read, fiscal-artifacts:read]
-          description: W1 grants only readiness and operation lookup; issuance scopes activate in later waves.
+            enum: [fiscal-v2:readiness:read, fiscal-v2:operations:read]
+          description: W1 no-DDL catalogue only; issuance scopes require a later wave.
         expiresAt: { type: string, format: date-time }
     IssuedConsumerKey:
       type: object
       additionalProperties: false
-      required: [keyId, associationId, secret, expiresAt, scopes]
+      required: [keyId, associationId, integrationProfile, secret, expiresAt, scopes]
       properties:
         keyId: { type: string, format: uuid }
         associationId: { type: string, format: uuid }
+        integrationProfile: { type: string, const: billing-consumer-v2 }
         secret: { type: string, description: Shown once. Never returned by GET. }
         expiresAt: { type: string, format: date-time }
         scopes:
           type: array
-          items: { type: string }
+          items: { type: string, enum: [fiscal-v2:readiness:read, fiscal-v2:operations:read] }
     Readiness:
       type: object
       additionalProperties: false
@@ -305,12 +312,12 @@ components:
     OperationLookupRequest:
       type: object
       additionalProperties: false
-      required: [operation, idempotencyKey]
+      required: [operation, idempotencyKey, requestHashVersion, requestHash]
       properties:
         operation: { type: string, enum: [CREATE_INVOICE] }
-        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
-        requestHashVersion: { type: string, description: Optional client evidence; compared with stored server hash version. }
-        requestHash: { type: string, description: Optional client evidence; never trusted as authority. }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+        requestHashVersion: { type: string, minLength: 1, maxLength: 80, pattern: '^[a-z][a-z\d.-]*$', description: Required client evidence; compared with stored server hash version. }
+        requestHash: { type: string, pattern: '^[a-fA-F0-9]{64}$', description: Required client evidence; never trusted as authority. }
     OperationLookup:
       type: object
       additionalProperties: false
@@ -348,12 +355,12 @@ components:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     NotFound:
-      description: Not found or inaccessible in this tenant namespace.
+      description: Not found, inaccessible, or lookup hash/version mismatch in this namespace.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     Conflict:
-      description: Existing mapping or idempotency payload conflicts with this request.
+      description: Existing mapping, creation replay payload conflict, or stored operation integrity error.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

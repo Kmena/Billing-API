@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../../../infrastructure/database/prisma.service';
 import { ApiKeyNotFoundException } from '../../../domain/exceptions/api-key-not-found.exception';
+import { BILLING_CONSUMER_V2_PROFILE } from '../../../../fiscal-consumers/domain/consumer-v2.policy';
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return (
@@ -35,9 +36,12 @@ export class AssignApiKeyCompanyHandler {
         tenantId: command.tenantId,
         status: 'ACTIVE',
       },
-      select: { id: true },
+      select: { id: true, integrationProfile: true },
     });
     if (!apiKey) throw new ApiKeyNotFoundException(command.apiKeyId);
+    if (apiKey.integrationProfile === BILLING_CONSUMER_V2_PROFILE) {
+      throw new ForbiddenException({ code: 'CONSUMER_V2_KEY_BINDING_ONLY' });
+    }
 
     const company = await this.prisma.company.findFirst({
       where: {

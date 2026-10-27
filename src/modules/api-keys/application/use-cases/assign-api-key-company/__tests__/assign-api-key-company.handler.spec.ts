@@ -1,6 +1,7 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AssignApiKeyCompanyHandler } from '../assign-api-key-company.handler';
 import { ApiKeyNotFoundException } from '../../../../domain/exceptions/api-key-not-found.exception';
+import { BILLING_CONSUMER_V2_PROFILE } from '../../../../../fiscal-consumers/domain/consumer-v2.policy';
 
 const TENANT_ID = '00000000-0000-0000-0000-000000000001';
 const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
@@ -83,5 +84,18 @@ describe('AssignApiKeyCompanyHandler', () => {
     await expect(
       handler.execute({ tenantId: TENANT_ID, apiKeyId: API_KEY_ID, companyId: COMPANY_ID }),
     ).resolves.toEqual({ created: false });
+  });
+
+  it('does not assign a v2 bound key through the legacy N:M company endpoint', async () => {
+    const prisma = createPrisma({
+      apiKey: { id: API_KEY_ID, integrationProfile: BILLING_CONSUMER_V2_PROFILE },
+    });
+    const handler = new AssignApiKeyCompanyHandler(prisma as never);
+
+    await expect(
+      handler.execute({ tenantId: TENANT_ID, apiKeyId: API_KEY_ID, companyId: COMPANY_ID }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.company.findFirst).not.toHaveBeenCalled();
+    expect(prisma.apiKeyCompany.create).not.toHaveBeenCalled();
   });
 });

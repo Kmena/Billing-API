@@ -12,6 +12,7 @@ import type { ApiKey } from '../../modules/api-keys/domain/entities/api-key.enti
 import { ApiKeyExpiredException } from '../../modules/api-keys/domain/exceptions/api-key-expired.exception';
 import { ApiKeyRevokedException } from '../../modules/api-keys/domain/exceptions/api-key-revoked.exception';
 import { ApiKeyInvalidException } from '../../modules/api-keys/domain/exceptions/api-key-invalid.exception';
+import { BILLING_CONSUMER_V2_PROFILE } from '../../modules/fiscal-consumers/domain/consumer-v2.policy';
 
 export interface ApiKeyRequest {
   apiKey: ApiKey;
@@ -44,6 +45,12 @@ export class ApiKeyAuthGuard implements CanActivate {
 
     try {
       const { apiKey } = await this.validateApiKeyHandler.execute({ rawKey });
+
+      // The legacy guard must never authorize a v2 association-bound key.
+      // Future v2 controllers require their own binding-aware guard.
+      if (apiKey.integrationProfile === BILLING_CONSUMER_V2_PROFILE) {
+        throw new ForbiddenException({ code: 'INTEGRATION_PROFILE_NOT_AUTHORIZED' });
+      }
 
       await this.assertCompanyAuthorization(request, apiKey);
       this.assertEnvironmentAuthorization(request, apiKey);
