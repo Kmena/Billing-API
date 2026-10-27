@@ -245,4 +245,105 @@ describe('W1 isolated v2 HTTP integration, with v1 loaded but unchanged', () => 
     await request(app.getHttpServer()).get(readiness()).set('X-API-Key', keySecret).expect(401);
     expect(await prisma.fiscalDocument.count({ where: { tenantId } })).toBe(0);
   });
+
+  it('enforces one scope per route, bounded rotation and hash-bound lookup over HTTP', async () => {
+    const created = await request(app.getHttpServer())
+      .post(adminPath)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({
+        provider: 'PARTNER',
+        externalConsumerKey: 'scoped-lab-app',
+        externalCompanyKey: 'scoped-lab-issuer',
+        companyId,
+        environment: 'SANDBOX',
+        profileVersion: 'fiscal-consumer-v2',
+      })
+      .expect(201);
+    const scopedConsumerId = created.body.consumerId as string;
+    const scopedAssociationId = created.body.associationId as string;
+    const keysPath = `${adminPath}/${scopedConsumerId}/keys`;
+    const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const first = await request(app.getHttpServer())
+      .post(keysPath)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({
+        associationId: scopedAssociationId,
+        scopes: ['fiscal-v2:readiness:read'],
+        expiresAt,
+      })
+      .expect(201);
+    const firstSecret = first.body.secret as string;
+
+    await request(app.getHttpServer()).get(readiness()).set('X-API-Key', firstSecret).expect(200);
+    await request(app.getHttpServer())
+      .get(readiness('not-a-uuid'))
+      .set('X-API-Key', firstSecret)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(readiness(companyId, 'INVALID'))
+      .set('X-API-Key', firstSecret)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(lookup())
+      .set('X-API-Key', firstSecret)
+      .send(lookupBody)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(keysPath)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({
+        associationId: scopedAssociationId,
+        scopes: ['fiscal-v2:operations:read'],
+        expiresAt,
+      })
+      .expect(409);
+    await request(app.getHttpServer())
+      .post(keysPath)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({
+        associationId: scopedAssociationId,
+        scopes: ['fiscal-v2:operations:read'],
+        expiresAt,
+        rotationEndsAt: new Date(Date.now() + 25 * 3600_000).toISOString(),
+      })
+      .expect(409);
+    const rotated = await request(app.getHttpServer())
+      .post(keysPath)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({
+        associationId: scopedAssociationId,
+        scopes: ['fiscal-v2:operations:read'],
+        expiresAt,
+        rotationEndsAt: new Date(Date.now() + 3600_000).toISOString(),
+      })
+      .expect(201);
+    const rotatedSecret = rotated.body.secret as string;
+    expect(rotated.body.keyId).not.toBe(first.body.keyId);
+    await request(app.getHttpServer()).get(readiness()).set('X-API-Key', rotatedSecret).expect(403);
+    await request(app.getHttpServer())
+      .post(lookup())
+      .set('X-API-Key', rotatedSecret)
+      .send({ ...lookupBody, requestHash: undefined })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(lookup())
+      .set('X-API-Key', rotatedSecret)
+      .send(lookupBody)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(lookup(companyId, 'PRODUCTION'))
+      .set('X-API-Key', rotatedSecret)
+      .send(lookupBody)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`${adminPath}/${scopedConsumerId}/keys/${first.body.keyId}/revoke`)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .expect(204);
+    await request(app.getHttpServer()).get(readiness()).set('X-API-Key', firstSecret).expect(401);
+    await request(app.getHttpServer())
+      .post(lookup())
+      .set('X-API-Key', rotatedSecret)
+      .send(lookupBody)
+      .expect(404);
+  });
 });

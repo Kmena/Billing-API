@@ -71,7 +71,7 @@ export class ConsumerV2LabService {
       throw new BadRequestException({ code: 'CONSUMER_PROVIDER_NOT_ALLOWED' });
     }
     for (const value of [command.externalConsumerKey, command.externalCompanyKey]) {
-      if (!value || value.length > 128 || value.trim() !== value) {
+      if (!value || value.length > 128 || !/^\S(?:.*\S)?$/.test(value)) {
         throw new BadRequestException({ code: 'CONSUMER_EXTERNAL_KEY_INVALID' });
       }
     }

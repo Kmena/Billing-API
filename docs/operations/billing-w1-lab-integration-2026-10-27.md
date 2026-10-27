@@ -41,3 +41,15 @@ Este mecanismo aprovecha el CI existente. No configura un despliegue automático
 - **XAdES:** la falla histórica independiente `xml-crypto` carece de error/XML/semilla preservados. El fallo XSD observado dentro del sandbox corresponde a `EPERM` al crear Python; no prueba rechazo del XML. Mantener el gate y capturar evidencia sanitizada si reaparece en runner apto.
 
 **Estados:** `W1_LAB_INTEGRATION_PASS=PASS`; `W1_TARGET_DB_READINESS=NOT_READY`; `W1_STAGING_READINESS=NOT_READY`; `W1_PRODUCTION_READINESS=NOT_READY`.
+
+## Cierre operativo adicional en rama aislada
+
+El módulo HTTP W1 ahora falla al iniciar fuera de `NODE_ENV=test`; el guard rechaza IDs de empresa malformados antes de Prisma. La validación directa de claves externas usa la misma expresión que DTO/OpenAPI. Se agregaron negativos HTTP para scope de una sola ruta, hash ausente, ambiente inválido, rotación sin ventana o mayor de 24 horas, revocación y clave v2 frente a v1. Ninguna ruta fiscal de creación v2 se registró en `AppModule`.
+
+Validación posterior: contratos **34/34**, HTTP W1 **3/3**, unidad completa **1338 aprobadas y 13 omitidas**, seguridad **35/35**, concurrencia DB **12/12**, E2E completo **165/165 en 28 suites**, typecheck/build/lint PASS (26 advertencias preexistentes). Cada corrida DB aplicó 25/25 migraciones únicamente a PostgreSQL descartable. Cliente Inventori fijado con SHA-256 `1bc069fa657569ce3c489b633775adea8ba362bbe3c3f19e0051209c88ea9da0`.
+
+Investigación XAdES: cinco ejecuciones aisladas de la suite pasaron **200/200** con Node 24.16.0, Python 3.14.5 y `FacturaElectronica.xsd` SHA-256 `d384afef665573606f6499b2182d6070850ada8c93bc40fa7f0f3901a25b9cc8`. La causa histórica no se reprodujo ni se declara resuelta. Ante un nuevo fallo, el test conserva la categoría del verificador, versión Node y SHA-256 del XML sintético firmado, sin registrar el XML ni claves.
+
+`scripts/update-billing-from-main.mjs` prepara un avance rápido de código desde un checkout `main` limpio, fijado a un SHA revisado. El modo predeterminado es de solo lectura; `--apply` exige el SHA exacto y hace solo fetch/fast-forward. Se verificaron sintaxis, ayuda y rechazos por rama distinta de `main` y falta de SHA. No se ejecutó `--apply`, migración objetivo, build de release ni despliegue.
+
+**Gates vigentes:** `W1_LAB_INTEGRATION_PASS=PASS`; `W1_TARGET_DB_READINESS=NOT_READY` (16 divergencias y ledger objetivo sin preflight DBA); `W1_STAGING_READINESS=NOT_READY`; `W1_PRODUCTION_READINESS=NOT_READY` (ADR-BIL-011/012, DP-01, política de claves, ensayo de restauración y XAdES histórico pendientes).

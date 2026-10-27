@@ -1,10 +1,24 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { FiscalConsumersLabModule } from '../../src/modules/fiscal-consumers/fiscal-consumers-lab.module';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const yaml = require('js-yaml') as { load(input: string): unknown };
 
 describe('W1-D2 lab boundary and additive migration contract', () => {
+  it('refuses accidental module registration outside the test environment', () => {
+    const previous = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      expect(() => new FiscalConsumersLabModule()).toThrow(
+        'W1_LAB_MODULE_REQUIRES_TEST_ENVIRONMENT',
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous;
+    }
+  });
+
   it('keeps the v2 lab module and fiscal issuance absent from the production app', () => {
     const appModule = readFileSync(join(process.cwd(), 'src/app.module.ts'), 'utf8');
     expect(appModule).not.toContain('FiscalConsumersLabModule');
@@ -21,6 +35,7 @@ describe('W1-D2 lab boundary and additive migration contract', () => {
     expect(contract['x-laboratory-implementation']).toMatchObject({
       wave: 'W1-D2',
       moduleRegisteredInAppModule: false,
+      moduleRequiresNodeEnvTest: true,
       operationalRoutesActive: false,
       fiscalIssuanceActive: false,
       persistenceVerification: 'disposable-postgresql-only',

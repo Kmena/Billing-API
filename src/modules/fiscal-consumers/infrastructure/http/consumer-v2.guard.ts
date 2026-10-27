@@ -75,7 +75,12 @@ export class ConsumerV2Guard implements CanActivate {
     const mapping = association?.consumerCompany;
     const companyId = request.params?.companyId;
     const environment = request.params?.environment;
-    if (!companyId || !['SANDBOX', 'PRODUCTION'].includes(environment ?? '')) {
+    // Guards run before controller pipes. Reject malformed IDs before Prisma sees them.
+    if (
+      !companyId ||
+      !/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(companyId) ||
+      !['SANDBOX', 'PRODUCTION'].includes(environment ?? '')
+    ) {
       throw new HttpException({ code: 'CONSUMER_RESOURCE_NOT_FOUND' }, 404);
     }
     const requestedCompany = await this.prisma.company.findUnique({ where: { id: companyId } });

@@ -12,6 +12,7 @@ x-activation-wave: W1-after-approval
 x-laboratory-implementation:
   wave: W1-D2
   moduleRegisteredInAppModule: false
+  moduleRequiresNodeEnvTest: true
   httpRoutesInIsolatedModule: true
   operationalRoutesActive: false
   fiscalIssuanceActive: false

@@ -116,6 +116,14 @@ describe('NodeXadesEpesSignerAdapter', () => {
     expect(signedXml).not.toContain('rsa-sha1');
     const independentVerification = standardsVerifier.verify(signedXml);
 
+    if (!independentVerification.isValid) {
+      throw new Error(
+        `Independent XAdES verification failed: ${independentVerification.error ?? 'UNKNOWN'}; ` +
+          `signedXmlSha256=${crypto.createHash('sha256').update(signedXml).digest('hex')}; ` +
+          `node=${process.version}`,
+      );
+    }
+
     expect(verification.isValid).toBe(true);
     expect(independentVerification).toMatchObject({
       isValid: true,

@@ -20,4 +20,10 @@ import { PrismaConsumerV2Repository } from './infrastructure/persistence/prisma-
   providers: [PrismaConsumerV2Repository, ConsumerV2LabService, ConsumerV2Guard],
   exports: [ConsumerV2LabService, ConsumerV2Guard],
 })
-export class FiscalConsumersLabModule {}
+export class FiscalConsumersLabModule {
+  constructor() {
+    if (process.env.NODE_ENV !== 'test') {
+      throw new Error('W1_LAB_MODULE_REQUIRES_TEST_ENVIRONMENT');
+    }
+  }
+}
