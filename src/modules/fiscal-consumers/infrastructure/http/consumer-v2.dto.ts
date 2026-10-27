@@ -14,7 +14,7 @@ import {
 } from 'class-validator';
 import {
   CONSUMER_V2_ASSOCIATION_CONTRACT,
-  CONSUMER_V2_W1_SCOPES,
+  CONSUMER_V2_LAB_SCOPES,
   FiscalEnvironmentV2,
   ConsumerV2Scope,
 } from '../../domain/consumer-v2.policy';
@@ -55,7 +55,7 @@ export class CreateConsumerKeyV2Dto {
   @IsArray()
   @ArrayMinSize(1)
   @ArrayUnique()
-  @IsIn(CONSUMER_V2_W1_SCOPES, { each: true })
+  @IsIn(CONSUMER_V2_LAB_SCOPES, { each: true })
   scopes!: ConsumerV2Scope[];
 
   @IsISO8601({ strict: true })

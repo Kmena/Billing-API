@@ -85,6 +85,7 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
       await prisma.fiscalArtifact.deleteMany({ where: tenantScope });
       await prisma.fiscalSubmission.deleteMany({ where: tenantScope });
       await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
+      await prisma.fiscalIdempotencyKeyV2.deleteMany({ where: tenantScope });
       await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
       await prisma.fiscalDocument.deleteMany({ where: tenantScope });
       fiscalDocumentsDeleted = true;
@@ -108,8 +109,12 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
   await prisma.fiscalIntegrationAssociation.deleteMany({ where: tenantScope });
   await prisma.haciendaConnection.deleteMany({ where: tenantScope });
   await prisma.auditLog.deleteMany({ where: tenantScope });
+  await prisma.fiscalConsumerKeyBinding.deleteMany({ where: tenantScope });
   await prisma.apiKeyCompany.deleteMany({ where: { apiKey: tenantScope } });
   await prisma.apiKey.deleteMany({ where: tenantScope });
+  await prisma.fiscalConsumerAssociation.deleteMany({ where: tenantScope });
+  await prisma.fiscalConsumerCompany.deleteMany({ where: tenantScope });
+  await prisma.fiscalConsumer.deleteMany({ where: tenantScope });
   await prisma.refreshToken.deleteMany({ where: tenantScope });
   await prisma.user.deleteMany({ where: tenantScope });
   await prisma.company.deleteMany({ where: tenantScope });

@@ -5,14 +5,29 @@ export const CONSUMER_V2_W1_SCOPES = [
   'fiscal-v2:readiness:read',
   'fiscal-v2:operations:read',
 ] as const;
-export type ConsumerV2Scope = (typeof CONSUMER_V2_W1_SCOPES)[number];
+export const CONSUMER_V2_LAB_SCOPES = [
+  ...CONSUMER_V2_W1_SCOPES,
+  'fiscal-v2:invoices:create',
+] as const;
+export type ConsumerV2Scope = (typeof CONSUMER_V2_LAB_SCOPES)[number];
 export type FiscalEnvironmentV2 = 'SANDBOX' | 'PRODUCTION';
 
 export function hasOnlyW1ConsumerScopes(scopes: readonly string[]): boolean {
   return (
     scopes.length > 0 &&
     new Set(scopes).size === scopes.length &&
-    scopes.every((scope) => CONSUMER_V2_W1_SCOPES.includes(scope as ConsumerV2Scope))
+    scopes.every((scope) =>
+      CONSUMER_V2_W1_SCOPES.includes(scope as (typeof CONSUMER_V2_W1_SCOPES)[number]),
+    )
+  );
+}
+
+/** Additional scope exists only in the unregistered laboratory module. */
+export function hasOnlyLabConsumerScopes(scopes: readonly string[]): boolean {
+  return (
+    scopes.length > 0 &&
+    new Set(scopes).size === scopes.length &&
+    scopes.every((scope) => CONSUMER_V2_LAB_SCOPES.includes(scope as ConsumerV2Scope))
   );
 }
 
@@ -129,7 +144,7 @@ export function authorizeConsumerV2(input: {
   ) {
     return deny(403, 'CONSUMER_ENVIRONMENT_NOT_AUTHORIZED');
   }
-  if (!hasOnlyW1ConsumerScopes(key.scopes) || !key.scopes.includes(input.requiredScope)) {
+  if (!hasOnlyLabConsumerScopes(key.scopes) || !key.scopes.includes(input.requiredScope)) {
     return deny(403, 'INSUFFICIENT_SCOPE');
   }
   return {

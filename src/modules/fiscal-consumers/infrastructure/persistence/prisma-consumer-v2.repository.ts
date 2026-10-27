@@ -502,6 +502,11 @@ export class PrismaConsumerV2Repository {
     });
   }
 
+  /** Recheck the key and association inside every fiscal mutation transaction. */
+  async assertPrincipalForScope(tx: Tx, principal: ConsumerV2Principal, scope: ConsumerV2Scope) {
+    return this.assertPrincipal(tx, principal, scope);
+  }
+
   private async assertPrincipal(tx: Tx, p: ConsumerV2Principal, scope: ConsumerV2Scope) {
     const binding = await tx.fiscalConsumerKeyBinding.findUnique({
       where: { apiKeyId: p.apiKeyId },

@@ -98,5 +98,9 @@
   {
     "name": "20261114000000_w1_d2_consumer_m2m_lab",
     "sha256": "b8f17aa80b65571e436f71a8c553229899c5847056bf4011b8c383807bdaeaab"
+  },
+  {
+    "name": "20261115000000_w2_b2_terminal_operation_state",
+    "sha256": "736faf4094c478262bcda95eb0751b85dd02c2d11884bbdf7e672afff09ddd63"
   }
 ]

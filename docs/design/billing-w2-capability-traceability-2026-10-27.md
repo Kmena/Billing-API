@@ -86,3 +86,15 @@ Todas las capacidades, incluidas las no citadas en esta sección, conservan exac
 | C54 | `source` afecta trazabilidad/hash y no crea ledger ni nodo fiscal XML. | Se mantiene `NOT_APPLICABLE`. |
 
 Los 54 estados auditados de la tabla principal permanecen idénticos. El [corte de evidencia W2-B](../operations/billing-w2-b-lab-evidence.md) clasifica el resultado general como parcial.
+
+## Evidencia W2-B2 de persistencia sintética, sin reclasificar capacidades
+
+| Capacidades | Evidencia nueva | Límite del gate |
+|---|---|---|
+| C13, C22–C31 | FE sintética persistida con líneas W2-B, consecutivo único y rechazo previo a reserva de combinaciones no soportadas. | No hay elegibilidad tributaria aprobada, varias cuotas/pagos/impuestos por línea ni escenario de emisor real. |
+| C33–C34 | El documento v2 de laboratorio reutiliza XML/XSD y firma XAdES existentes; artefacto firmado consultable. | Sin aceptación de Hacienda ni STAG; ADR-BIL-016/DF-06 pendientes. |
+| C38, C45 | Reserva v2 con hash versionado, binding de asociación/ambiente, scope de creación, replay/conflicto y OpenAPI separado de laboratorio. | `fiscal-payload.v2` y ruta productiva siguen inactivos; ADR-BIL-011/012/013 pendientes. |
+| C39 | Reintentos tras reserva, documento y firma con estado consultable por clave+hash; error terminal de XSD/firma sin segundo documento. | No cierra la recuperación operativa W5 ni eventos, backup y conciliación externa. |
+| C54 | Procedencia comercial opaca en el hash/snapshot; sin ledger comercial. | Sigue `NOT_APPLICABLE`. |
+
+Los 54 estados auditados originales permanecen idénticos. Véase la [evidencia W2-B2](../operations/billing-w2-b2-persistence-lab-evidence.md) para comandos, base descartable y riesgos.

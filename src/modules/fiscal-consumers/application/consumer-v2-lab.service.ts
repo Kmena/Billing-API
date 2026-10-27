@@ -3,7 +3,7 @@ import {
   CONSUMER_V2_W1_SCOPES,
   ConsumerV2Scope,
   FiscalEnvironmentV2,
-  hasOnlyW1ConsumerScopes,
+  hasOnlyLabConsumerScopes,
 } from '../domain/consumer-v2.policy';
 import { ConsumerV2Operation } from '../domain/consumer-v2-idempotency.policy';
 import { ConsumerV2Principal } from '../infrastructure/http/consumer-v2.guard';
@@ -86,7 +86,7 @@ export class ConsumerV2LabService {
   }
 
   issueKey(command: IssueConsumerKeyV2) {
-    if (!hasOnlyW1ConsumerScopes(command.scopes)) {
+    if (!hasOnlyLabConsumerScopes(command.scopes)) {
       throw new BadRequestException({ code: 'CONSUMER_SCOPE_INVALID' });
     }
     if (

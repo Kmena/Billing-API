@@ -4,7 +4,7 @@ import { FiscalEnvironmentV2 } from './consumer-v2.policy';
 /** Contract evaluation only. No reservation writer or fiscal operation is registered. */
 export type ConsumerV2Operation = 'CREATE_INVOICE';
 export type ConsumerV2ReservationState =
-  'RESERVED' | 'COMMITTED' | 'RECOVERY_REQUIRED' | 'ABORTED_BEFORE_ALLOCATION';
+  'RESERVED' | 'COMMITTED' | 'RECOVERY_REQUIRED' | 'ABORTED_BEFORE_ALLOCATION' | 'FAILED_TERMINAL';
 
 export interface ConsumerV2Reservation {
   associationId: string;
@@ -71,7 +71,10 @@ export function evaluateConsumerV2Lookup(input: {
   if (!reservation || !sameNamespace(query, reservation) || !sameHash(query, reservation)) {
     return { status: 404, code: 'FISCAL_OPERATION_NOT_FOUND' };
   }
-  if (reservation.state === 'COMMITTED' && !reservation.fiscalDocumentId) {
+  if (
+    ['COMMITTED', 'FAILED_TERMINAL'].includes(reservation.state) &&
+    !reservation.fiscalDocumentId
+  ) {
     return { status: 409, code: 'FISCAL_OPERATION_INTEGRITY_ERROR' };
   }
   if (reservation.state === 'RESERVED' && reservation.fiscalDocumentId) {

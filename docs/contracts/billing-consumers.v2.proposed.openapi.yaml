@@ -337,7 +337,7 @@ components:
       required: [operation, state, correlationId]
       properties:
         operation: { type: string }
-        state: { type: string, enum: [RESERVED, COMMITTED, RECOVERY_REQUIRED, ABORTED_BEFORE_ALLOCATION] }
+        state: { type: string, enum: [RESERVED, COMMITTED, RECOVERY_REQUIRED, ABORTED_BEFORE_ALLOCATION, FAILED_TERMINAL], description: FAILED_TERMINAL is exercised only by the W2-B2 disposable laboratory until fiscal activation is approved. }
         fiscalDocumentId: { type: [string, 'null'], format: uuid }
         correlationId: { type: string }
         retryAfterSeconds: { type: integer, minimum: 0 }

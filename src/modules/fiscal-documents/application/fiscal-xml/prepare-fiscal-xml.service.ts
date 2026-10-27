@@ -8,6 +8,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
+import { FiscalDocumentWithXmlArtifacts } from '../../../../infrastructure/database/prisma-fiscal-types';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import { STORAGE_PORT, StoragePort } from '../../../../infrastructure/storage/ports/storage.port';
 import {
@@ -57,6 +58,42 @@ export class PrepareFiscalXmlService {
     this.assertScope(document.type, input.scopes);
     await this.assertApiKeyCompany(input.apiKeyId, document.companyId);
 
+    return this.processDocument(input, document);
+  }
+
+  /** Trusted M2M principal, checked by the isolated v2 service immediately before calling. */
+  async executeV2Lab(input: {
+    tenantId: string;
+    companyId: string;
+    environment: 'SANDBOX';
+    consumerId: string;
+    associationId: string;
+    documentId: string;
+    actor: string;
+  }): Promise<FiscalXmlProcessingResult> {
+    if (process.env.NODE_ENV !== 'test' || input.environment !== 'SANDBOX') {
+      throw new BadRequestException({ code: 'W2_B2_LAB_ONLY' });
+    }
+    const document = await this.prisma.fiscalDocument.findFirst({
+      where: {
+        id: input.documentId,
+        tenantId: input.tenantId,
+        companyId: input.companyId,
+        environment: input.environment,
+        originConsumerId: input.consumerId,
+        originAssociationId: input.associationId,
+      },
+      include: { xmlArtifacts: true },
+    });
+    if (!document) throw new NotFoundException({ code: FISCAL_XML_ERROR.documentNotFound });
+    return this.processDocument({ tenantId: input.tenantId, actor: input.actor }, document, false);
+  }
+
+  private async processDocument(
+    input: { tenantId: string; actor?: string },
+    document: FiscalDocumentWithXmlArtifacts,
+    enableInitialDelivery = true,
+  ): Promise<FiscalXmlProcessingResult> {
     const existingArtifact = document.xmlArtifacts[0];
     if (document.status === 'READY_TO_SUBMIT' && existingArtifact?.signedXmlSha256) {
       return this.toResult(document.id, document.status, existingArtifact);
@@ -224,7 +261,7 @@ export class PrepareFiscalXmlService {
 
       // F4 integration hook (DEC-011): trigger INITIAL_DOCUMENT delivery after READY_TO_SUBMIT
       // INVARIANT: Does NOT modify FiscalDocument.status. Delivery is independent.
-      if (this.ensureInitialDelivery) {
+      if (enableInitialDelivery && this.ensureInitialDelivery) {
         setImmediate(async () => {
           try {
             await this.ensureInitialDelivery!.ensure({

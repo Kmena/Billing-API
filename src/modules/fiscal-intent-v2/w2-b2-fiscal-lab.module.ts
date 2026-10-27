@@ -1,0 +1,20 @@
+import { Module } from '@nestjs/common';
+import { DatabaseModule } from '../../infrastructure/database/database.module';
+import { FiscalConsumersLabModule } from '../fiscal-consumers/fiscal-consumers-lab.module';
+import { FiscalDocumentsModule } from '../fiscal-documents/fiscal-documents.module';
+import { W2B2LabInvoiceController } from './w2-b2-lab-invoice.controller';
+import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
+
+/** Test-only module. It is deliberately absent from AppModule and worker bootstrap. */
+@Module({
+  imports: [DatabaseModule, FiscalConsumersLabModule, FiscalDocumentsModule],
+  controllers: [W2B2LabInvoiceController],
+  providers: [W2B2LabInvoiceService],
+  exports: [W2B2LabInvoiceService],
+})
+export class W2B2FiscalLabModule {
+  constructor() {
+    if (process.env.NODE_ENV !== 'test')
+      throw new Error('W2_B2_LAB_MODULE_REQUIRES_TEST_ENVIRONMENT');
+  }
+}

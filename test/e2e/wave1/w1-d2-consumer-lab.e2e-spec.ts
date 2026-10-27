@@ -3,6 +3,8 @@ import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import * as request from 'supertest';
 import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/application/consumer-v2-lab.service';
 import { FiscalConsumersLabModule } from '../../../src/modules/fiscal-consumers/fiscal-consumers-lab.module';
@@ -177,10 +179,18 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
     await prisma?.$disconnect();
   });
 
-  it('applies 25 migrations and has five new tables with namespace and tenant constraints', async () => {
+  it('applies every manifest migration and has five W1 tables with namespace and tenant constraints', async () => {
     const migrations = await prisma.$queryRaw<Array<{ migration_name: string }>>`
       SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL`;
-    expect(migrations).toHaveLength(25);
+    const manifest = JSON.parse(
+      readFileSync(
+        join(process.cwd(), 'docs/operations/billing-w0-migration-manifest.json'),
+        'utf8',
+      ),
+    ) as Array<{ name: string }>;
+    expect(migrations.map((entry) => entry.migration_name).sort()).toEqual(
+      manifest.map((entry) => entry.name).sort(),
+    );
     const tables = await prisma.$queryRaw<Array<{ table_name: string }>>`
       SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'
         AND table_name IN ('fiscal_consumers', 'fiscal_consumer_companies',

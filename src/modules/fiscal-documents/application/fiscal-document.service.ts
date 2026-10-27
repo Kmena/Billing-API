@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
+import { PrismaTransactionClient } from '../../../infrastructure/database/prisma-fiscal-types';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
 import { AuditService, EventClass } from '../../audit/application/audit.service';
 import {
@@ -256,11 +257,7 @@ export class FiscalDocumentService {
           throw new ForbiddenException({ code: 'API_KEY_COMPANY_NOT_AUTHORIZED' });
       }
 
-      const fiscalProfile = await this.getReadyCompanyFiscalProfile(
-        tx,
-        command.tenantId,
-        command.companyId,
-      );
+      await this.getReadyCompanyFiscalProfile(tx, command.tenantId, command.companyId);
 
       const idempotencyKey = command.idempotencyKey as string;
       const operation = `fiscal-document.create.${command.type.toLowerCase()}`;
@@ -274,133 +271,7 @@ export class FiscalDocumentService {
       });
       if ('response' in idempotency) return idempotency.response;
 
-      // Perform the shared read-only predicate before allocation. A production
-      // module always injects it; the fallback keeps isolated legacy tests valid.
-      let eligibleConnection:
-        { readonly connectionId: string; readonly secretReference: string } | undefined;
-      if (this.issuanceEligibility) {
-        const eligibility = await this.issuanceEligibility.haciendaEligibility({
-          tenantId: command.tenantId,
-          companyId: command.companyId,
-          environment: command.environment,
-        });
-        if (!eligibility.eligible) {
-          throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
-        }
-        eligibleConnection = eligibility;
-      }
-
-      // Recheck the exact validated connection/reference in the allocation
-      // transaction. A concurrent rotation or revocation must restart readiness
-      // rather than allocate against credential state that was never validated.
-      const haciendaConnection = await tx.haciendaConnection.findFirst({
-        where: {
-          tenantId: command.tenantId,
-          companyId: command.companyId,
-          environment: command.environment,
-          status: 'CONNECTED',
-          ...(eligibleConnection
-            ? {
-                id: eligibleConnection.connectionId,
-                secretReference: eligibleConnection.secretReference,
-              }
-            : {}),
-        },
-      });
-      if (!haciendaConnection)
-        throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
-
-      const point = await tx.fiscalIssuancePoint.findFirst({
-        where: {
-          tenantId: command.tenantId,
-          companyId: command.companyId,
-          environment: command.environment,
-          active: true,
-          isDefault: true,
-        },
-        orderBy: { id: 'asc' },
-      });
-      if (!point) throw new BadRequestException({ code: 'FISCAL_ISSUANCE_POINT_REQUIRED' });
-
-      const allocated = await tx.$queryRaw<Array<{ assigned: bigint }>>`
-        INSERT INTO "fiscal_sequences" (
-          "id", "tenant_id", "company_id", "environment", "branch_code", "terminal_code",
-          "document_type", "next_value", "last_assigned", "created_at", "updated_at"
-        ) VALUES (
-          ${randomUUID()}::uuid, ${command.tenantId}::uuid, ${command.companyId}::uuid,
-          ${command.environment}::"HaciendaEnvironment", ${point.branchCode}, ${point.terminalCode},
-          ${command.type}::"FiscalDocumentType", 2, 1, NOW(), NOW()
-        )
-        ON CONFLICT ("tenant_id", "company_id", "environment", "branch_code", "terminal_code", "document_type")
-        DO UPDATE SET "last_assigned" = "fiscal_sequences"."next_value",
-          "next_value" = "fiscal_sequences"."next_value" + 1,
-          "updated_at" = NOW()
-        RETURNING "last_assigned" AS assigned
-      `;
-      const sequenceValue = allocated[0]?.assigned ?? 1n;
-      if (sequenceValue > 9999999999n)
-        throw new ConflictException({ code: 'FISCAL_SEQUENCE_EXHAUSTED' });
-      const issueDate = new Date();
-      const consecutive = buildConsecutive({
-        branchCode: point.branchCode,
-        terminalCode: point.terminalCode,
-        documentType: command.type,
-        sequenceValue,
-      });
-      const securityCode = generateSecurityCode();
-      const clave = buildFiscalKey({
-        issuedAt: issueDate,
-        issuerIdentificationNumber: company.identificationNumber,
-        consecutive,
-        securityCode,
-      });
-      const totals = this.calculateTotals(command.lines);
-
-      const document = await tx.fiscalDocument.create({
-        data: {
-          id: randomUUID(),
-          tenantId: command.tenantId,
-          companyId: command.companyId,
-          environment: command.environment,
-          type: command.type,
-          status: 'READY_FOR_XML',
-          issuancePointId: point.id,
-          branchCode: point.branchCode,
-          terminalCode: point.terminalCode,
-          sequenceValue,
-          consecutive,
-          clave,
-          securityCode,
-          situation: FISCAL_NORMAL_SITUATION,
-          issueDate,
-          issuerSnapshot: {
-            legalName: company.legalName,
-            tradeName: company.tradeName,
-            identificationType: company.identificationType,
-            identificationNumber: company.identificationNumber,
-            codigoActividad: fiscalProfile.resolvedActivityCode,
-            proveedorSistemas: fiscalProfile.proveedorSistemas,
-            provincia: fiscalProfile.province,
-            canton: fiscalProfile.canton,
-            distrito: fiscalProfile.district,
-            barrio: fiscalProfile.barrio,
-            otrasSenas: fiscalProfile.otrasSenas,
-            email: fiscalProfile.email,
-            phoneCountryCode: fiscalProfile.phoneCountryCode,
-            phoneNumber: fiscalProfile.phoneNumber,
-          },
-          receiverSnapshot: command.receiver as never,
-          currency: command.currency,
-          exchangeRate: command.exchangeRate ?? null,
-          saleCondition: command.saleCondition,
-          creditTermDays: command.creditTermDays ?? null,
-          paymentMethod: command.paymentMethod ?? null,
-          lines: command.lines as never,
-          totals: totals as never,
-          idempotencyKey,
-          requestHash,
-        },
-      });
+      const document = await this.createDocumentCore(tx, command, requestHash, idempotencyKey);
 
       await tx.fiscalIdempotencyKey.update({
         where: { id: idempotency.id },
@@ -416,12 +287,187 @@ export class FiscalDocumentService {
         metadata: {
           type: command.type,
           environment: command.environment,
-          consecutive,
+          consecutive: document.consecutive,
           status: 'READY_FOR_XML',
         },
       });
       return this.toFiscalDocumentResponse(document);
     });
+  }
+
+  /**
+   * Shared allocation and immutable snapshot writer. The caller owns authorization,
+   * idempotency and the surrounding transaction; this method never writes either key table.
+   */
+  async createDocumentV2LabInTransaction(
+    tx: PrismaTransactionClient,
+    command: CreateFiscalDocumentCommand,
+    requestHash: string,
+    origin: { consumerId: string; associationId: string },
+  ) {
+    this.validateV2LabCommand(command);
+    return this.createDocumentCore(tx, command, requestHash, null, origin);
+  }
+
+  validateV2LabCommand(command: CreateFiscalDocumentCommand): void {
+    if (
+      process.env.NODE_ENV !== 'test' ||
+      command.environment !== 'SANDBOX' ||
+      command.type !== 'INVOICE'
+    ) {
+      throw new ForbiddenException({ code: 'W2_B2_LAB_ONLY' });
+    }
+    this.validateFiscalContent(command);
+  }
+
+  private async createDocumentCore(
+    tx: PrismaTransactionClient,
+    command: CreateFiscalDocumentCommand,
+    requestHash: string,
+    idempotencyKey: string | null,
+    origin?: { consumerId: string; associationId: string },
+  ) {
+    const company = await tx.company.findFirst({
+      where: { id: command.companyId, tenantId: command.tenantId, status: 'ACTIVE' },
+    });
+    if (!company) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND' });
+    const fiscalProfile = await this.getReadyCompanyFiscalProfile(
+      tx,
+      command.tenantId,
+      command.companyId,
+    );
+    // Perform the shared read-only predicate before allocation. A production
+    // module always injects it; the fallback keeps isolated legacy tests valid.
+    let eligibleConnection:
+      { readonly connectionId: string; readonly secretReference: string } | undefined;
+    if (this.issuanceEligibility) {
+      const eligibility = await this.issuanceEligibility.haciendaEligibility({
+        tenantId: command.tenantId,
+        companyId: command.companyId,
+        environment: command.environment,
+      });
+      if (!eligibility.eligible) {
+        throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
+      }
+      eligibleConnection = eligibility;
+    }
+
+    // Recheck the exact validated connection/reference in the allocation
+    // transaction. A concurrent rotation or revocation must restart readiness
+    // rather than allocate against credential state that was never validated.
+    const haciendaConnection = await tx.haciendaConnection.findFirst({
+      where: {
+        tenantId: command.tenantId,
+        companyId: command.companyId,
+        environment: command.environment,
+        status: 'CONNECTED',
+        ...(eligibleConnection
+          ? {
+              id: eligibleConnection.connectionId,
+              secretReference: eligibleConnection.secretReference,
+            }
+          : {}),
+      },
+    });
+    if (!haciendaConnection)
+      throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
+
+    const point = await tx.fiscalIssuancePoint.findFirst({
+      where: {
+        tenantId: command.tenantId,
+        companyId: command.companyId,
+        environment: command.environment,
+        active: true,
+        isDefault: true,
+      },
+      orderBy: { id: 'asc' },
+    });
+    if (!point) throw new BadRequestException({ code: 'FISCAL_ISSUANCE_POINT_REQUIRED' });
+
+    const allocated = await tx.$queryRaw<Array<{ assigned: bigint }>>`
+        INSERT INTO "fiscal_sequences" (
+          "id", "tenant_id", "company_id", "environment", "branch_code", "terminal_code",
+          "document_type", "next_value", "last_assigned", "created_at", "updated_at"
+        ) VALUES (
+          ${randomUUID()}::uuid, ${command.tenantId}::uuid, ${command.companyId}::uuid,
+          ${command.environment}::"HaciendaEnvironment", ${point.branchCode}, ${point.terminalCode},
+          ${command.type}::"FiscalDocumentType", 2, 1, NOW(), NOW()
+        )
+        ON CONFLICT ("tenant_id", "company_id", "environment", "branch_code", "terminal_code", "document_type")
+        DO UPDATE SET "last_assigned" = "fiscal_sequences"."next_value",
+          "next_value" = "fiscal_sequences"."next_value" + 1,
+          "updated_at" = NOW()
+        RETURNING "last_assigned" AS assigned
+      `;
+    const sequenceValue = allocated[0]?.assigned ?? 1n;
+    if (sequenceValue > 9999999999n)
+      throw new ConflictException({ code: 'FISCAL_SEQUENCE_EXHAUSTED' });
+    const issueDate = new Date();
+    const consecutive = buildConsecutive({
+      branchCode: point.branchCode,
+      terminalCode: point.terminalCode,
+      documentType: command.type,
+      sequenceValue,
+    });
+    const securityCode = generateSecurityCode();
+    const clave = buildFiscalKey({
+      issuedAt: issueDate,
+      issuerIdentificationNumber: company.identificationNumber,
+      consecutive,
+      securityCode,
+    });
+    const totals = this.calculateTotals(command.lines);
+
+    const document = await tx.fiscalDocument.create({
+      data: {
+        id: randomUUID(),
+        tenantId: command.tenantId,
+        companyId: command.companyId,
+        environment: command.environment,
+        type: command.type,
+        status: 'READY_FOR_XML',
+        issuancePointId: point.id,
+        branchCode: point.branchCode,
+        terminalCode: point.terminalCode,
+        sequenceValue,
+        consecutive,
+        clave,
+        securityCode,
+        situation: FISCAL_NORMAL_SITUATION,
+        issueDate,
+        issuerSnapshot: {
+          legalName: company.legalName,
+          tradeName: company.tradeName,
+          identificationType: company.identificationType,
+          identificationNumber: company.identificationNumber,
+          codigoActividad: fiscalProfile.resolvedActivityCode,
+          proveedorSistemas: fiscalProfile.proveedorSistemas,
+          provincia: fiscalProfile.province,
+          canton: fiscalProfile.canton,
+          distrito: fiscalProfile.district,
+          barrio: fiscalProfile.barrio,
+          otrasSenas: fiscalProfile.otrasSenas,
+          email: fiscalProfile.email,
+          phoneCountryCode: fiscalProfile.phoneCountryCode,
+          phoneNumber: fiscalProfile.phoneNumber,
+        },
+        receiverSnapshot: command.receiver as never,
+        currency: command.currency,
+        exchangeRate: command.exchangeRate ?? null,
+        saleCondition: command.saleCondition,
+        creditTermDays: command.creditTermDays ?? null,
+        paymentMethod: command.paymentMethod ?? null,
+        lines: command.lines as never,
+        totals: totals as never,
+        idempotencyKey,
+        requestHash,
+        ...(origin
+          ? { originConsumerId: origin.consumerId, originAssociationId: origin.associationId }
+          : {}),
+      },
+    });
+
+    return document;
   }
 
   private async reserveIdempotencyKey(
@@ -600,6 +646,10 @@ export class FiscalDocumentService {
     if (!command.idempotencyKey) {
       throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_REQUIRED' });
     }
+    this.validateFiscalContent(command);
+  }
+
+  private validateFiscalContent(command: CreateFiscalDocumentCommand): void {
     if (!ALLOWED_CURRENCY_CODES.includes(command.currency as never)) {
       throw new BadRequestException({ code: 'INVALID_CURRENCY' });
     }

@@ -18,7 +18,7 @@ import { PrismaConsumerV2Repository } from './infrastructure/persistence/prisma-
     ConsumerV2LabOperationController,
   ],
   providers: [PrismaConsumerV2Repository, ConsumerV2LabService, ConsumerV2Guard],
-  exports: [ConsumerV2LabService, ConsumerV2Guard],
+  exports: [ConsumerV2LabService, ConsumerV2Guard, PrismaConsumerV2Repository],
 })
 export class FiscalConsumersLabModule {
   constructor() {
