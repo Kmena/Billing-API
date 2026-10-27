@@ -26,6 +26,22 @@ x-w2-a-structural-implementation:
   taxCodesValidated: false
   taxArithmeticValidated: false
   structuralTotals: [gross, discounts, net, declaredTax, totalBeforeFiscalPolicy]
+x-w2-b-laboratory-projection:
+  routesRegistered: false
+  fiscalIssuanceEnabled: false
+  policyMarker: LAB_SYNTHETIC_V44_ONLY
+  hashVersion: w2-b-fiscal-lab.v1
+  hashUse: synthetic-lab-comparison-only
+  finalFiscalHashRequires: ADR-BIL-013
+  environment: SANDBOX
+  currency: CRC
+  saleCondition: '01'
+  paymentMethod: '01'
+  perLineTaxCount: 1
+  perLineDiscountCount: 0-1
+  supportedLabXmlPatterns: [LAB_TAXABLE_IVA_13_XML, LAB_EXEMPT_XML]
+  precision: { amountFractionDigits: 5, quantityFractionDigits: 3, rounding: reject-inexact }
+  unsupported: [multiple-taxes-per-line, multiple-discounts-per-line, exoneration, fiscal-references, credit, multiple-payments, foreign-currency, production-origin]
 servers:
   - url: /api/v2
 paths:

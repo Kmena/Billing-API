@@ -74,3 +74,15 @@ La [evidencia técnica W2-A](../operations/billing-w2-a-structural-technical-evi
 | C54 | `source` es procedencia comercial opaca; campos de ledger y autoridad de consumidor en body se rechazan. | Billing no calcula deuda ni asigna pagos. |
 
 Todas las capacidades, incluidas las no citadas en esta sección, conservan exactamente su estado y gate auditado en la tabla anterior. `W1_TARGET_DB_READINESS`, STAG y producción siguen `NOT_READY`; no se infiere aprobación de ADR-BIL-011/012/013, DP-01/02 ni DF.
+
+## Evidencia W2-B de laboratorio, sin reclasificar capacidades
+
+| Capacidades | Avance sintético verificable | Gate que sigue abierto |
+|---|---|---|
+| C13, C22–C27 | Proyección de FE con una o dos líneas, patrones XML gravado/exento/mixto y procedencia comercial por línea. | Elegibilidad tributaria por emisor, CABYS vigente, más de un impuesto por línea y emisión persistente v2. |
+| C28–C31 | Un descuento por línea, bruto/base/impuesto/total exactos y conciliación de un pago CRC. | Múltiples descuentos/pagos, monedas, redondeo y momento fiscal DF-02. |
+| C33–C34 | Serializador existente, XSD v4.4 y firma XAdES probados con certificado sintético. | XSD/catálogos fijados bajo ADR-BIL-016/DF-06; certificado de emisor y STAG. |
+| C38, C45 | Hash `w2-b-fiscal-lab.v1`, vector golden y replay/conflicto W1 puro; OpenAPI sigue inactivo. | Reserva/documento transaccional, scope de creación y `fiscal-payload.v2` aprobado. |
+| C54 | `source` afecta trazabilidad/hash y no crea ledger ni nodo fiscal XML. | Se mantiene `NOT_APPLICABLE`. |
+
+Los 54 estados auditados de la tabla principal permanecen idénticos. El [corte de evidencia W2-B](../operations/billing-w2-b-lab-evidence.md) clasifica el resultado general como parcial.
