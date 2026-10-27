@@ -1,0 +1,92 @@
+
+[*] Changed the `api_keys` table
+  [*] Altered column `scopes` (default changed from `Some(Value(List([])))` to `None`)
+  [*] Altered column `expires_at` (type changed)
+  [*] Altered column `last_used_at` (type changed)
+  [*] Altered column `revoked_at` (type changed)
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)
+
+[*] Changed the `audit_logs` table
+  [-] Removed foreign key on columns (api_key_id)
+  [-] Removed foreign key on columns (tenant_id)
+  [*] Altered column `created_at` (type changed)
+  [+] Added foreign key on columns (tenant_id)
+  [+] Added foreign key on columns (api_key_id)
+
+[*] Changed the `companies` table
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)
+
+[*] Changed the `company_economic_activities` table
+  [*] Renamed index `company_economic_activities_tenant_company_idx` to `company_economic_activities_tenant_id_company_id_idx`
+
+[*] Changed the `fiscal_branches` table
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (type changed)
+  [*] Renamed index `fiscal_branches_company_environment_code_key` to `fiscal_branches_company_id_environment_code_key`
+  [*] Renamed index `fiscal_branches_tenant_company_environment_active_idx` to `fiscal_branches_tenant_id_company_id_environment_active_idx`
+
+[*] Changed the `fiscal_documents` table
+  [*] Renamed index `fiscal_documents_tenant_company_created_at_idx` to `fiscal_documents_tenant_id_company_id_created_at_idx`
+  [*] Renamed index `fiscal_documents_tenant_company_environment_consecutive_key` to `fiscal_documents_tenant_id_company_id_environment_consecuti_key`
+  [*] Renamed index `fiscal_documents_tenant_company_idempotency_key_idx` to `fiscal_documents_tenant_id_company_id_idempotency_key_idx`
+  [*] Renamed index `fiscal_documents_tenant_company_status_idx` to `fiscal_documents_tenant_id_company_id_status_idx`
+
+[*] Changed the `fiscal_idempotency_keys` table
+  [*] Altered column `operation` (default changed from `Some(Value(String("fiscal-document.create")))` to `None`)
+
+[*] Changed the `fiscal_integration_associations` table
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (type changed)
+  [*] Renamed index `fiscal_integration_associations_tenant_company_idx` to `fiscal_integration_associations_tenant_id_company_id_idx`
+  [*] Renamed index `fiscal_integration_associations_tenant_provider_external_key` to `fiscal_integration_associations_tenant_id_provider_external_key`
+
+[*] Changed the `fiscal_issuance_points` table
+  [-] Removed foreign key on columns (branch_id)
+  [-] Removed foreign key on columns (terminal_id)
+  [+] Added foreign key on columns (branch_id)
+  [+] Added foreign key on columns (terminal_id)
+  [*] Renamed index `fiscal_issuance_points_company_id_environment_branch_code_termi` to `fiscal_issuance_points_company_id_environment_branch_code_t_key`
+  [*] Renamed index `fiscal_issuance_points_tenant_company_environment_active_idx` to `fiscal_issuance_points_tenant_id_company_id_environment_act_idx`
+
+[*] Changed the `fiscal_sequences` table
+  [*] Renamed index `fiscal_sequences_scope_key` to `fiscal_sequences_tenant_id_company_id_environment_branch_co_key`
+  [*] Renamed index `fiscal_sequences_tenant_company_environment_idx` to `fiscal_sequences_tenant_id_company_id_environment_idx`
+
+[*] Changed the `fiscal_terminals` table
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (type changed)
+  [*] Renamed index `fiscal_terminals_branch_code_key` to `fiscal_terminals_branch_id_code_key`
+  [*] Renamed index `fiscal_terminals_tenant_company_environment_active_idx` to `fiscal_terminals_tenant_id_company_id_environment_active_idx`
+
+[*] Changed the `fiscal_xml_artifacts` table
+  [*] Renamed index `fiscal_xml_artifacts_tenant_id_company_id_fiscal_document_id_sc` to `fiscal_xml_artifacts_tenant_id_company_id_fiscal_document_i_key`
+
+[*] Changed the `hacienda_connections` table
+  [-] Removed foreign key on columns (company_id)
+  [-] Removed foreign key on columns (tenant_id)
+  [*] Altered column `last_validated_at` (type changed)
+  [*] Altered column `last_successful_auth_at` (type changed)
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)
+  [+] Added foreign key on columns (tenant_id)
+  [+] Added foreign key on columns (company_id)
+  [*] Renamed index `hacienda_connections_company_env_unique` to `hacienda_connections_company_id_environment_key`
+  [*] Renamed index `idx_hacienda_connections_tenant_id` to `hacienda_connections_tenant_id_idx`
+  [*] Renamed index `idx_hacienda_connections_tenant_status` to `hacienda_connections_tenant_id_status_idx`
+
+[*] Changed the `refresh_tokens` table
+  [-] Removed foreign key on columns (user_id)
+  [*] Altered column `expires_at` (type changed)
+  [*] Altered column `created_at` (type changed)
+  [+] Added foreign key on columns (user_id)
+
+[*] Changed the `tenants` table
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)
+
+[*] Changed the `users` table
+  [*] Altered column `last_login_at` (type changed)
+  [*] Altered column `created_at` (type changed)
+  [*] Altered column `updated_at` (default changed from `Some(Now)` to `None`, type changed)

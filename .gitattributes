@@ -1,2 +1,9 @@
 # Match the TypeScript line endings required by Prettier.
 *.ts text eol=lf
+
+# Official XSD assets are pinned by SHA-256; checkout bytes must match Git bytes.
+resources/hacienda/v4.4/*.xsd text eol=lf
+
+# Prisma stores migration checksums from exact SQL bytes.
+prisma/migrations/**/migration.sql text eol=lf
+prisma/migrations/migration_lock.toml text eol=lf

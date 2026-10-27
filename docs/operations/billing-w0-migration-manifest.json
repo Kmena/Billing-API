@@ -1,0 +1,98 @@
+[
+  {
+    "name": "20250001000000_initial_foundation",
+    "sha256": "58627ed15e6adbc9357055ce79416503ffa0bfb20b669b4ba3c27cbd585793a0"
+  },
+  {
+    "name": "20250002000000_company_hacienda_fields",
+    "sha256": "c7573b97d9825fcfaab67bf8ef456103097dc712c2e5627c70acc0675b5d7e25"
+  },
+  {
+    "name": "20250003000000_hacienda_connection",
+    "sha256": "6866615ab100a69156cfb572ffa59e5f0e146cfe62c83839917a73cf144c7259"
+  },
+  {
+    "name": "20260911140000_fiscal_document_core",
+    "sha256": "6c8711ded4c3091ac1274f258c22330e97068b6842d4d035f837b99026e997cb"
+  },
+  {
+    "name": "20260911143000_fiscal_idempotency_scope",
+    "sha256": "195376c41e6387783bad06d4f015084d623cd423a59c4b3be5d3edfb95eeb773"
+  },
+  {
+    "name": "20260912123000_post_f2_2_fiscal_constraints",
+    "sha256": "67d1b752fd14052a3a4c8e4ed6651e9ddbfb410bcc606d224aebc9c6ec15f862"
+  },
+  {
+    "name": "20260912180000_fiscal_xml_signing_metadata",
+    "sha256": "169ef7a6c30975b372bd60a5ac2f9384c00909c121108ebcdb3d7712c01e9308"
+  },
+  {
+    "name": "20260913110000_company_fiscal_profile",
+    "sha256": "f20ff47b0715af2f24db902f82ac614e9702e2a2a59f79c289d978f58334d689"
+  },
+  {
+    "name": "20260913113000_company_fiscal_address_positive_codes",
+    "sha256": "ad20cb9294f715c08131f37ba6ecdaf83b3503979ac3283c5753046ae5bb2629"
+  },
+  {
+    "name": "20260914193000_fiscal_submission",
+    "sha256": "975f1dbc42d693cece7d8fcd42ab53626ebaa4548bbf609556922a53cabce63a"
+  },
+  {
+    "name": "20260915100000_f4_fiscal_artifacts_delivery",
+    "sha256": "405307f33af88965cf68d0ae6e4feb941215bb34e67fc7da066e0280874f9e9c"
+  },
+  {
+    "name": "20260916000000_f4_fix_delivery_unique_null",
+    "sha256": "e53257d3886863c7adf0e63c6269631de78e2b15d1138d4d59c0148e70ead4dd"
+  },
+  {
+    "name": "20260920000000_fix_economic_activity_code_format",
+    "sha256": "91864136bb8b483d7cbe586684dd1bb18405e1c06851e25610820f6c9371ac97"
+  },
+  {
+    "name": "20260924000000_add_cert_extracted_identity",
+    "sha256": "dd5892f9e3fc7f93786c3e7b759dda6a831ebaddc10413112c4ca3a48cc9d5b0"
+  },
+  {
+    "name": "20260924123000_inventori_p0_fiscal_compatibility",
+    "sha256": "67b902a2a849c6858586344b3d0fe8329b069c22a6ee651b227294d2ea3717b8"
+  },
+  {
+    "name": "20260924200000_cert_single_active_partial_unique_index",
+    "sha256": "e7583ff9ed86cbd1c4177959a6f6fe5122d7927ebbee9a36d233a74d288ff4a5"
+  },
+  {
+    "name": "20260925000000_p0_economic_activities",
+    "sha256": "db827cef39df4a952cb9c9c60d83f8d992cdeec82d9aed13ff94ee833282a213"
+  },
+  {
+    "name": "20261031000000_fix_fiscal_artifact_xml_unique_index",
+    "sha256": "7d5e47cfc0aab887ce372ac55f6222d6475abd1f40f7788f65d46542fd2fe7fb"
+  },
+  {
+    "name": "20261107000000_restore_fiscal_superseded_lifecycle",
+    "sha256": "c3a2248a46be2f21788a50aed87727768715d4f2b9b914c29cecaae95056d62f"
+  },
+  {
+    "name": "20261108000000_add_accepted_fiscal_package_delivery",
+    "sha256": "eb2f049faa1fa1a1ff3ba0daf1a8c7d20e666b32a53d48a1ef8d54dbae3d7f10"
+  },
+  {
+    "name": "20261109000000_reconcile_fiscal_idempotency_api_key_scope",
+    "sha256": "ba83a2f5b050ecdd6a46905af4c5f7ae76195f2c1d5f4009f6a1b1e4710cf36d"
+  },
+  {
+    "name": "20261110000000_make_fiscal_idempotency_rotation_safe",
+    "sha256": "ea43d0566814497ae1bd0ca5b37905c6d9215098f90cf33046897b26ec9dd7cf"
+  },
+  {
+    "name": "20261112000000_add_fiscal_onboarding_v1",
+    "sha256": "1fbf1648df3127425d73017bff1f6f2eefeb841a67b6baf6c3e9ab089d0d092d"
+  },
+  {
+    "name": "20261113000000_allow_inventori_bootstrap_profile",
+    "sha256": "209706e4b76e63c6435d1a623f620f2596cdee1b2defd379ba68c8b429b7e0a2"
+  }
+]

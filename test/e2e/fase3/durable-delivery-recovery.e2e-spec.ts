@@ -317,7 +317,9 @@ describe('Wave 2 durable delivery recovery — disposable PostgreSQL', () => {
     ).resolves.toMatchObject({ status: 'DELIVERED', attemptCount: 1 });
   });
   it('does not resend when a lease expires during an external send and accepts the late confirmed outcome', async () => {
-    const row = await delivery();
+    // The worker records its attempt using the real clock. Keep this row in the
+    // recovery window when the suite's fixed 2026-10-11 clock is historical.
+    const row = await delivery({ createdAt: new Date() });
     const actualFindUnique = prisma.documentDelivery.findUnique.bind(prisma.documentDelivery);
     const actualUpdateMany = prisma.documentDelivery.updateMany.bind(prisma.documentDelivery);
     const actualAttemptCreate = prisma.deliveryAttempt.create.bind(prisma.deliveryAttempt);
