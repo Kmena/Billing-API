@@ -84,11 +84,13 @@ export function authorizeConsumerV2(input: {
   requestedEnvironment: FiscalEnvironmentV2;
   requiredScope: ConsumerV2Scope;
   now: Date;
+  tenantActive?: boolean;
 }): ConsumerV2Authorization {
   const { key, binding, association, consumer, requestedCompany } = input;
   if (!key || key.status !== 'ACTIVE' || !key.expiresAt || key.expiresAt <= input.now) {
     return deny(401, 'CONSUMER_KEY_UNAUTHORIZED');
   }
+  if (input.tenantActive === false) return deny(403, 'CONSUMER_TENANT_INACTIVE');
   if (key.integrationProfile !== BILLING_CONSUMER_V2_PROFILE) {
     return deny(403, 'INTEGRATION_PROFILE_NOT_AUTHORIZED');
   }

@@ -205,6 +205,11 @@ model Tenant {
   fiscalIntegrationAssociations FiscalIntegrationAssociation[]
   fiscalBranches            FiscalBranch[]
   fiscalTerminals           FiscalTerminal[]
+  fiscalConsumers           FiscalConsumer[]
+  fiscalConsumerCompanies   FiscalConsumerCompany[]
+  fiscalConsumerAssociations FiscalConsumerAssociation[]
+  fiscalConsumerKeyBindings FiscalConsumerKeyBinding[]
+  fiscalIdempotencyKeysV2   FiscalIdempotencyKeyV2[]
 
   @@map("tenants")
 }
@@ -247,6 +252,9 @@ model Company {
   fiscalIntegrationAssociation FiscalIntegrationAssociation?
   fiscalBranches             FiscalBranch[]
   fiscalTerminals            FiscalTerminal[]
+  fiscalConsumerCompanies    FiscalConsumerCompany[]
+
+  @@unique([id, tenantId], map: "companies_id_tenant_v2_key")
 
   @@unique([tenantId, identificationNumber])
   @@index([tenantId, status])
@@ -367,6 +375,105 @@ model FiscalIntegrationAssociation {
   @@map("fiscal_integration_associations")
 }
 
+// W1-D2 laboratory-only persistence; no v2 fiscal issuance route is registered.
+model FiscalConsumer {
+  id                  String                  @id @db.Uuid
+  tenantId            String                  @map("tenant_id") @db.Uuid
+  provider            String                  @db.VarChar(64)
+  externalConsumerKey String                  @map("external_consumer_key") @db.VarChar(128)
+  status              String                  @default("ACTIVE") @db.VarChar(16)
+  createdAt           DateTime                @default(now()) @map("created_at")
+  updatedAt           DateTime                @updatedAt @map("updated_at")
+  tenant              Tenant                  @relation(fields: [tenantId], references: [id])
+  companies           FiscalConsumerCompany[]
+  originDocuments     FiscalDocument[]        @relation("V2OriginConsumer")
+
+  @@unique([tenantId, provider, externalConsumerKey], map: "fiscal_consumers_tenant_provider_external_key")
+  @@unique([id, tenantId], map: "fiscal_consumers_id_tenant_key")
+  @@map("fiscal_consumers")
+}
+
+model FiscalConsumerCompany {
+  id                 String                      @id @db.Uuid
+  tenantId           String                      @map("tenant_id") @db.Uuid
+  consumerId         String                      @map("consumer_id") @db.Uuid
+  companyId          String                      @map("company_id") @db.Uuid
+  externalCompanyKey String                      @map("external_company_key") @db.VarChar(128)
+  status             String                      @default("ACTIVE") @db.VarChar(16)
+  createdAt          DateTime                    @default(now()) @map("created_at")
+  updatedAt          DateTime                    @updatedAt @map("updated_at")
+  tenant             Tenant                      @relation(fields: [tenantId], references: [id])
+  consumer           FiscalConsumer              @relation(fields: [consumerId, tenantId], references: [id, tenantId])
+  company            Company                     @relation(fields: [companyId, tenantId], references: [id, tenantId])
+  associations       FiscalConsumerAssociation[]
+
+  @@unique([tenantId, consumerId, companyId], map: "fiscal_consumer_companies_tenant_consumer_company_key")
+  @@unique([tenantId, consumerId, externalCompanyKey], map: "fiscal_consumer_companies_tenant_consumer_external_key")
+  @@unique([id, tenantId], map: "fiscal_consumer_companies_id_tenant_key")
+  @@map("fiscal_consumer_companies")
+}
+
+model FiscalConsumerAssociation {
+  id                  String                      @id @db.Uuid
+  tenantId            String                      @map("tenant_id") @db.Uuid
+  consumerCompanyId   String                      @map("consumer_company_id") @db.Uuid
+  environment         HaciendaEnvironment
+  status              String                      @default("ACTIVE") @db.VarChar(16)
+  createdAt           DateTime                    @default(now()) @map("created_at")
+  updatedAt           DateTime                    @updatedAt @map("updated_at")
+  tenant              Tenant                      @relation(fields: [tenantId], references: [id])
+  consumerCompany     FiscalConsumerCompany       @relation(fields: [consumerCompanyId, tenantId], references: [id, tenantId])
+  keyBindings         FiscalConsumerKeyBinding[]
+  idempotencyKeys     FiscalIdempotencyKeyV2[]
+  originDocuments     FiscalDocument[]            @relation("V2OriginAssociation")
+
+  @@unique([consumerCompanyId, environment], map: "fiscal_consumer_associations_company_environment_key")
+  @@unique([id, tenantId], map: "fiscal_consumer_associations_id_tenant_key")
+  @@unique([id, tenantId, environment], map: "fiscal_consumer_associations_id_tenant_environment_key")
+  @@map("fiscal_consumer_associations")
+}
+
+model FiscalConsumerKeyBinding {
+  apiKeyId      String                    @id @map("api_key_id") @db.Uuid
+  tenantId      String                    @map("tenant_id") @db.Uuid
+  associationId String                    @map("association_id") @db.Uuid
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id])
+  apiKey        ApiKey                    @relation(fields: [apiKeyId, tenantId], references: [id, tenantId])
+  association   FiscalConsumerAssociation @relation(fields: [associationId, tenantId], references: [id, tenantId])
+
+  @@unique([apiKeyId, tenantId], map: "fiscal_consumer_key_bindings_key_tenant_key")
+  @@index([associationId, tenantId], map: "fiscal_consumer_key_bindings_association_idx")
+  @@map("fiscal_consumer_key_bindings")
+}
+
+model FiscalIdempotencyKeyV2 {
+  id                 String                    @id @db.Uuid
+  tenantId           String                    @map("tenant_id") @db.Uuid
+  associationId      String                    @map("association_id") @db.Uuid
+  environment        HaciendaEnvironment
+  operation          String                    @db.VarChar(60)
+  key                String                    @db.VarChar(128)
+  requestHashVersion String                    @map("request_hash_version") @db.VarChar(80)
+  requestHash        String                    @map("request_hash") @db.Char(64)
+  state              String                    @default("RESERVED") @db.VarChar(32)
+  fiscalDocumentId   String?                   @map("fiscal_document_id") @db.Uuid
+  firstApiKeyId      String?                   @map("first_api_key_id") @db.Uuid
+  attemptCount       Int                       @default(0) @map("attempt_count")
+  leaseExpiresAt     DateTime?                 @map("lease_expires_at")
+  version            Int                       @default(0)
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id])
+  association        FiscalConsumerAssociation @relation(fields: [associationId, tenantId, environment], references: [id, tenantId, environment])
+  fiscalDocument     FiscalDocument?           @relation(fields: [fiscalDocumentId], references: [id])
+  firstApiKey        ApiKey?                   @relation(fields: [firstApiKeyId, tenantId], references: [id, tenantId])
+
+  @@unique([associationId, environment, operation, key], map: "fiscal_idempotency_keys_v2_namespace_key")
+  @@index([tenantId, associationId, state, leaseExpiresAt], map: "fiscal_idempotency_keys_v2_recovery_idx")
+  @@map("fiscal_idempotency_keys_v2")
+}
+
 model FiscalBranch {
   id             String               @id @db.Uuid
   tenantId       String               @map("tenant_id") @db.Uuid
@@ -471,12 +578,18 @@ model FiscalDocument {
   documentDeliveries           DocumentDelivery[]
   supersededByFiscalDocument   FiscalDocument?        @relation("FiscalDocumentSupersession", fields: [supersededByFiscalDocumentId], references: [id], onUpdate: Cascade, onDelete: SetNull, map: "fiscal_documents_superseded_by_fkey")
   supersededDocuments          FiscalDocument[]       @relation("FiscalDocumentSupersession")
+  originConsumerId             String?                @map("origin_consumer_id") @db.Uuid
+  originAssociationId          String?                @map("origin_association_id") @db.Uuid
+  originConsumer               FiscalConsumer?        @relation("V2OriginConsumer", fields: [originConsumerId, tenantId], references: [id, tenantId])
+  originAssociation            FiscalConsumerAssociation? @relation("V2OriginAssociation", fields: [originAssociationId, tenantId, environment], references: [id, tenantId, environment])
+  idempotencyKeysV2            FiscalIdempotencyKeyV2[]
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
   @@index([tenantId, companyId, status])
   @@index([tenantId, companyId, idempotencyKey])
   @@index([supersededByFiscalDocumentId], map: "fiscal_documents_superseded_by_idx")
+  @@index([tenantId, originAssociationId, createdAt(sort: Desc)], map: "fiscal_documents_v2_origin_idx")
   @@map("fiscal_documents")
 }
 
@@ -683,6 +796,10 @@ model ApiKey {
   companies             ApiKeyCompany[]
   auditLogs             AuditLog[]
   fiscalIdempotencyKeys FiscalIdempotencyKey[]
+  consumerKeyBinding    FiscalConsumerKeyBinding?
+  firstIdempotencyKeysV2 FiscalIdempotencyKeyV2[]
+
+  @@unique([id, tenantId], map: "api_keys_id_tenant_v2_key")
 
   @@index([tenantId, status])
   @@index([keyPrefix])

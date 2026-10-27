@@ -9,6 +9,12 @@ info:
     Existing /api/v1 contracts for Inventori remain unchanged.
 x-status: proposed
 x-activation-wave: W1-after-approval
+x-laboratory-implementation:
+  wave: W1-D2
+  moduleRegisteredInAppModule: false
+  operationalRoutesActive: false
+  fiscalIssuanceActive: false
+  persistenceVerification: disposable-postgresql-only
 x-credential-policy:
   steadyActiveKeysPerAssociation: 1
   maximumActiveKeysDuringRotation: 2

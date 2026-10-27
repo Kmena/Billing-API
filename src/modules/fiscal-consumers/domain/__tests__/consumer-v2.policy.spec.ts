@@ -51,6 +51,14 @@ describe('W1-D1 isolated M2M authorization', () => {
     });
   });
 
+  it('denies a suspended tenant even when its key and association are active', () => {
+    expect(authorizeConsumerV2({ ...base(), tenantActive: false })).toMatchObject({
+      allowed: false,
+      status: 403,
+      code: 'CONSUMER_TENANT_INACTIVE',
+    });
+  });
+
   it.each([
     ['absent key', (v: ReturnType<typeof base>) => ({ ...v, key: null }), 401],
     [

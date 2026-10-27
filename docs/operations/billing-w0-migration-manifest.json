@@ -94,5 +94,9 @@
   {
     "name": "20261113000000_allow_inventori_bootstrap_profile",
     "sha256": "209706e4b76e63c6435d1a623f620f2596cdee1b2defd379ba68c8b429b7e0a2"
+  },
+  {
+    "name": "20261114000000_w1_d2_consumer_m2m_lab",
+    "sha256": "b8f17aa80b65571e436f71a8c553229899c5847056bf4011b8c383807bdaeaab"
   }
 ]
