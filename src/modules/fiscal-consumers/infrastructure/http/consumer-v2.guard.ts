@@ -58,6 +58,9 @@ export class ConsumerV2Guard implements CanActivate {
     if (!key || !validSecret) {
       throw new HttpException({ code: 'CONSUMER_KEY_UNAUTHORIZED' }, 401);
     }
+    if (match[1] !== (key.environment === 'TEST' ? 'test' : 'live')) {
+      throw new HttpException({ code: 'CONSUMER_KEY_UNAUTHORIZED' }, 401);
+    }
     const binding = await this.prisma.fiscalConsumerKeyBinding.findUnique({
       where: { apiKeyId: key.id },
       include: {

@@ -144,14 +144,22 @@ describe('W1-D0 proposed OpenAPI v2 contracts', () => {
     expect(lookup.responses).toHaveProperty('404');
     expect(m2m.components.schemas.OperationLookup.properties).toHaveProperty('state');
     expect(JSON.stringify(m2m.components.schemas.OperationLookup)).not.toContain('ACCEPTED');
-    for (const contract of [m2m, fiscal]) {
-      expect(contract.components.schemas.Error.required).toEqual([
-        'code',
-        'message',
-        'correlationId',
-        'retryable',
-      ]);
+    expect(m2m.components.schemas.Error.required).toEqual(['code', 'message', 'timestamp']);
+    expect(m2m.components.schemas.ErrorEnvelope.required).toEqual(['error']);
+    for (const response of Object.values((m2m.components as ObjectMap).responses as ObjectMap)) {
+      const content = (response as ObjectMap).content as ObjectMap | undefined;
+      if (content) {
+        expect(((content['application/json'] as ObjectMap).schema as ObjectMap).$ref).toBe(
+          '#/components/schemas/ErrorEnvelope',
+        );
+      }
     }
+    expect(fiscal.components.schemas.Error.required).toEqual([
+      'code',
+      'message',
+      'correlationId',
+      'retryable',
+    ]);
   });
 
   it('keeps fiscal line provenance opaque and treats the two-period example as W2-only', () => {

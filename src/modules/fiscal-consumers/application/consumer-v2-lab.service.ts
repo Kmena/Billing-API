@@ -23,6 +23,7 @@ export interface RegisterConsumerAssociationV2 {
 export interface IssueConsumerKeyV2 {
   tenantId: string;
   associationId: string;
+  consumerId?: string;
   scopes: ConsumerV2Scope[];
   expiresAt: Date;
   rotationEndsAt?: Date;
@@ -32,7 +33,8 @@ export interface IssueConsumerKeyV2 {
 
 export interface RevokeConsumerKeyV2 {
   tenantId: string;
-  associationId: string;
+  associationId?: string;
+  consumerId?: string;
   apiKeyId: string;
   actorId: string;
   correlationId: string;
@@ -47,6 +49,15 @@ export interface ConsumerV2OperationCommand {
   correlationId: string;
 }
 
+/** Synthetic laboratory catalogue; no production provider is approved here. */
+export const CONSUMER_V2_LAB_PROVIDERS = new Set([
+  'AFFILIATIONS',
+  'PARTNER',
+  'FOREIGN',
+  'AUDIT_TEST',
+  'ORIGIN_TEST',
+]);
+
 /** Lab façade. Deliberately absent from AppModule and all production controllers. */
 @Injectable()
 export class ConsumerV2LabService {
@@ -55,6 +66,9 @@ export class ConsumerV2LabService {
   registerAssociation(command: RegisterConsumerAssociationV2) {
     if (!/^[A-Z][A-Z0-9_]{1,63}$/.test(command.provider)) {
       throw new BadRequestException({ code: 'CONSUMER_PROVIDER_INVALID' });
+    }
+    if (!CONSUMER_V2_LAB_PROVIDERS.has(command.provider)) {
+      throw new BadRequestException({ code: 'CONSUMER_PROVIDER_NOT_ALLOWED' });
     }
     for (const value of [command.externalConsumerKey, command.externalCompanyKey]) {
       if (!value || value.length > 128 || value.trim() !== value) {
@@ -65,6 +79,10 @@ export class ConsumerV2LabService {
       throw new BadRequestException({ code: 'CONSUMER_ENVIRONMENT_INVALID' });
     }
     return this.repository.registerAssociation(command);
+  }
+
+  getConsumer(tenantId: string, consumerId: string) {
+    return this.repository.getConsumer(tenantId, consumerId);
   }
 
   issueKey(command: IssueConsumerKeyV2) {

@@ -496,7 +496,8 @@ describe('NodeXadesEpesSignerAdapter — Hacienda v4.4 official policy structure
 
   it('independent xml-crypto verifier confirms signature valid', () => {
     const result = standardsVerifier.verify(signedXml);
-    expect(result.isValid).toBe(true);
+    // Preserve the verifier's error category if the intermittent failure recurs.
+    expect(result).toMatchObject({ isValid: true });
   });
 
   it('generated XML still passes official Hacienda XSD v4.4 validation', () => {

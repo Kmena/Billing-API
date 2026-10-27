@@ -5,6 +5,7 @@ import {
   IsArray,
   IsIn,
   IsISO8601,
+  IsOptional,
   IsString,
   IsUUID,
   Matches,
@@ -19,7 +20,7 @@ import {
 } from '../../domain/consumer-v2.policy';
 import { ConsumerV2Operation } from '../../domain/consumer-v2-idempotency.policy';
 
-/** DTOs are unregistered until persistence and operational routes are authorized. */
+/** Registered only by the isolated laboratory module; not by AppModule. */
 export class CreateConsumerAssociationV2Dto {
   @IsString()
   @Matches(/^[A-Z][A-Z0-9_]{1,63}$/)
@@ -59,6 +60,10 @@ export class CreateConsumerKeyV2Dto {
 
   @IsISO8601({ strict: true })
   expiresAt!: string;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  rotationEndsAt?: string;
 }
 
 export class LookupConsumerOperationV2Dto {

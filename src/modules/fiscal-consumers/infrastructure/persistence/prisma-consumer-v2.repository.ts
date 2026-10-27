@@ -82,6 +82,20 @@ export class PrismaConsumerV2Repository {
             select: { id: true },
           });
           if (!company) throw new NotFoundException({ code: 'CONSUMER_COMPANY_NOT_FOUND' });
+          const previousAssociation = await tx.fiscalConsumerAssociation.findFirst({
+            where: {
+              tenantId: command.tenantId,
+              environment: command.environment,
+              consumerCompany: {
+                externalCompanyKey: command.externalCompanyKey,
+                consumer: {
+                  provider: command.provider,
+                  externalConsumerKey: command.externalConsumerKey,
+                },
+              },
+            },
+            select: { id: true },
+          });
           const consumer = await tx.fiscalConsumer.upsert({
             where: {
               tenantId_provider_externalConsumerKey: {
@@ -154,10 +168,12 @@ export class PrismaConsumerV2Repository {
             },
           });
           return {
+            created: !previousAssociation,
             consumerId: consumer.id,
             associationId: association.id,
             companyId: mapping.companyId,
             environment: association.environment,
+            status: association.status,
           };
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
@@ -166,6 +182,28 @@ export class PrismaConsumerV2Repository {
       if (isUnique(error)) throw new ConflictException({ code: 'CONSUMER_ASSOCIATION_CONFLICT' });
       throw error;
     }
+  }
+
+  async getConsumer(tenantId: string, consumerId: string) {
+    const consumer = await this.prisma.fiscalConsumer.findFirst({
+      where: { id: consumerId, tenantId },
+      include: { companies: { include: { associations: true } } },
+    });
+    if (!consumer) throw new NotFoundException({ code: 'CONSUMER_NOT_FOUND' });
+    return {
+      consumerId: consumer.id,
+      provider: consumer.provider,
+      externalConsumerKey: consumer.externalConsumerKey,
+      associations: consumer.companies.flatMap((mapping) =>
+        mapping.associations.map((association) => ({
+          consumerId: consumer.id,
+          associationId: association.id,
+          companyId: mapping.companyId,
+          environment: association.environment,
+          status: association.status,
+        })),
+      ),
+    };
   }
 
   async issueKey(command: IssueConsumerKeyV2) {
@@ -186,6 +224,9 @@ export class PrismaConsumerV2Repository {
           include: { consumerCompany: { include: { consumer: true, company: true } } },
         });
         if (!association) throw new NotFoundException({ code: 'CONSUMER_ASSOCIATION_NOT_FOUND' });
+        if (command.consumerId && association.consumerCompany.consumerId !== command.consumerId) {
+          throw new NotFoundException({ code: 'CONSUMER_ASSOCIATION_NOT_FOUND' });
+        }
         if (
           association.status !== 'ACTIVE' ||
           association.consumerCompany.status !== 'ACTIVE' ||
@@ -273,13 +314,25 @@ export class PrismaConsumerV2Repository {
 
   async revokeKey(command: RevokeConsumerKeyV2) {
     return this.prisma.$transaction(async (tx) => {
+      const selected = await tx.fiscalConsumerKeyBinding.findFirst({
+        where: { apiKeyId: command.apiKeyId, tenantId: command.tenantId },
+        include: { association: { include: { consumerCompany: true } } },
+      });
+      if (
+        !selected ||
+        (command.associationId && selected.associationId !== command.associationId) ||
+        (command.consumerId &&
+          selected.association.consumerCompany.consumerId !== command.consumerId)
+      ) {
+        throw new NotFoundException({ code: 'CONSUMER_KEY_NOT_FOUND' });
+      }
       await tx.$queryRaw`SELECT id FROM fiscal_consumer_associations
-        WHERE id = ${command.associationId}::uuid AND tenant_id = ${command.tenantId}::uuid FOR UPDATE`;
+        WHERE id = ${selected.associationId}::uuid AND tenant_id = ${command.tenantId}::uuid FOR UPDATE`;
       const binding = await tx.fiscalConsumerKeyBinding.findFirst({
         where: {
           apiKeyId: command.apiKeyId,
           tenantId: command.tenantId,
-          associationId: command.associationId,
+          associationId: selected.associationId,
         },
         include: { apiKey: true, association: { include: { consumerCompany: true } } },
       });
@@ -306,7 +359,7 @@ export class PrismaConsumerV2Repository {
         correlationId: command.correlationId,
         eventClass: 'SECURITY',
         metadata: {
-          associationId: command.associationId,
+          associationId: selected.associationId,
           alreadyRevoked: decision.action === 'ALREADY_REVOKED',
         },
       });

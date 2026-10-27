@@ -12,13 +12,18 @@ x-activation-wave: W1-after-approval
 x-laboratory-implementation:
   wave: W1-D2
   moduleRegisteredInAppModule: false
+  httpRoutesInIsolatedModule: true
   operationalRoutesActive: false
   fiscalIssuanceActive: false
+  readinessInLab: always-false-with-W1_LAB_FISCAL_ISSUANCE_DISABLED
+  operationLookupInLab: synthetic-reservations-only
   persistenceVerification: disposable-postgresql-only
 x-credential-policy:
   steadyActiveKeysPerAssociation: 1
   maximumActiveKeysDuringRotation: 2
   rotationIntervalDaysInitialReference: 90
+  laboratoryMaximumRotationOverlapHours: 24
+  operationalRotationDurationApproval: pending
 servers:
   - url: /api/v2
 security: []
@@ -237,7 +242,7 @@ components:
       name: X-Correlation-Id
       in: header
       required: false
-      schema: { type: string, minLength: 1, maxLength: 128 }
+      schema: { type: string, format: uuid, minLength: 36, maxLength: 36 }
   schemas:
     CreateConsumerAssociation:
       type: object
@@ -286,6 +291,7 @@ components:
             enum: [fiscal-v2:readiness:read, fiscal-v2:operations:read]
           description: W1 no-DDL catalogue only; issuance scopes require a later wave.
         expiresAt: { type: string, format: date-time }
+        rotationEndsAt: { type: string, format: date-time, description: Optional bounded overlap for replacing the association's current key; laboratory ceiling is 24 hours. }
     IssuedConsumerKey:
       type: object
       additionalProperties: false
@@ -334,42 +340,48 @@ components:
         fiscalDocumentId: { type: [string, 'null'], format: uuid }
         correlationId: { type: string }
         retryAfterSeconds: { type: integer, minimum: 0 }
+    ErrorEnvelope:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error: { $ref: '#/components/schemas/Error' }
     Error:
       type: object
       additionalProperties: false
-      required: [code, message, correlationId, retryable]
+      required: [code, message, timestamp]
       properties:
         code: { type: string, description: Stable machine-readable code. }
         message: { type: string, description: No tenant or secret leakage. }
         correlationId: { type: string }
-        retryable: { type: boolean }
+        timestamp: { type: string, format: date-time }
         details: { type: object, additionalProperties: true }
   responses:
     BadRequest:
       description: Invalid request shape or unsupported contract version.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Unauthorized:
       description: Missing, expired or revoked credential.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Forbidden:
       description: Authenticated principal lacks the required scope or association.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     NotFound:
       description: Not found, inaccessible, or lookup hash/version mismatch in this namespace.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Conflict:
       description: Existing mapping, creation replay payload conflict, or stored operation integrity error.
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     RateLimited:
       description: Caller rate limit; retryable after Retry-After.
       headers:
@@ -377,7 +389,7 @@ components:
           schema: { type: integer, minimum: 1 }
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
     Unavailable:
       description: Dependency unavailable; retry with the same idempotency key after reconciliation.
       headers:
@@ -385,4 +397,4 @@ components:
           schema: { type: integer, minimum: 1 }
       content:
         application/json:
-          schema: { $ref: '#/components/schemas/Error' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }

@@ -1,4 +1,4 @@
-/** W1-D1 policy only. No controller, repository, or credential issuance is registered. */
+/** W1 policy used only by the isolated laboratory module. */
 export const BILLING_CONSUMER_V2_PROFILE = 'billing-consumer-v2' as const;
 export const CONSUMER_V2_ASSOCIATION_CONTRACT = 'fiscal-consumer-v2' as const;
 export const CONSUMER_V2_W1_SCOPES = [
@@ -147,6 +147,8 @@ export function authorizeConsumerV2(input: {
 
 /** Rotation interval is configurable; 90 days is the initial reference, not an expiry grant. */
 export const INITIAL_ROTATION_REFERENCE_DAYS = 90;
+/** Conservative laboratory ceiling; operational duration still requires Security approval. */
+export const MAX_CONSUMER_V2_LAB_ROTATION_OVERLAP_MS = 24 * 60 * 60 * 1000;
 
 export function nextConsumerRotationDueAt(
   issuedAt: Date,
@@ -172,6 +174,12 @@ export function evaluateConsumerKeyIssue(input: {
   }
   if (input.rotation.endsAt <= input.now) {
     return { allowed: false, code: 'CONSUMER_ROTATION_WINDOW_EXPIRED' };
+  }
+  if (
+    input.rotation.endsAt.getTime() - input.now.getTime() >
+    MAX_CONSUMER_V2_LAB_ROTATION_OVERLAP_MS
+  ) {
+    return { allowed: false, code: 'CONSUMER_ROTATION_WINDOW_TOO_LONG' };
   }
   return active.length === 1
     ? { allowed: true }

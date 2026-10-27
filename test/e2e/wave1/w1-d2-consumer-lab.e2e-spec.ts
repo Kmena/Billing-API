@@ -192,8 +192,9 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
           'fiscal_consumer_companies_tenant_consumer_external_key',
           'fiscal_consumer_associations_company_environment_key')`;
     expect(indexes).toHaveLength(3);
-    expect(await prisma.fiscalIntegrationAssociation.count()).toBe(0);
-    expect(await prisma.fiscalIdempotencyKey.count()).toBe(0);
+    const ownedTenantScope = { tenantId: { in: [tenantA, tenantB] } };
+    expect(await prisma.fiscalIntegrationAssociation.count({ where: ownedTenantScope })).toBe(0);
+    expect(await prisma.fiscalIdempotencyKey.count({ where: ownedTenantScope })).toBe(0);
   });
 
   it('preserves stable association identity across environments and blocks remapping', async () => {
@@ -205,7 +206,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       'issuer-1',
       'SANDBOX',
     );
-    expect(replay).toEqual(first);
+    expect(replay).toMatchObject({ ...first, created: false, status: 'ACTIVE' });
     expect(production.consumerId).toBe(first.consumerId);
     expect(production.associationId).not.toBe(first.associationId);
     await expect(
@@ -457,7 +458,11 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         },
       }),
     ).rejects.toThrow('invalid v2 credential binding');
-    expect(await prisma.fiscalIdempotencyKey.count()).toBe(0);
+    expect(
+      await prisma.fiscalIdempotencyKey.count({
+        where: { tenantId: { in: [tenantA, tenantB] } },
+      }),
+    ).toBe(0);
   });
 
   it('rolls back an association if its audit insert fails and exposes no raw key in audit', async () => {

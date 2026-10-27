@@ -190,7 +190,7 @@ describe('W1-D1 isolated M2M authorization', () => {
 
 describe('W1-D1 key lifecycle policy', () => {
   const key = { id: 'key-1', expiresAt: new Date('2027-01-01T00:00:00Z') };
-  const rotation = { endsAt: new Date('2026-11-01T00:00:00Z') };
+  const rotation = { endsAt: new Date('2026-10-28T00:00:00Z') };
 
   it('allows one steady key and a second only in a live rotation window', () => {
     expect(evaluateConsumerKeyIssue({ activeKeys: [], now })).toEqual({ allowed: true });
@@ -208,6 +208,13 @@ describe('W1-D1 key lifecycle policy', () => {
     expect(
       evaluateConsumerKeyIssue({ activeKeys: [key], now, rotation: { endsAt: now } }),
     ).toMatchObject({ allowed: false, code: 'CONSUMER_ROTATION_WINDOW_EXPIRED' });
+    expect(
+      evaluateConsumerKeyIssue({
+        activeKeys: [key],
+        now,
+        rotation: { endsAt: new Date('2026-10-28T00:00:00.001Z') },
+      }),
+    ).toMatchObject({ allowed: false, code: 'CONSUMER_ROTATION_WINDOW_TOO_LONG' });
   });
 
   it('uses 90 days as a configurable reference only', () => {
