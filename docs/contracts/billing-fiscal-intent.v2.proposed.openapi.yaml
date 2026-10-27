@@ -1,0 +1,279 @@
+openapi: 3.1.0
+info:
+  title: Billing fiscal intent v2 (W2 proposal)
+  version: 0.1.0-proposed
+  description: >-
+    Design artifact only. This invoice endpoint is NOT part of W1 implementation.
+    It cannot accept production traffic until ADR-BIL-013, DP-02 and applicable
+    DF-01 through DF-06 decisions are approved and the current fiscal annex/XSD
+    has been validated. The existing Inventori v1 API remains unchanged.
+x-status: proposed-inactive
+x-activation-wave: W2-after-fiscal-approval
+x-tax-decision-gates: [ADR-BIL-013, DP-02, DF-01, DF-02, DF-03, DF-04, DF-05, DF-06]
+servers:
+  - url: /api/v2
+paths:
+  /companies/{companyId}/fiscal-documents/{environment}/invoices:
+    post:
+      summary: Submit an immutable fiscal intent for an electronic invoice
+      operationId: createFiscalInvoiceV2
+      security: [{ ConsumerApiKey: [] }]
+      description: >-
+        Billing validates and emits only the approved fiscal representation.
+        The consumer owns its commercial ledger, allocation and collection
+        decisions. A 201 or 200 identifies a local document; neither means
+        Hacienda accepted it. The authenticated consumer association defines
+        tenant, issuer and environment. A conflicting replay returns 409 before
+        any new consecutive number is allocated.
+      parameters:
+        - name: companyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: environment
+          in: path
+          required: true
+          schema: { type: string, enum: [SANDBOX, PRODUCTION] }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128 }
+        - name: X-Fiscal-Payload-Contract-Version
+          in: header
+          required: true
+          schema: { type: string, const: fiscal-payload.v2 }
+        - name: X-Correlation-Id
+          in: header
+          required: false
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/InvoiceIntent' }
+            examples:
+              twoPeriodsOneAffiliation:
+                summary: Synthetic example; tax codes and values are placeholders, not an approved fiscal policy.
+                value:
+                  externalOperationId: allocation-2026-001
+                  policyVersion: issuer-policy-to-approve
+                  receiver:
+                    identificationType: pending-code
+                    identificationNumber: synthetic-123
+                    name: Receptor de prueba
+                  currency: CRC
+                  exchangeRate: null
+                  saleCondition: pending-code
+                  paymentMethods: []
+                  lines:
+                    - lineNumber: 1
+                      source:
+                        affiliationId: affiliation-001
+                        periodId: 2026-09
+                        allocationId: allocation-001
+                      servicePeriod: { startsOn: '2026-09-01', endsOn: '2026-09-30' }
+                      description: Concepto aprobado del periodo de septiembre
+                      cabysCode: pending-cabys
+                      unitCode: pending-unit
+                      quantity: '1.00000'
+                      unitPrice: '1000.00000'
+                      priceInputMode: EXCLUSIVE
+                      discounts: []
+                      taxTreatment: pending-treatment
+                      taxes: []
+                    - lineNumber: 2
+                      source:
+                        affiliationId: affiliation-001
+                        periodId: 2026-10
+                        allocationId: allocation-002
+                      servicePeriod: { startsOn: '2026-10-01', endsOn: '2026-10-31' }
+                      description: Concepto aprobado del periodo de octubre
+                      cabysCode: pending-cabys
+                      unitCode: pending-unit
+                      quantity: '1.00000'
+                      unitPrice: '1000.00000'
+                      priceInputMode: EXCLUSIVE
+                      discounts: []
+                      taxTreatment: pending-treatment
+                      taxes: []
+      responses:
+        '201':
+          description: New local document identity. No official acceptance implied.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceOperation' }
+        '200':
+          description: Exact replay; same local identity and payload hash.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceOperation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+components:
+  securitySchemes:
+    ConsumerApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Association-bound M2M key with invoices:create; W2 gated.
+  schemas:
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(\.[0-9]+)?$'
+      description: Exact base-10 decimal string. Final scale and rounding await fiscal approval.
+    SourceReference:
+      type: object
+      additionalProperties: false
+      description: >-
+        Opaque audit provenance owned by the consumer; never serialized as
+        an invented fiscal XML node and never used by Billing to calculate debt.
+      properties:
+        affiliationId: { type: string, minLength: 1 }
+        periodId: { type: string, minLength: 1 }
+        allocationId: { type: string, minLength: 1 }
+    ServicePeriod:
+      type: object
+      additionalProperties: false
+      required: [startsOn, endsOn]
+      properties:
+        startsOn: { type: string, format: date }
+        endsOn: { type: string, format: date }
+    Receiver:
+      type: object
+      additionalProperties: false
+      required: [identificationType, identificationNumber, name]
+      properties:
+        identificationType: { type: string, description: Code subject to applicable fiscal validation. }
+        identificationNumber: { type: string }
+        name: { type: string }
+        email: { type: string, format: email }
+    Discount:
+      type: object
+      additionalProperties: false
+      required: [amount, reasonCode]
+      properties:
+        amount: { $ref: '#/components/schemas/Decimal' }
+        reasonCode: { type: string, description: Fiscal code requires approved mapping. }
+        reason: { type: string }
+    DeclaredTax:
+      type: object
+      additionalProperties: false
+      required: [code, rateCode, rate, base, amount]
+      properties:
+        code: { type: string, description: No code approved by this proposal. }
+        rateCode: { type: string }
+        rate: { $ref: '#/components/schemas/Decimal' }
+        base: { $ref: '#/components/schemas/Decimal' }
+        amount: { $ref: '#/components/schemas/Decimal' }
+        exemptionDocument: { type: object, additionalProperties: true, description: Shape blocked by DF decisions. }
+    FiscalLine:
+      type: object
+      additionalProperties: false
+      required: [lineNumber, description, cabysCode, unitCode, quantity, unitPrice, priceInputMode, discounts, taxTreatment, taxes]
+      properties:
+        lineNumber: { type: integer, minimum: 1 }
+        source: { $ref: '#/components/schemas/SourceReference' }
+        servicePeriod: { $ref: '#/components/schemas/ServicePeriod' }
+        description: { type: string, minLength: 1 }
+        cabysCode: { type: string, description: Validate against catalog applicable on issue date. }
+        unitCode: { type: string, description: Exact code/mapping subject to tax validation. }
+        quantity: { $ref: '#/components/schemas/Decimal' }
+        unitPrice: { $ref: '#/components/schemas/Decimal' }
+        priceInputMode:
+          type: string
+          enum: [EXCLUSIVE, INCLUSIVE]
+          description: INCLUSIVE is disabled until an approved decomposition rule exists.
+        discounts:
+          type: array
+          items: { $ref: '#/components/schemas/Discount' }
+        taxTreatment:
+          type: string
+          description: Declared intent; allowed values, evidence and fiscal mapping await DF decisions.
+        taxes:
+          type: array
+          items: { $ref: '#/components/schemas/DeclaredTax' }
+    PaymentMethod:
+      type: object
+      additionalProperties: false
+      required: [code, amount]
+      properties:
+        code: { type: string, description: Requires fiscal catalog validation. }
+        amount: { $ref: '#/components/schemas/Decimal' }
+    InvoiceIntent:
+      type: object
+      additionalProperties: false
+      required: [externalOperationId, policyVersion, receiver, currency, saleCondition, paymentMethods, lines]
+      properties:
+        externalOperationId: { type: string, minLength: 1, maxLength: 128 }
+        policyVersion: { type: string, minLength: 1, description: Approved issuer policy reference; not a Billing-created tax rule. }
+        receiver: { $ref: '#/components/schemas/Receiver' }
+        currency: { type: string, description: Catalog validation and currency decisions pending. }
+        exchangeRate: { type: [string, 'null'], description: Exact decimal if applicable; currency rule pending. }
+        saleCondition: { type: string, description: Catalog validation pending. }
+        paymentMethods:
+          type: array
+          items: { $ref: '#/components/schemas/PaymentMethod' }
+        lines:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/FiscalLine' }
+    InvoiceOperation:
+      type: object
+      additionalProperties: false
+      required: [documentId, clave, consecutive, documentStatus, submissionStatus, links, payloadHash, correlationId]
+      properties:
+        documentId: { type: string, format: uuid }
+        clave: { type: string, description: Local fiscal identity; acceptance is separate. }
+        consecutive: { type: string }
+        documentStatus: { type: string }
+        submissionStatus: { type: string }
+        links: { type: object, additionalProperties: { type: string, format: uri-reference } }
+        payloadHash: { type: string }
+        correlationId: { type: string }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        details: { type: object, additionalProperties: true }
+  responses:
+    BadRequest:
+      description: Invalid shape or unsupported contract version.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: Missing, expired or revoked credential.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: No scope or issuer association.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Not found or inaccessible in this namespace.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: IDEMPOTENCY_PAYLOAD_CONFLICT or an integrity conflict; no new number allocated.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unprocessable:
+      description: Fiscal meaning or required evidence cannot be validated under an approved policy.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: Caller rate limit; retryable after Retry-After.
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unavailable:
+      description: Dependency unavailable; retry with the same idempotency key after reconciliation.
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }

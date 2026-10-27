@@ -1,0 +1,375 @@
+openapi: 3.1.0
+info:
+  title: Billing consumer integration v2 (proposal)
+  version: 0.1.0-proposed
+  description: >-
+    Draft W1 contract. No operation in this document is deployed or approved.
+    ADR-BIL-011, ADR-BIL-012 and DP-01 are pending. Existing /api/v1
+    contracts for Inventori remain unchanged.
+x-status: proposed
+x-activation-wave: W1-after-approval
+servers:
+  - url: /api/v2
+security: []
+tags:
+  - name: Consumer administration
+    description: Tenant administration with an existing user JWT.
+  - name: Consumer M2M
+    description: Bound consumer API key; authorization includes tenant, company and environment.
+paths:
+  /integrations/consumers:
+    post:
+      tags: [Consumer administration]
+      summary: Register a consumer and its first issuer association
+      operationId: createFiscalConsumerAssociationV2
+      security: [{ AdminJwt: [] }]
+      parameters: [{ $ref: '#/components/parameters/CorrelationId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsumerAssociation' }
+            examples:
+              affiliations:
+                value:
+                  provider: AFFILIATIONS
+                  externalConsumerKey: affiliations-main
+                  externalCompanyKey: issuer-001
+                  companyId: 78a7a66b-18ac-45cb-aa2c-eb094557bc19
+                  environment: SANDBOX
+                  profileVersion: fiscal-consumer-v2
+      responses:
+        '201':
+          description: New consumer and association, or new association for a known consumer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsumerAssociation' }
+        '200':
+          description: Exact idempotent registration replay; same identifiers and mapping.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConsumerAssociation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /integrations/consumers/{consumerId}:
+    get:
+      tags: [Consumer administration]
+      summary: Read consumer associations without secret material
+      operationId: getFiscalConsumerV2
+      security: [{ AdminJwt: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ConsumerId' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      responses:
+        '200':
+          description: Consumer and associations visible to this tenant administrator.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Consumer' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /integrations/consumers/{consumerId}/keys:
+    post:
+      tags: [Consumer administration]
+      summary: Issue or rotate one association-bound M2M credential
+      description: >-
+        The raw secret is returned only in the 201 response. A rotation issues a
+        new key with a bounded overlap; expiry and overlap policy require
+        ADR-BIL-011 approval. No existing v1 key is converted implicitly.
+      operationId: createFiscalConsumerKeyV2
+      security: [{ AdminJwt: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ConsumerId' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateConsumerKey' }
+      responses:
+        '201':
+          description: New secret. Set Cache-Control no-store.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IssuedConsumerKey' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+  /integrations/consumers/{consumerId}/keys/{keyId}/revoke:
+    post:
+      tags: [Consumer administration]
+      summary: Revoke one M2M credential
+      operationId: revokeFiscalConsumerKeyV2
+      security: [{ AdminJwt: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ConsumerId' }
+        - { $ref: '#/components/parameters/KeyId' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      responses:
+        '204': { description: Revoked or already revoked; no secret disclosed. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /companies/{companyId}/fiscal-readiness/{environment}:
+    get:
+      tags: [Consumer M2M]
+      summary: Read issuer readiness for this consumer association
+      operationId: getFiscalReadinessV2
+      security: [{ ConsumerApiKey: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CompanyId' }
+        - { $ref: '#/components/parameters/Environment' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      responses:
+        '200':
+          description: Scoped readiness; never implies a document type is accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Readiness' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /companies/{companyId}/fiscal-documents/{environment}/operations/lookup:
+    post:
+      tags: [Consumer M2M]
+      summary: Read the outcome of an idempotent operation
+      description: >-
+        Safe read-only POST. Idempotency key is in the body to avoid URL logs;
+        response is never cacheable. The server binds lookup to the authenticated
+        association and compares optional client evidence with the versioned
+        server hash already stored for that operation. It
+        never allocates a consecutive number or creates a document.
+      operationId: lookupFiscalOperationV2
+      security: [{ ConsumerApiKey: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CompanyId' }
+        - { $ref: '#/components/parameters/Environment' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationLookupRequest' }
+      responses:
+        '200':
+          description: Completed operation found in this consumer/company/environment namespace.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationLookup' }
+        '202':
+          description: Operation still reserved or in recovery; retry the lookup after Retry-After.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationLookup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/Unavailable' }
+components:
+  securitySchemes:
+    AdminJwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Existing tenant administrator authentication; not an M2M key.
+    ConsumerApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Hashed at rest; bound to one consumer association and environment.
+  parameters:
+    ConsumerId:
+      name: consumerId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CompanyId:
+      name: companyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Environment:
+      name: environment
+      in: path
+      required: true
+      schema: { type: string, enum: [SANDBOX, PRODUCTION] }
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  schemas:
+    CreateConsumerAssociation:
+      type: object
+      additionalProperties: false
+      required: [provider, externalConsumerKey, externalCompanyKey, companyId, environment, profileVersion]
+      properties:
+        provider: { type: string, minLength: 1, maxLength: 64 }
+        externalConsumerKey: { type: string, minLength: 1, maxLength: 128 }
+        externalCompanyKey: { type: string, minLength: 1, maxLength: 128 }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        profileVersion: { type: string, const: fiscal-consumer-v2 }
+    ConsumerAssociation:
+      type: object
+      additionalProperties: false
+      required: [consumerId, associationId, companyId, environment, status]
+      properties:
+        consumerId: { type: string, format: uuid }
+        associationId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, enum: [ACTIVE, SUSPENDED] }
+    Consumer:
+      type: object
+      additionalProperties: false
+      required: [consumerId, provider, externalConsumerKey, associations]
+      properties:
+        consumerId: { type: string, format: uuid }
+        provider: { type: string }
+        externalConsumerKey: { type: string }
+        associations:
+          type: array
+          items: { $ref: '#/components/schemas/ConsumerAssociation' }
+    CreateConsumerKey:
+      type: object
+      additionalProperties: false
+      required: [associationId, scopes, expiresAt]
+      properties:
+        associationId: { type: string, format: uuid }
+        scopes:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            enum: [fiscal-readiness:read, fiscal-operations:read, invoices:create, invoices:read, fiscal-documents:read, fiscal-artifacts:read]
+          description: W1 grants only readiness and operation lookup; issuance scopes activate in later waves.
+        expiresAt: { type: string, format: date-time }
+    IssuedConsumerKey:
+      type: object
+      additionalProperties: false
+      required: [keyId, associationId, secret, expiresAt, scopes]
+      properties:
+        keyId: { type: string, format: uuid }
+        associationId: { type: string, format: uuid }
+        secret: { type: string, description: Shown once. Never returned by GET. }
+        expiresAt: { type: string, format: date-time }
+        scopes:
+          type: array
+          items: { type: string }
+    Readiness:
+      type: object
+      additionalProperties: false
+      required: [companyId, environment, ready, blockers]
+      properties:
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        ready: { type: boolean }
+        blockers:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [code]
+            properties:
+              code: { type: string }
+    OperationLookupRequest:
+      type: object
+      additionalProperties: false
+      required: [operation, idempotencyKey]
+      properties:
+        operation: { type: string, enum: [CREATE_INVOICE] }
+        idempotencyKey: { type: string, minLength: 1, maxLength: 128 }
+        requestHashVersion: { type: string, description: Optional client evidence; compared with stored server hash version. }
+        requestHash: { type: string, description: Optional client evidence; never trusted as authority. }
+    OperationLookup:
+      type: object
+      additionalProperties: false
+      required: [operation, state, correlationId]
+      properties:
+        operation: { type: string }
+        state: { type: string, enum: [RESERVED, COMMITTED, RECOVERY_REQUIRED, ABORTED_BEFORE_ALLOCATION] }
+        fiscalDocumentId: { type: [string, 'null'], format: uuid }
+        correlationId: { type: string }
+        retryAfterSeconds: { type: integer, minimum: 0 }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, correlationId, retryable]
+      properties:
+        code: { type: string, description: Stable machine-readable code. }
+        message: { type: string, description: No tenant or secret leakage. }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        details: { type: object, additionalProperties: true }
+  responses:
+    BadRequest:
+      description: Invalid request shape or unsupported contract version.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing, expired or revoked credential.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Authenticated principal lacks the required scope or association.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found or inaccessible in this tenant namespace.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: Existing mapping or idempotency payload conflicts with this request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Caller rate limit; retryable after Retry-After.
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unavailable:
+      description: Dependency unavailable; retry with the same idempotency key after reconciliation.
+      headers:
+        Retry-After:
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
