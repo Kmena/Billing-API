@@ -2,6 +2,8 @@
 
 **Estado:** PROPUESTO, sin autorización de implementación. **Base:** `codex/billing-w0` / `e1294de`, W0_TECHNICAL_PASS local. **Alcance W1:** identidad, vinculación, credenciales, aislamiento e idempotencia v2. La emisión fiscal de líneas v2 pertenece a W2 y se documenta aquí solo para fijar el límite de integración. No se ejecutó W1, DDL, STAG ni despliegue.
 
+**Nota de preparación D1:** [actas para aprobación y plan D1](billing-w1-d1-decision-readiness.md) proponen un mapeo de empresa independiente del ambiente, perfil/scopes propios de v2 y hash obligatorio en el lookup. Esas precisiones sustituyen las opciones de este diseño **solo si se aprueban**; ADR-BIL-011/012 y DP-01 continúan pendientes.
+
 Fuentes: `billing-completion-sdd.md` §§3, 5, 6 y 8; `billing-affiliations-integration.md`; [evidencia W0](../operations/billing-w0-technical-evidence.md); [inventario Inventori v1](../contracts/inventori-v1-inventory-w0.md); [reconciliación Prisma](../operations/billing-w0-schema-reconciliation.md). Los ADR-BIL-011/012 y DP-01 **no tienen actas aprobadas independientes en este checkout**: su texto exacto es la fila DRAFT/pendiente del SDD. El ADR-010 sí figura aprobado en `specs/fase-0-foundation/decisions.md` del checkout original; `specs/` está ignorado y no se incorporó a esta rama.
 
 W0 aportó 1.297 pruebas unitarias aprobadas/13 omitidas por infraestructura en la rama limpia; las 13 se ejecutaron y aprobaron por separado en PostgreSQL/LocalStack descartables. También aportó E2E 153/153 con cliente Inventori fijado, 24 migraciones y checksums en DB descartable, cero pendientes allí y 16 tablas con divergencia Prisma. La base normal no fue consultada. Esta evidencia protege el punto de partida, no acredita W1 ni STAG.
