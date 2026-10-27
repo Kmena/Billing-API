@@ -1,0 +1,63 @@
+{
+  "source": "docs/contracts/inventori-v1-inventory-w0.md, Inventori edb1e05186d296e3699c71306913f16aee470d1e",
+  "groups": {
+    "legacyOnboarding": [
+      ["GET", "companies/:companyId/fiscal-onboarding/status"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/:environment/hacienda-credentials"],
+      ["POST", "companies/:companyId/fiscal-onboarding/:environment/hacienda-credentials/validate"],
+      ["GET", "companies/:companyId/fiscal-onboarding/:environment/readiness"]
+    ],
+    "bootstrap": [
+      ["POST", "fiscal-onboarding/v1/bootstrap"]
+    ],
+    "activities": [
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/activities"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/activities/refresh"],
+      ["PATCH", "companies/:companyId/fiscal-onboarding/v1/:environment/activities/:code"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/activities/default"]
+    ],
+    "readinessAndTest": [
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/readiness"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/test-invoices"],
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/test-invoices/:executionId"]
+    ],
+    "issuerAndProfile": [
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/issuer"],
+      ["PATCH", "companies/:companyId/fiscal-onboarding/v1/:environment/issuer"],
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/profile"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/profile"]
+    ],
+    "connectionAndCertificate": [
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/hacienda-connection"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/hacienda-connection"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/hacienda-connection/validate"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/hacienda-connection/disable"],
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/certificate"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/certificate"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/certificate"]
+    ],
+    "branchesTerminalsSequences": [
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/branches"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/branches"],
+      ["PATCH", "companies/:companyId/fiscal-onboarding/v1/:environment/branches/:branchId"],
+      ["POST", "companies/:companyId/fiscal-onboarding/v1/:environment/branches/:branchId/terminals"],
+      ["PATCH", "companies/:companyId/fiscal-onboarding/v1/:environment/terminals/:terminalId"],
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/issuance-points/default"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/issuance-points/default"],
+      ["GET", "companies/:companyId/fiscal-onboarding/v1/:environment/terminals/:terminalId/sequences/:documentType"],
+      ["PUT", "companies/:companyId/fiscal-onboarding/v1/:environment/terminals/:terminalId/sequences/:documentType/initial"]
+    ],
+    "invoiceCycle": [
+      ["POST", "companies/:companyId/fiscal-documents/:environment/invoices"],
+      ["GET", "companies/:companyId/fiscal-documents/:environment/identity-by-idempotency"],
+      ["POST", "companies/:companyId/fiscal-documents/:environment/identity-by-fiscal-evidence"],
+      ["POST", "fiscal-documents/:id/prepare-xml"],
+      ["POST", "companies/:companyId/fiscal-documents/:environment/invoices/:id/submit"],
+      ["POST", "companies/:companyId/fiscal-documents/:environment/invoices/:fiscalDocumentId/accepted-package-resend"],
+      ["GET", "fiscal-documents/:id"],
+      ["GET", "companies/:companyId/fiscal-documents/:environment/invoices/:id/submission"],
+      ["GET", "companies/:companyId/fiscal-documents/:environment/invoices/:id/artifacts"],
+      ["GET", "companies/:companyId/fiscal-documents/:environment/invoices/:id/artifacts/:artifactId/download"]
+    ]
+  }
+}

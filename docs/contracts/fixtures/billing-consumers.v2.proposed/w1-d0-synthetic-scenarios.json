@@ -1,0 +1,56 @@
+{
+  "notice": "Synthetic contract scenarios only. No issuer, consumer, key or reservation exists in a database.",
+  "tenants": [
+    { "id": "10000000-0000-4000-8000-000000000001", "name": "Tenant Sintético A" },
+    { "id": "10000000-0000-4000-8000-000000000002", "name": "Tenant Sintético B" }
+  ],
+  "companies": [
+    { "id": "20000000-0000-4000-8000-000000000001", "tenantId": "10000000-0000-4000-8000-000000000001", "name": "Emisor Sintético Compartido" },
+    { "id": "20000000-0000-4000-8000-000000000002", "tenantId": "10000000-0000-4000-8000-000000000001", "name": "Emisor Sintético Separado" },
+    { "id": "20000000-0000-4000-8000-000000000003", "tenantId": "10000000-0000-4000-8000-000000000002", "name": "Emisor Sintético Ajeno" }
+  ],
+  "consumers": [
+    { "id": "30000000-0000-4000-8000-000000000001", "tenantId": "10000000-0000-4000-8000-000000000001", "provider": "AFFILIATIONS" },
+    { "id": "30000000-0000-4000-8000-000000000002", "tenantId": "10000000-0000-4000-8000-000000000001", "provider": "SYNTHETIC_PARTNER" },
+    { "id": "30000000-0000-4000-8000-000000000003", "tenantId": "10000000-0000-4000-8000-000000000002", "provider": "SYNTHETIC_FOREIGN" }
+  ],
+  "associations": [
+    { "id": "40000000-0000-4000-8000-000000000001", "consumerId": "30000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "status": "ACTIVE" },
+    { "id": "40000000-0000-4000-8000-000000000002", "consumerId": "30000000-0000-4000-8000-000000000002", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "status": "ACTIVE" },
+    { "id": "40000000-0000-4000-8000-000000000003", "consumerId": "30000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000002", "environment": "SANDBOX", "status": "ACTIVE" },
+    { "id": "40000000-0000-4000-8000-000000000004", "consumerId": "30000000-0000-4000-8000-000000000003", "companyId": "20000000-0000-4000-8000-000000000003", "environment": "SANDBOX", "status": "ACTIVE" },
+    { "id": "40000000-0000-4000-8000-000000000005", "consumerId": "30000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "PRODUCTION", "status": "SUSPENDED" }
+  ],
+  "keys": [
+    { "id": "50000000-0000-4000-8000-000000000001", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-readiness:read", "fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000002", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-readiness:read", "fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000003", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "affiliations-fiscal-v1", "status": "REVOKED", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000004", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "affiliations-fiscal-v1", "status": "EXPIRED", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000005", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "inventori-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000006", "associationId": "40000000-0000-4000-8000-000000000001", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-readiness:read"] },
+    { "id": "50000000-0000-4000-8000-000000000007", "associationId": "40000000-0000-4000-8000-000000000002", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000008", "associationId": "40000000-0000-4000-8000-000000000003", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000009", "associationId": "40000000-0000-4000-8000-000000000004", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-operations:read"] },
+    { "id": "50000000-0000-4000-8000-000000000010", "associationId": "40000000-0000-4000-8000-000000000005", "profile": "affiliations-fiscal-v1", "status": "ACTIVE", "scopes": ["fiscal-operations:read"] }
+  ],
+  "reservationExamples": [
+    { "associationId": "40000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "operation": "CREATE_INVOICE", "idempotencyKey": "synthetic-operation-001", "requestHashVersion": "pending-v2-hash", "requestHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "state": "COMMITTED" },
+    { "associationId": "40000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "operation": "CREATE_INVOICE", "idempotencyKey": "synthetic-operation-002", "requestHashVersion": "pending-v2-hash", "requestHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "state": "RECOVERY_REQUIRED" }
+  ],
+  "contractCases": [
+    { "name": "missing credential", "operationId": "lookupFiscalOperationV2", "keyId": null, "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "expectedStatus": 401 },
+    { "name": "revoked credential", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000003", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "expectedStatus": 401 },
+    { "name": "expired credential", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000004", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "expectedStatus": 401 },
+    { "name": "v1 profile on v2", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000005", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "expectedStatus": 403 },
+    { "name": "insufficient scope", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000006", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "expectedStatus": 403 },
+    { "name": "other company same tenant", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000007", "companyId": "20000000-0000-4000-8000-000000000002", "environment": "SANDBOX", "expectedStatus": 403 },
+    { "name": "other tenant", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000003", "environment": "SANDBOX", "expectedStatus": 404 },
+    { "name": "wrong environment", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "PRODUCTION", "expectedStatus": 403 },
+    { "name": "suspended association", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000010", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "PRODUCTION", "expectedStatus": 403 },
+    { "name": "rotated key same namespace", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000002", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "idempotencyKey": "synthetic-operation-001", "expectedStatus": 200 },
+    { "name": "another consumer same issuer has no reservation", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000007", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "idempotencyKey": "synthetic-operation-001", "expectedStatus": 404 },
+    { "name": "another issuer has no reservation", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000008", "companyId": "20000000-0000-4000-8000-000000000002", "environment": "SANDBOX", "idempotencyKey": "synthetic-operation-001", "expectedStatus": 404 },
+    { "name": "same namespace different payload", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "idempotencyKey": "synthetic-operation-001", "requestHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "expectedStatus": 409 },
+    { "name": "uncertain external result", "operationId": "lookupFiscalOperationV2", "keyId": "50000000-0000-4000-8000-000000000001", "companyId": "20000000-0000-4000-8000-000000000001", "environment": "SANDBOX", "idempotencyKey": "synthetic-operation-002", "expectedStatus": 202 }
+  ]
+}

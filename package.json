@@ -27,6 +27,7 @@
     "test:db-regression:disposable": "node scripts/test-safety/disposable-postgres.mjs run -- node scripts/test-safety/run-disposable-validation.mjs db-regression",
     "test:w0:schema": "node scripts/test-safety/disposable-postgres.mjs run -- node scripts/test-safety/verify-w0-disposable-schema.mjs",
     "test:w0:localstack": "node scripts/test-safety/disposable-localstack-ssm.mjs",
+    "test:w1:d0": "jest --config ./test/jest-w1-d0.json --runInBand",
     "test:e2e:disposable": "node scripts/test-safety/disposable-postgres.mjs run -- node scripts/test-safety/run-disposable-validation.mjs e2e",
     "db:migrate:dev": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",

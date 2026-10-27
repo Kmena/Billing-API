@@ -8,6 +8,7 @@ import { GlobalExceptionFilter } from '../api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../api/interceptors/tenant-context.interceptor';
 import { AuditInterceptor } from '../api/interceptors/audit.interceptor';
+import { configureApiPrefixes } from './api-prefix';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -46,10 +47,8 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  // Global API prefix — all endpoints under /api/v1
-  app.setGlobalPrefix('api/v1', {
-    exclude: ['health', 'health/ready', 'health/live'],
-  });
+  // Existing routes stay under v1; future explicit v2 controllers keep their own path.
+  configureApiPrefixes(app);
 
   // Global exception filter — FR-014
   app.useGlobalFilters(new GlobalExceptionFilter(nodeEnv));
