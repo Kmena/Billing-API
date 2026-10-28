@@ -12,7 +12,7 @@ Después de la aceptación de la NC, el consumidor puede solicitar un borrador p
 
 ## Límite fiscal
 
-La emisión de esa ND está bloqueada por `BLOCKED_FISCAL_POLICY`. No se selecciona código de referencia ni tratamiento tributario por inferencia. Se requiere aprobación fiscal de la secuencia, importes, impuestos, estados exigibles y referencias en DF-06 antes de añadir el ejecutor de ND o activar `DEBIT_NOTE_PENDING`, `DEBIT_NOTE_ACCEPTED` y `REVERSAL_COMPLETED`. Tampoco se considera aceptada una NC por su XML firmado o por estar lista para envío; solo cuenta el estado fiscal terminal observado.
+La emisión de esa ND está bloqueada por `BLOCKED_FISCAL_POLICY`. La [matriz DF-06](df-06-normative-matrix-2026-10-28.md) identifica `TipoDocIR=03` y `01` como **candidato normativo** para anular la NC completa, sin aprobar su aplicación tributaria. El plan compara la NC total con la FE, verifica emisor, receptor, clave, consecutivo, referencia, impuestos, totales y XML firmado, y fija un hash. Se requiere aprobación fiscal de la secuencia, importes, impuestos, estados exigibles y referencias antes de añadir el ejecutor de ND o activar `DEBIT_NOTE_PENDING`, `DEBIT_NOTE_ACCEPTED` y `REVERSAL_COMPLETED`. Tampoco se considera aceptada una NC por su XML firmado o por estar lista para envío; solo cuenta el estado fiscal terminal observado.
 
 ## Persistencia y recuperación
 

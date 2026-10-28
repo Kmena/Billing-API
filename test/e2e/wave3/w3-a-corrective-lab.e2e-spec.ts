@@ -12,6 +12,16 @@ import {
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
 import { STORAGE_PORT, StoragePort } from '../../../src/infrastructure/storage/ports/storage.port';
 import {
+  XSD_VALIDATOR,
+  XsdValidatorPort,
+} from '../../../src/modules/fiscal-documents/application/fiscal-xml/xsd-validator.port';
+import {
+  buildConsecutive,
+  buildFiscalKey,
+} from '../../../src/modules/fiscal-documents/domain/fiscal-key.generator';
+import { FiscalXmlDocumentSnapshot } from '../../../src/modules/fiscal-documents/domain/fiscal-xml/fiscal-xml.types';
+import { HaciendaV44XmlSerializerAdapter } from '../../../src/modules/fiscal-documents/infrastructure/xml/hacienda-v44-xml-serializer.adapter';
+import {
   XML_SIGNER,
   XmlSignerPort,
 } from '../../../src/infrastructure/signing/ports/xml-signer.port';
@@ -894,8 +904,59 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     expect(workflow.reversalPlan).toMatchObject({
       operation: 'REVERSE_CANCELLATION',
       sourceCreditNoteId: created.body.cancellationNoteId,
+      reference: { documentTypeCode: '03', candidateReasonCode: '01' },
+      issuanceAllowed: false,
       fiscalPolicy: 'DF_06_REFERENCE_AND_TAX_TREATMENT_PENDING',
     });
+    const acceptedNote = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: created.body.cancellationNoteId },
+    });
+    const issuer = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
+    const consecutive = buildConsecutive({
+      branchCode: acceptedNote.branchCode,
+      terminalCode: acceptedNote.terminalCode,
+      documentType: 'DEBIT_NOTE',
+      sequenceValue: acceptedNote.sequenceValue,
+    });
+    const previewSnapshot = {
+      ...acceptedNote,
+      id: randomUUID(),
+      type: 'DEBIT_NOTE',
+      status: 'READY_FOR_XML',
+      consecutive,
+      clave: buildFiscalKey({
+        issuedAt: acceptedNote.issueDate,
+        issuerIdentificationNumber: issuer.identificationNumber,
+        consecutive,
+        securityCode: acceptedNote.securityCode,
+        situation: acceptedNote.situation,
+      }),
+      referenceSnapshot: {
+        documentTypeCode: '03',
+        clave: acceptedNote.clave,
+        issueDate: acceptedNote.issueDate.toISOString(),
+        code: '01',
+        reason: 'Reversión sintética de anulación',
+      },
+    } as unknown as FiscalXmlDocumentSnapshot;
+    const serializer = app.get(HaciendaV44XmlSerializerAdapter);
+    expect(() => serializer.serialize(previewSnapshot)).toThrow(
+      'FISCAL_XML_CORRECTION_REFERENCE_INVALID',
+    );
+    const preview = serializer.serializeLabReversalPreview(previewSnapshot);
+    expect(preview.xml).toContain('<TipoDocIR>03</TipoDocIR>');
+    expect(preview.xml).toContain(`<Numero>${acceptedNote.clave}</Numero>`);
+    const signedPreview = await app.get<XmlSignerPort>(XML_SIGNER).sign(preview.xml, {
+      data: Buffer.from(signing.pkcs12Base64, 'base64'),
+      passphrase: signing.certificate.passphrase,
+    });
+    expect(
+      app.get<XsdValidatorPort>(XSD_VALIDATOR).validate({
+        ...preview,
+        xml: signedPreview,
+      }),
+    ).toMatchObject({ isValid: true, errors: [] });
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(signedPreview)).isValid).toBe(true);
     expect(
       await prisma.fiscalDocument.count({
         where: { type: 'DEBIT_NOTE', sourceFiscalDocumentId: originalId },
@@ -964,6 +1025,55 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     expect(
       await prisma.fiscalDocument.count({
         where: { type: 'DEBIT_NOTE', sourceFiscalDocumentId: originalId },
+      }),
+    ).toBe(0);
+  });
+
+  it('refuses an altered NC reference or tax amount before claiming reversal', async () => {
+    const originalId = await acceptedInvoice('reverse-tampered-credit-source');
+    const created = await cancelInvoice(originalId, 'reverse-tampered-credit').expect(200);
+    const note = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: created.body.cancellationNoteId },
+    });
+    await prisma.fiscalDocument.update({
+      where: { id: note.id },
+      data: {
+        status: 'ACCEPTED',
+        referenceSnapshot: { ...(note.referenceSnapshot as object), code: '02' },
+      },
+    });
+    await workflowGet(created.body.workflowId).expect(200);
+    await workflowPost(created.body.workflowId, 'reversal', 'reverse-tampered-attempt').expect(422);
+    expect(
+      (
+        await prisma.fiscalCancellationWorkflow.findUniqueOrThrow({
+          where: { id: created.body.workflowId },
+        })
+      ).reversalKey,
+    ).toBeNull();
+    const lines = note.lines as Array<Record<string, unknown>>;
+    await prisma.fiscalDocument.update({
+      where: { id: note.id },
+      data: {
+        referenceSnapshot: note.referenceSnapshot as object,
+        lines: [{ ...lines[0], taxAmount: '999.00000' }],
+      },
+    });
+    await workflowPost(created.body.workflowId, 'reversal', 'reverse-tampered-attempt').expect(422);
+    await prisma.fiscalDocument.update({
+      where: { id: note.id },
+      data: { lines: note.lines as object[] },
+    });
+    const blocked = await workflowPost(
+      created.body.workflowId,
+      'reversal',
+      'reverse-tampered-attempt',
+    ).expect(200);
+    expect(blocked.body.state).toBe('BLOCKED_FISCAL_POLICY');
+    expect(blocked.body.reversalPreparation.snapshotSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { sourceFiscalDocumentId: note.id, type: 'DEBIT_NOTE' },
       }),
     ).toBe(0);
   });

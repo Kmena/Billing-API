@@ -92,8 +92,10 @@ paths:
       x-required-scope: fiscal-v2:debit-notes:create
       description: >-
         Requires credit-notes:create as well when an accepted replacement must first
-        be cancelled. It creates no ND while DF-06 is pending. If replacement NC
-        fails, RECOVERY_REQUIRED is retained without automatically undoing it.
+        be cancelled. It validates and records an ND preparation referencing the
+        accepted NC directly (TipoDocIR 03, candidate Codigo 01), but creates no ND
+        while DF-06 tax approval is pending. If replacement NC fails,
+        RECOVERY_REQUIRED is retained without automatically undoing it.
       parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -146,3 +148,9 @@ components:
               replacementCancellationNoteId: { type: [string, 'null'], format: uuid }
               reversalNoteId: { type: [string, 'null'], format: uuid }
               policyBlock: { type: [string, 'null'] }
+              reversalPreparation:
+                description: >-
+                  Validated, hash-pinned laboratory candidate. Reference code 01 and
+                  copied NC amounts are subject to tax approval; issuanceAllowed is
+                  always false. No ND key or consecutive is reserved.
+                type: [object, 'null']

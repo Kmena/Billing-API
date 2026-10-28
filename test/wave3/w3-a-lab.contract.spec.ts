@@ -73,6 +73,17 @@ describe('Cancellation and reversal laboratory contract', () => {
       'x-status': string;
       'x-fiscal-policy': string;
       servers: Array<{ url: string }>;
+      components: {
+        responses: {
+          Workflow: {
+            content: {
+              'application/json': {
+                schema: { properties: { reversalPreparation: { description: string } } };
+              };
+            };
+          };
+        };
+      };
       paths: Record<
         string,
         Record<string, { 'x-required-scope': string; responses: Record<string, unknown> }>
@@ -80,6 +91,10 @@ describe('Cancellation and reversal laboratory contract', () => {
     };
     expect(contract['x-status']).toBe('lab-only-inactive-in-product');
     expect(contract['x-fiscal-policy']).toContain('DF-06');
+    expect(
+      contract.components.responses.Workflow.content['application/json'].schema.properties
+        .reversalPreparation.description,
+    ).toContain('issuanceAllowed');
     expect(contract.servers[0].url).toBe('/api/v2/lab');
     const root = '/companies/{companyId}/fiscal-documents/{environment}/cancellations';
     for (const [path, method, scope] of [

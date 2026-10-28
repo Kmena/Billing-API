@@ -22,6 +22,7 @@ import {
   replacementDraftFromInvoice,
   validateReplacementConfirmation,
 } from './cancellation-replacement-draft';
+import { prepareNdReversalLab } from './nd-reversal-lab-preparation';
 
 type Tx = PrismaTransactionClient;
 type Action = { principal: ConsumerV2Principal; key: string; correlationId: string };
@@ -150,6 +151,7 @@ export class CancellationWorkflowLabService {
       reversalNoteId: row.reversalNoteId,
       policyBlock:
         row.state === 'BLOCKED_FISCAL_POLICY' ? 'DF_06_REFERENCE_AND_TAX_TREATMENT_PENDING' : null,
+      reversalPreparation: row.reversalPlan,
     };
   }
 
@@ -422,20 +424,70 @@ export class CancellationWorkflowLabService {
 
   private async reversalPlan(tx: Tx, row: FiscalCancellationWorkflow) {
     if (!row.cancellationNoteId) throw new ConflictException({ code: 'CANCELLATION_NOTE_MISSING' });
+    if (row.reversalNoteId) throw new ConflictException({ code: 'CANCELLATION_ALREADY_REVERSED' });
     const note = await tx.fiscalDocument.findUniqueOrThrow({
       where: { id: row.cancellationNoteId },
     });
     if (note.type !== 'CREDIT_NOTE' || note.status !== 'ACCEPTED')
       throw new UnprocessableEntityException({ code: 'CANCELLATION_NOTE_NOT_ACCEPTED' });
+    const original = await tx.fiscalDocument.findUniqueOrThrow({
+      where: { id: row.originalDocumentId },
+    });
+    const company = await tx.company.findUniqueOrThrow({
+      where: { id: row.companyId },
+      select: { identificationNumber: true },
+    });
+    const existingDebit = await tx.fiscalDocument.count({
+      where: { sourceFiscalDocumentId: note.id, type: 'DEBIT_NOTE', status: { not: 'REJECTED' } },
+    });
+    if (existingDebit) throw new ConflictException({ code: 'CANCELLATION_ALREADY_REVERSED' });
+    const signed = await tx.fiscalXmlArtifact.findFirst({
+      where: {
+        fiscalDocumentId: note.id,
+        tenantId: row.tenantId,
+        companyId: row.companyId,
+        xsdValidationStatus: 'VALID',
+        signedXmlStorageKey: { not: null },
+        signatureVerifiedAt: { not: null },
+      },
+      select: { id: true },
+    });
+    if (!signed)
+      throw new UnprocessableEntityException({ code: 'ND_REVERSAL_CREDIT_XML_UNVERIFIED' });
+    if (row.replacementDocumentId) {
+      const replacement = await tx.fiscalDocument.findUniqueOrThrow({
+        where: { id: row.replacementDocumentId },
+      });
+      if (replacement.status !== 'REJECTED') {
+        if (replacement.status !== 'ACCEPTED' || !row.replacementCancellationNoteId)
+          throw new UnprocessableEntityException({ code: 'ND_REVERSAL_REPLACEMENT_NOT_CANCELLED' });
+        const replacementNc = await tx.fiscalDocument.findUniqueOrThrow({
+          where: { id: row.replacementCancellationNoteId },
+        });
+        prepareNdReversalLab(replacement, replacementNc, company.identificationNumber);
+        const signedReplacementNc = await tx.fiscalXmlArtifact.findFirst({
+          where: {
+            fiscalDocumentId: replacementNc.id,
+            tenantId: row.tenantId,
+            companyId: row.companyId,
+            xsdValidationStatus: 'VALID',
+            signedXmlStorageKey: { not: null },
+            signatureVerifiedAt: { not: null },
+          },
+          select: { id: true },
+        });
+        if (!signedReplacementNc)
+          throw new UnprocessableEntityException({
+            code: 'ND_REVERSAL_REPLACEMENT_CREDIT_XML_UNVERIFIED',
+          });
+      }
+    }
+    const preparation = prepareNdReversalLab(original, note, company.identificationNumber);
     return {
-      operation: 'REVERSE_CANCELLATION',
-      sourceCreditNoteId: note.id,
+      ...preparation,
       referenceClave: note.clave,
       referenceConsecutive: note.consecutive,
-      currency: note.currency,
-      totals: note.totals,
-      lines: note.lines,
-      fiscalPolicy: 'DF_06_REFERENCE_AND_TAX_TREATMENT_PENDING',
+      replacementCancellationNoteId: row.replacementCancellationNoteId,
     };
   }
 
@@ -466,7 +518,8 @@ export class CancellationWorkflowLabService {
           throw new UnprocessableEntityException({ code: 'REPLACEMENT_FISCAL_STATUS_PENDING' });
         if (replacement.status === 'ACCEPTED')
           await this.consumers.assertPrincipalForScope(tx, input.principal, CREDIT);
-      }
+        else await this.reversalPlan(tx, current);
+      } else await this.reversalPlan(tx, current);
       return this.transition(tx, current, input, 'REVERSAL_REQUESTED', {
         reversalKey: input.key,
         reversalHash: digest({ id, operation: 'REVERSE_CANCELLATION' }),

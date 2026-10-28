@@ -111,6 +111,24 @@ interface TaxGroupEntry {
 @Injectable()
 export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort {
   serialize(document: FiscalXmlDocumentSnapshot): FiscalXmlGenerationResult {
+    return this.serializeInternal(document, false);
+  }
+
+  /** Unsigned, non-persistent ND preview for the isolated DF-06 laboratory only. */
+  serializeLabReversalPreview(document: FiscalXmlDocumentSnapshot): FiscalXmlGenerationResult {
+    if (
+      process.env.NODE_ENV !== 'test' ||
+      document.environment !== 'SANDBOX' ||
+      document.type !== 'DEBIT_NOTE'
+    )
+      throw new Error('ND_REVERSAL_LAB_ONLY');
+    return this.serializeInternal(document, true);
+  }
+
+  private serializeInternal(
+    document: FiscalXmlDocumentSnapshot,
+    allowLabNcReference: boolean,
+  ): FiscalXmlGenerationResult {
     const contract =
       document.type === 'INVOICE'
         ? HACIENDA_V44_FACTURA_ELECTRONICA
@@ -279,7 +297,10 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     summary.up();
 
     if (document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE') {
-      const reference = this.requireCorrectionReference(document.referenceSnapshot);
+      const reference = this.requireCorrectionReference(
+        document.referenceSnapshot,
+        allowLabNcReference,
+      );
       const element = root.ele('InformacionReferencia');
       element.ele('TipoDocIR').txt(reference.documentTypeCode).up();
       element.ele('Numero').txt(reference.clave).up();
@@ -299,7 +320,10 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     };
   }
 
-  private requireCorrectionReference(value: unknown): {
+  private requireCorrectionReference(
+    value: unknown,
+    allowLabNcReference = false,
+  ): {
     documentTypeCode: string;
     clave: string;
     issueDate: string;
@@ -311,7 +335,8 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     }
     const item = value as Record<string, unknown>;
     if (
-      item.documentTypeCode !== '01' ||
+      (item.documentTypeCode !== '01' &&
+        !(allowLabNcReference && item.documentTypeCode === '03' && item.code === '01')) ||
       typeof item.clave !== 'string' ||
       !/^\d{50}$/.test(item.clave) ||
       typeof item.issueDate !== 'string' ||
