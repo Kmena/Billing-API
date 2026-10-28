@@ -603,6 +603,41 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     ).toBe(1);
   });
 
+  it('serializes concurrent ND adjustments and persists an auditable debit ledger', async () => {
+    const sourceId = await acceptedInvoice('integration-debit-ledger-source');
+    await post(
+      'debit-notes',
+      apiKey.secret,
+      'integration-debit-inexact',
+      debit(sourceId, '100.00001'),
+    ).expect(422);
+    const [first, second] = await Promise.all([
+      post('debit-notes', apiKey.secret, 'integration-debit-a', debit(sourceId, '100')),
+      post('debit-notes', apiKey.secret, 'integration-debit-b', debit(sourceId, '100')),
+    ]);
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(first.body.documentId).not.toBe(second.body.documentId);
+    const documents = await prisma.fiscalDocument.findMany({
+      where: { sourceFiscalDocumentId: sourceId, type: 'DEBIT_NOTE' },
+      include: { xmlArtifacts: true },
+    });
+    expect(documents).toHaveLength(2);
+    const after = documents.map((document) => {
+      const reference = document.referenceSnapshot as Record<string, unknown>;
+      expect(reference).toMatchObject({
+        clave: expect.stringMatching(/^\d{50}$/),
+        code: '02',
+        debitLedgerBefore: expect.any(Array),
+        debitLedgerAfter: expect.any(Array),
+      });
+      expect(document.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+      return (reference.debitLedgerAfter as Array<{ adjustedBaseAmount: string }>)[0]
+        .adjustedBaseAmount;
+    });
+    expect(after.sort()).toEqual(['100.00000', '200.00000']);
+  });
+
   it('blocks ND→NC and NC→ND sequences pending fiscal approval', async () => {
     const debitFirst = await acceptedInvoice('w3b-debit-first-source');
     const debitBody = debit(debitFirst, '100');

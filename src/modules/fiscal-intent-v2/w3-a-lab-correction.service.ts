@@ -18,6 +18,7 @@ import {
   correctionBalances,
   correctionHash,
   correctionLines,
+  debitAdjustmentBalances,
   parseCorrectionIntent,
   W3_A_LAB_HASH_VERSION,
 } from './w3-a-correction-projection';
@@ -166,7 +167,9 @@ export class W3ALabCorrectionService {
       throw new UnprocessableEntityException({ code: 'CORRECTION_MIXED_NOTE_POLICY_PENDING' });
     }
     const creditedLines = credits.map((note) => note.lines);
+    const adjustedLines = debits.map((note) => note.lines);
     const ledgerBefore = correctionBalances(source.lines, creditedLines);
+    const debitLedgerBefore = debitAdjustmentBalances(source.lines, adjustedLines);
     const lines = correctionLines(kind, intent, source.lines, creditedLines);
     if (lines.length === 0) throw new ConflictException({ code: 'CORRECTION_EMPTY' });
     const command: CreateFiscalDocumentCommand = {
@@ -203,7 +206,10 @@ export class W3ALabCorrectionService {
           ledgerBefore,
           ...(kind === 'CREDIT_NOTE'
             ? { ledgerAfter: correctionBalances(source.lines, [...creditedLines, lines]) }
-            : {}),
+            : {
+                debitLedgerBefore,
+                debitLedgerAfter: debitAdjustmentBalances(source.lines, [...adjustedLines, lines]),
+              }),
         },
       },
     );

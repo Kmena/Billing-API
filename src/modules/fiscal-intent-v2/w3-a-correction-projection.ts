@@ -229,6 +229,52 @@ export function correctionBalances(sourceLinesRaw: unknown, priorCreditLinesRaw:
   );
 }
 
+/** Structural ND history only. It does not define a fiscal cap or net NC/ND balance. */
+export function debitAdjustmentBalances(sourceLinesRaw: unknown, priorDebitLinesRaw: unknown[]) {
+  const source = correctionLedger(sourceLinesRaw, []);
+  const totals = new Map<number, { base: bigint; tax: bigint; count: number }>();
+  for (const sourceLineNumber of source.keys())
+    totals.set(sourceLineNumber, { base: 0n, tax: 0n, count: 0 });
+  for (const raw of priorDebitLinesRaw) {
+    if (!Array.isArray(raw))
+      throw new ConflictException({ code: 'CORRECTION_DEBIT_LEDGER_INVALID' });
+    const seen = new Set<number>();
+    for (const line of raw as Array<Record<string, unknown>>) {
+      const number = line.sourceLineNumber;
+      if (!Number.isInteger(number) || seen.has(number as number) || !source.has(number as number))
+        throw new ConflictException({ code: 'CORRECTION_DEBIT_LEDGER_INVALID' });
+      seen.add(number as number);
+      const original = source.get(number as number)!.source;
+      const rateCode = original.taxRateCode;
+      if (
+        line.quantity !== '1.00000' ||
+        line.taxCode !== '01' ||
+        line.taxRateCode !== rateCode ||
+        !['08', '10'].includes(String(rateCode)) ||
+        (line.discountAmount !== undefined && line.discountAmount !== '0.00000')
+      )
+        throw new ConflictException({ code: 'CORRECTION_DEBIT_LEDGER_INVALID' });
+      const base = amount(line.unitPrice, 'CORRECTION_DEBIT_LEDGER_INVALID');
+      const tax = amount(line.taxAmount, 'CORRECTION_DEBIT_LEDGER_INVALID');
+      if (
+        base <= 0n ||
+        tax !== (rateCode === '08' ? exact(base, 13n, 100n, 'CORRECTION_DEBIT_LEDGER_INVALID') : 0n)
+      )
+        throw new ConflictException({ code: 'CORRECTION_DEBIT_LEDGER_INVALID' });
+      const total = totals.get(number as number)!;
+      total.base += base;
+      total.tax += tax;
+      total.count += 1;
+    }
+  }
+  return [...totals].map(([sourceLineNumber, total]) => ({
+    sourceLineNumber,
+    adjustmentCount: total.count,
+    adjustedBaseAmount: decimal(total.base),
+    adjustedTaxAmount: decimal(total.tax),
+  }));
+}
+
 export function correctionLines(
   kind: CorrectionKind,
   intent: CorrectionIntent,

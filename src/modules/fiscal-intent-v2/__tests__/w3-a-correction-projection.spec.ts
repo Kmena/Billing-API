@@ -2,6 +2,7 @@ import {
   correctionBalances,
   correctionHash,
   correctionLines,
+  debitAdjustmentBalances,
   parseCorrectionIntent,
 } from '../w3-a-correction-projection';
 import { ConsumerV2Principal } from '../../fiscal-consumers/infrastructure/http/consumer-v2.guard';
@@ -47,6 +48,41 @@ function intent(mode: 'TOTAL' | 'PARTIAL' | 'REMAINING', quantity?: string) {
 }
 
 describe('W3-A exact corrective projection', () => {
+  it('records cumulative ND base and tax by original line without netting NC', () => {
+    const note = (baseAmount: string) =>
+      correctionLines(
+        'DEBIT_NOTE',
+        parseCorrectionIntent(
+          {
+            sourceDocumentId,
+            mode: 'ADJUSTMENT',
+            referenceReasonCode: '02',
+            reason: 'Ajuste sintético',
+            externalCorrectionId: baseAmount,
+            correctionLines: [{ sourceLineNumber: 1, baseAmount }],
+          },
+          'DEBIT_NOTE',
+        ),
+        source,
+        [],
+      );
+    const first = note('100');
+    const second = note('50');
+    expect(first[0]).toMatchObject({ unitPrice: '100.00000', taxAmount: '13.00000' });
+    expect(debitAdjustmentBalances(source, [first, second])).toEqual([
+      {
+        sourceLineNumber: 1,
+        adjustmentCount: 2,
+        adjustedBaseAmount: '150.00000',
+        adjustedTaxAmount: '19.50000',
+      },
+    ]);
+    expect(() => debitAdjustmentBalances(source, [[first[0], first[0]]])).toThrow();
+    expect(() =>
+      debitAdjustmentBalances(source, [[{ ...first[0], taxAmount: '12.00000' }]]),
+    ).toThrow();
+    expect(() => note('100.00001')).toThrow();
+  });
   it('prorates discount and IVA exactly for a partial NC', () => {
     const lines = correctionLines('CREDIT_NOTE', intent('PARTIAL', '1'), source, []);
     expect(lines[0]).toMatchObject({
