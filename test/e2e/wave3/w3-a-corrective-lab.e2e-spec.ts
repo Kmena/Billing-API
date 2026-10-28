@@ -127,6 +127,29 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     externalCorrectionId: randomUUID(),
     correctionLines: [{ sourceLineNumber: 1, baseAmount }],
   });
+  const cancellationBase = () => `${base()}/cancellations`;
+  const cancelInvoice = (sourceDocumentId: string, key: string, secret = apiKey.secret) =>
+    request(app.getHttpServer())
+      .post(cancellationBase())
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', key)
+      .send({ sourceDocumentId, reason: 'Anulación total solicitada por operador' });
+  const workflowPost = (
+    workflowId: string,
+    suffix: string,
+    key: string,
+    body: object = {},
+    secret = apiKey.secret,
+  ) =>
+    request(app.getHttpServer())
+      .post(`${cancellationBase()}/${workflowId}/${suffix}`)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', key)
+      .send(body);
+  const workflowGet = (workflowId: string, suffix = '', secret = apiKey.secret) =>
+    request(app.getHttpServer())
+      .get(`${cancellationBase()}/${workflowId}${suffix}`)
+      .set('X-API-Key', secret);
   async function acceptedInvoice(operation: string, tax: 'TAX' | 'EXEMPT' = 'TAX', mixed = false) {
     const created = await request(app.getHttpServer())
       .post(`${base()}/invoices`)
@@ -516,6 +539,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     await post('credit-notes', rotated.secret, 'w3a-rotation', credit(sourceId, 'TOTAL')).expect(
       201,
     );
+    apiKey = rotated;
   });
 
   it('hides an original from a different company and tenant', async () => {
@@ -758,5 +782,428 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       'w3b-debit-after-credit',
       debit(creditFirst, '100'),
     ).expect(422);
+  });
+
+  it('cancels only by total NC after fiscal acceptance and confirms an edited replacement', async () => {
+    const originalId = await acceptedInvoice('cancel-replace-source');
+    const first = await cancelInvoice(originalId, 'cancel-replace').expect(200);
+    expect(first.body.state).toBe('CREDIT_NOTE_PENDING');
+    const workflowId = first.body.workflowId as string;
+    const noteId = first.body.cancellationNoteId as string;
+    const note = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: noteId },
+      include: { xmlArtifacts: true },
+    });
+    expect(note).toMatchObject({ type: 'CREDIT_NOTE', sourceFiscalDocumentId: originalId });
+    expect(note.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    expect(
+      (
+        await app
+          .get<XmlSignerPort>(XML_SIGNER)
+          .verify(
+            (
+              await app
+                .get<StoragePort>(STORAGE_PORT)
+                .download(note.xmlArtifacts[0].signedXmlStorageKey ?? '')
+            ).toString('utf8'),
+          )
+      ).isValid,
+    ).toBe(true);
+    await workflowPost(workflowId, 'replacement-draft', 'draft-too-soon').expect(422);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'INVOICE', sourceFiscalDocumentId: originalId },
+      }),
+    ).toBe(0);
+    await prisma.fiscalDocument.update({ where: { id: noteId }, data: { status: 'ACCEPTED' } });
+    await workflowGet(workflowId)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('CANCELLED'));
+    const drafted = await workflowPost(workflowId, 'replacement-draft', 'draft-replace', {
+      observation: 'Sustituye factura original',
+    }).expect(200);
+    expect(drafted.body.state).toBe('REPLACEMENT_DRAFT');
+    expect(drafted.body.draft.receiver.name).toBe('Receptor sintético');
+    expect(drafted.body.draft.lines[0].description).toBe('Servicio sintético');
+    const edited = {
+      ...drafted.body.draft,
+      receiver: { ...drafted.body.draft.receiver, name: 'Receptor corregido' },
+      lines: [{ ...drafted.body.draft.lines[0], description: 'Servicio corregido' }],
+    };
+    const confirmed = await workflowPost(
+      workflowId,
+      'replacement-confirmation',
+      'confirm-replace',
+      {
+        intent: edited,
+      },
+    ).expect(200);
+    expect(confirmed.body.state).toBe('REPLACEMENT_ISSUED');
+    const replacement = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: confirmed.body.replacementDocumentId },
+      include: { xmlArtifacts: true },
+    });
+    const original = await prisma.fiscalDocument.findUniqueOrThrow({ where: { id: originalId } });
+    expect(replacement).toMatchObject({ type: 'INVOICE', status: 'READY_TO_SUBMIT' });
+    expect(replacement.clave).not.toBe(original.clave);
+    expect(replacement.consecutive).not.toBe(original.consecutive);
+    expect(replacement.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    expect((replacement.receiverSnapshot as Record<string, unknown>).name).toBe(
+      'Receptor corregido',
+    );
+    await workflowPost(workflowId, 'replacement-confirmation', 'confirm-replace', {
+      intent: edited,
+    })
+      .expect(200)
+      .expect(({ body }) => expect(body.replacementDocumentId).toBe(replacement.id));
+    await workflowPost(workflowId, 'replacement-confirmation', 'different-key', {
+      intent: edited,
+    }).expect(409);
+    const history = await workflowGet(workflowId, '/history').expect(200);
+    expect(history.body.documents.map((d: { id: string }) => d.id)).toEqual(
+      expect.arrayContaining([originalId, noteId, replacement.id]),
+    );
+    expect(history.body.events.map((e: { action: string }) => e.action)).toEqual(
+      expect.arrayContaining([
+        'cancellation.requested',
+        'cancellation.cancelled',
+        'cancellation.replacement_issued',
+      ]),
+    );
+  });
+
+  it('prepares reversal against the accepted NC without a replacement and blocks ND policy', async () => {
+    const originalId = await acceptedInvoice('reverse-no-replacement-source');
+    const created = await cancelInvoice(originalId, 'reverse-no-replacement').expect(200);
+    const workflowId = created.body.workflowId as string;
+    await prisma.fiscalDocument.update({
+      where: { id: created.body.cancellationNoteId },
+      data: { status: 'ACCEPTED' },
+    });
+    await workflowGet(workflowId).expect(200);
+    const reversed = await workflowPost(
+      workflowId,
+      'reversal',
+      'reverse-no-replacement',
+      {},
+    ).expect(200);
+    expect(reversed.body).toMatchObject({ state: 'BLOCKED_FISCAL_POLICY', reversalNoteId: null });
+    const workflow = await prisma.fiscalCancellationWorkflow.findUniqueOrThrow({
+      where: { id: workflowId },
+    });
+    expect(workflow.reversalPlan).toMatchObject({
+      operation: 'REVERSE_CANCELLATION',
+      sourceCreditNoteId: created.body.cancellationNoteId,
+      fiscalPolicy: 'DF_06_REFERENCE_AND_TAX_TREATMENT_PENDING',
+    });
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'DEBIT_NOTE', sourceFiscalDocumentId: originalId },
+      }),
+    ).toBe(0);
+    await workflowPost(workflowId, 'reversal', 'reverse-no-replacement', {}).expect(200);
+    await workflowPost(workflowId, 'reversal', 'reverse-other-key', {}).expect(409);
+  });
+
+  it('cancels an accepted replacement first and blocks direct-NC reversal until fiscal policy', async () => {
+    const originalId = await acceptedInvoice('reverse-with-replacement-source');
+    const created = await cancelInvoice(originalId, 'reverse-with-replacement').expect(200);
+    const workflowId = created.body.workflowId as string;
+    await prisma.fiscalDocument.update({
+      where: { id: created.body.cancellationNoteId },
+      data: { status: 'ACCEPTED' },
+    });
+    const drafted = await workflowPost(
+      workflowId,
+      'replacement-draft',
+      'draft-with-replacement',
+      {},
+    ).expect(200);
+    const confirmed = await workflowPost(
+      workflowId,
+      'replacement-confirmation',
+      'confirm-with-replacement',
+      {
+        intent: drafted.body.draft,
+      },
+    ).expect(200);
+    await workflowPost(workflowId, 'reversal', 'reverse-before-accept', {}).expect(422);
+    await prisma.fiscalDocument.update({
+      where: { id: confirmed.body.replacementDocumentId },
+      data: { status: 'ACCEPTED' },
+    });
+    const requested = await workflowPost(
+      workflowId,
+      'reversal',
+      'reverse-with-replacement',
+      {},
+    ).expect(200);
+    expect(requested.body.state).toBe('REPLACEMENT_CANCELLATION_PENDING');
+    const replacementNc = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: requested.body.replacementCancellationNoteId },
+      include: { xmlArtifacts: true },
+    });
+    expect(replacementNc).toMatchObject({
+      type: 'CREDIT_NOTE',
+      sourceFiscalDocumentId: confirmed.body.replacementDocumentId,
+    });
+    expect(replacementNc.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    expect((await workflowGet(workflowId, '/reversal').expect(200)).body.state).toBe(
+      'REPLACEMENT_CANCELLATION_PENDING',
+    );
+    await prisma.fiscalDocument.update({
+      where: { id: replacementNc.id },
+      data: { status: 'ACCEPTED' },
+    });
+    const blocked = await workflowGet(workflowId, '/reversal').expect(200);
+    expect(blocked.body).toMatchObject({ state: 'BLOCKED_FISCAL_POLICY', reversalNoteId: null });
+    const row = await prisma.fiscalCancellationWorkflow.findUniqueOrThrow({
+      where: { id: workflowId },
+    });
+    expect(row.reversalPlan).toMatchObject({ sourceCreditNoteId: created.body.cancellationNoteId });
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'DEBIT_NOTE', sourceFiscalDocumentId: originalId },
+      }),
+    ).toBe(0);
+  });
+
+  it('keeps recoverable state when the original or replacement NC is rejected', async () => {
+    const rejectedSource = await acceptedInvoice('cancel-note-rejected-source');
+    const first = await cancelInvoice(rejectedSource, 'cancel-note-rejected').expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: first.body.cancellationNoteId },
+      data: { status: 'REJECTED' },
+    });
+    await workflowGet(first.body.workflowId)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('RECOVERY_REQUIRED'));
+    await workflowPost(first.body.workflowId, 'replacement-draft', 'draft-rejected').expect(422);
+
+    const source = await acceptedInvoice('replacement-nc-rejected-source');
+    const cancel = await cancelInvoice(source, 'replacement-nc-rejected').expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: cancel.body.cancellationNoteId },
+      data: { status: 'ACCEPTED' },
+    });
+    const draft = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-draft',
+      'draft-rejected-nc',
+      {},
+    ).expect(200);
+    const replacement = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-confirmation',
+      'confirm-rejected-nc',
+      {
+        intent: draft.body.draft,
+      },
+    ).expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: replacement.body.replacementDocumentId },
+      data: { status: 'ACCEPTED' },
+    });
+    const reverse = await workflowPost(
+      cancel.body.workflowId,
+      'reversal',
+      'reverse-rejected-nc',
+      {},
+    ).expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: reverse.body.replacementCancellationNoteId },
+      data: { status: 'REJECTED' },
+    });
+    await workflowGet(cancel.body.workflowId)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('RECOVERY_REQUIRED'));
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'DEBIT_NOTE', sourceFiscalDocumentId: source },
+      }),
+    ).toBe(0);
+  });
+
+  it('blocks ND after a rejected replacement without making a second cancellation NC', async () => {
+    const source = await acceptedInvoice('replacement-rejected-source');
+    const cancel = await cancelInvoice(source, 'replacement-rejected-cancel').expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: cancel.body.cancellationNoteId },
+      data: { status: 'ACCEPTED' },
+    });
+    const draft = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-draft',
+      'replacement-rejected-draft',
+    ).expect(200);
+    const replacement = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-confirmation',
+      'replacement-rejected-confirm',
+      {
+        intent: draft.body.draft,
+      },
+    ).expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: replacement.body.replacementDocumentId },
+      data: { status: 'REJECTED' },
+    });
+    await workflowGet(cancel.body.workflowId)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('RECOVERY_REQUIRED'));
+    const reversal = await workflowPost(
+      cancel.body.workflowId,
+      'reversal',
+      'replacement-rejected-reverse',
+    ).expect(200);
+    expect(reversal.body).toMatchObject({
+      state: 'BLOCKED_FISCAL_POLICY',
+      replacementCancellationNoteId: null,
+      reversalNoteId: null,
+    });
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { sourceFiscalDocumentId: replacement.body.replacementDocumentId },
+      }),
+    ).toBe(0);
+  });
+
+  it('recovers an interrupted cancellation using one NC and one workflow', async () => {
+    const source = await acceptedInvoice('cancel-recovery-source');
+    engine.interruptOnceAfterReservation();
+    await cancelInvoice(source, 'cancel-recovery').expect(503);
+    const pending = await prisma.fiscalCancellationWorkflow.findUniqueOrThrow({
+      where: { originalDocumentId: source },
+    });
+    expect(pending.state).toBe('RECOVERY_REQUIRED');
+    const replay = await cancelInvoice(source, 'cancel-recovery').expect(200);
+    expect(replay.body).toMatchObject({ workflowId: pending.id, state: 'CREDIT_NOTE_PENDING' });
+    expect(
+      await prisma.fiscalCancellationWorkflow.count({ where: { originalDocumentId: source } }),
+    ).toBe(1);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'CREDIT_NOTE', sourceFiscalDocumentId: source },
+      }),
+    ).toBe(1);
+    await cancelInvoice(source, 'cancel-recovery')
+      .expect(200)
+      .expect(({ body }) => expect(body.cancellationNoteId).toBe(replay.body.cancellationNoteId));
+    await cancelInvoice(source, 'cancel-different-key').expect(409);
+  });
+
+  it('recovers replacement emission after an interruption without a second FE', async () => {
+    const source = await acceptedInvoice('replacement-recovery-source');
+    const cancel = await cancelInvoice(source, 'replacement-recovery-cancel').expect(200);
+    await prisma.fiscalDocument.update({
+      where: { id: cancel.body.cancellationNoteId },
+      data: { status: 'ACCEPTED' },
+    });
+    const draft = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-draft',
+      'replacement-recovery-draft',
+    ).expect(200);
+    engine.interruptOnceAfterDocument();
+    await workflowPost(
+      cancel.body.workflowId,
+      'replacement-confirmation',
+      'replacement-recovery-confirm',
+      { intent: draft.body.draft },
+    ).expect(503);
+    const interrupted = await prisma.fiscalCancellationWorkflow.findUniqueOrThrow({
+      where: { id: cancel.body.workflowId },
+    });
+    expect(interrupted.state).toBe('RECOVERY_REQUIRED');
+    const replay = await workflowPost(
+      cancel.body.workflowId,
+      'replacement-confirmation',
+      'replacement-recovery-confirm',
+      { intent: draft.body.draft },
+    ).expect(200);
+    expect(replay.body.state).toBe('REPLACEMENT_ISSUED');
+    const reservation = await prisma.fiscalIdempotencyKeyV2.findFirstOrThrow({
+      where: { associationId, key: `replacement:${cancel.body.workflowId}` },
+    });
+    expect(reservation.fiscalDocumentId).toBe(replay.body.replacementDocumentId);
+    await workflowPost(
+      cancel.body.workflowId,
+      'replacement-confirmation',
+      'replacement-recovery-confirm',
+      { intent: draft.body.draft },
+    )
+      .expect(200)
+      .expect(({ body }) => expect(body.replacementDocumentId).toBe(reservation.fiscalDocumentId));
+    const resumed = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: replay.body.replacementDocumentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(resumed.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+  });
+
+  it('serializes concurrent cancellation requests with different keys', async () => {
+    const source = await acceptedInvoice('cancel-concurrent-source');
+    const [a, b] = await Promise.all([
+      cancelInvoice(source, 'cancel-concurrent-a'),
+      cancelInvoice(source, 'cancel-concurrent-b'),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    expect(
+      await prisma.fiscalCancellationWorkflow.count({ where: { originalDocumentId: source } }),
+    ).toBe(1);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { type: 'CREDIT_NOTE', sourceFiscalDocumentId: source },
+      }),
+    ).toBe(1);
+  });
+
+  it('isolates workflow history and rejects revoked or insufficient M2M credentials', async () => {
+    const source = await acceptedInvoice('cancel-security-source');
+    const cancel = await cancelInvoice(source, 'cancel-security').expect(200);
+    const other = await createFiscalTenantFixture(context);
+    const foreign = await lab.registerAssociation({
+      tenantId: other.tenantId,
+      companyId: other.companyId,
+      provider: 'AUDIT_TEST',
+      externalConsumerKey: 'cancel-foreign-app',
+      externalCompanyKey: 'cancel-foreign-company',
+      environment: 'SANDBOX',
+      actorId: other.userId,
+      correlationId: randomUUID(),
+    });
+    const foreignKey = await lab.issueKey({
+      tenantId: other.tenantId,
+      associationId: foreign.associationId,
+      scopes: [...scopes],
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      actorId: other.userId,
+      correlationId: randomUUID(),
+    });
+    await request(app.getHttpServer())
+      .get(
+        `/api/v2/lab/companies/${other.companyId}/fiscal-documents/SANDBOX/cancellations/${cancel.body.workflowId}/history`,
+      )
+      .set('X-API-Key', foreignKey.secret)
+      .expect(404);
+    const limited = await lab.issueKey({
+      tenantId,
+      associationId,
+      scopes: ['fiscal-v2:operations:read'],
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      rotationEndsAt: new Date(Date.now() + 60_000),
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    await cancelInvoice(source, 'cancel-security-limited', limited.secret).expect(403);
+    await workflowGet(cancel.body.workflowId, '/history', limited.secret).expect(200);
+    await lab.revokeKey({
+      tenantId,
+      associationId,
+      apiKeyId: limited.apiKeyId,
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    await workflowGet(cancel.body.workflowId, '/history', limited.secret).expect(401);
   });
 });

@@ -61,3 +61,42 @@ describe('W3-A corrective laboratory contract', () => {
     );
   });
 });
+
+describe('Cancellation and reversal laboratory contract', () => {
+  it('keeps all seven operations in the inactive lab module with scoped M2M access', () => {
+    const contract = yaml.load(
+      readFileSync(
+        join(process.cwd(), 'docs/contracts/billing-cancellation-reversal.v2.lab.openapi.yaml'),
+        'utf8',
+      ),
+    ) as {
+      'x-status': string;
+      'x-fiscal-policy': string;
+      servers: Array<{ url: string }>;
+      paths: Record<
+        string,
+        Record<string, { 'x-required-scope': string; responses: Record<string, unknown> }>
+      >;
+    };
+    expect(contract['x-status']).toBe('lab-only-inactive-in-product');
+    expect(contract['x-fiscal-policy']).toContain('DF-06');
+    expect(contract.servers[0].url).toBe('/api/v2/lab');
+    const root = '/companies/{companyId}/fiscal-documents/{environment}/cancellations';
+    for (const [path, method, scope] of [
+      [root, 'post', 'fiscal-v2:credit-notes:create'],
+      [`${root}/{workflowId}`, 'get', 'fiscal-v2:operations:read'],
+      [`${root}/{workflowId}/replacement-draft`, 'post', 'fiscal-v2:invoices:create'],
+      [`${root}/{workflowId}/replacement-confirmation`, 'post', 'fiscal-v2:invoices:create'],
+      [`${root}/{workflowId}/reversal`, 'post', 'fiscal-v2:debit-notes:create'],
+      [`${root}/{workflowId}/reversal`, 'get', 'fiscal-v2:operations:read'],
+      [`${root}/{workflowId}/history`, 'get', 'fiscal-v2:operations:read'],
+    ]) {
+      expect(contract.paths[path][method]['x-required-scope']).toBe(scope);
+      expect(CONSUMER_V2_LAB_SCOPES).toContain(scope);
+      expect(contract.paths[path][method].responses).toHaveProperty('200');
+    }
+    expect(readFileSync(join(process.cwd(), 'src/app.module.ts'), 'utf8')).not.toContain(
+      'W3AFiscalLabModule',
+    );
+  });
+});

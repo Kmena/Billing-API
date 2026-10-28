@@ -1,0 +1,148 @@
+openapi: 3.1.0
+info:
+  title: Billing cancellation, replacement and reversal laboratory
+  version: 0.1.0-lab
+  description: >-
+    SANDBOX-only workflow. W3AFiscalLabModule is absent from AppModule and requires
+    NODE_ENV=test. It never sends to Hacienda. Reversal ND issuance is blocked by
+    DF-06 until reference code and tax treatment receive fiscal approval.
+x-status: lab-only-inactive-in-product
+x-functional-decision: total NC, optional edited replacement, conditional two-stage reversal
+x-fiscal-policy: pending-ADR-BIL-014-016-and-DF-06
+servers:
+  - url: /api/v2/lab
+paths:
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations:
+    post:
+      operationId: requestTotalCancellationLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:credit-notes:create
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sourceDocumentId, reason]
+              properties:
+                sourceDocumentId: { type: string, format: uuid }
+                reason: { type: string, minLength: 3, maxLength: 180 }
+      responses:
+        '200': { $ref: '#/components/responses/Workflow' }
+        '401': { description: Invalid or revoked M2M key }
+        '403': { description: Insufficient scope or inactive association }
+        '404': { description: Original outside authenticated association }
+        '409': { description: Already cancelled, corrected or conflicting key }
+        '422': { description: Original not fiscally accepted }
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations/{workflowId}:
+    get:
+      operationId: getCancellationLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Workflow' }
+        '404': { description: Workflow outside authenticated association }
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations/{workflowId}/replacement-draft:
+    post:
+      operationId: createReplacementDraftLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:invoices:create
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                observation: { type: string, maxLength: 180, description: Optional commercial observation; not inserted into fiscal XML. }
+      responses:
+        '200': { description: Validated editable W2 laboratory invoice draft and workflow state }
+        '409': { description: Draft already requested with a different key or payload }
+        '422': { description: Cancellation NC not accepted or original cannot be reconstructed safely }
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations/{workflowId}/replacement-confirmation:
+    post:
+      operationId: confirmReplacementLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:invoices:create
+      description: Explicit consumer confirmation. Generates a new clave and consecutive through the existing W2 lab invoice engine.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [intent]
+              properties:
+                intent: { type: object, description: Edited W2-B2 lab intent; externalOperationId cannot change. }
+      responses:
+        '200': { $ref: '#/components/responses/Workflow' }
+        '409': { description: Confirmation already claimed with a different key or payload }
+        '422': { description: Draft missing, invalid or fiscally unconfirmed cancellation }
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations/{workflowId}/reversal:
+    post:
+      operationId: requestCancellationReversalLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:debit-notes:create
+      description: >-
+        Requires credit-notes:create as well when an accepted replacement must first
+        be cancelled. It creates no ND while DF-06 is pending. If replacement NC
+        fails, RECOVERY_REQUIRED is retained without automatically undoing it.
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false }
+      responses:
+        '200': { $ref: '#/components/responses/Workflow' }
+        '409': { description: Reversal already claimed by another key }
+        '422': { description: Original NC not accepted or replacement fiscal status pending }
+    get:
+      operationId: getReversalProgressLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }]
+      responses:
+        '200': { $ref: '#/components/responses/Workflow' }
+  /companies/{companyId}/fiscal-documents/{environment}/cancellations/{workflowId}/history:
+    get:
+      operationId: getCancellationHistoryLab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }]
+      responses:
+        '200': { description: Append-only audit events and scoped document relationships }
+components:
+  securitySchemes:
+    ConsumerApiKey: { type: apiKey, in: header, name: X-API-Key }
+  parameters:
+    CompanyId: { name: companyId, in: path, required: true, schema: { type: string, format: uuid } }
+    Environment: { name: environment, in: path, required: true, schema: { type: string, const: SANDBOX } }
+    WorkflowId: { name: workflowId, in: path, required: true, schema: { type: string, format: uuid } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[!-~]+$' } }
+  responses:
+    Workflow:
+      description: Persisted commercial workflow; fiscal acceptance is derived only from terminal document state.
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [workflowId, state, version, originalDocumentId]
+            properties:
+              workflowId: { type: string, format: uuid }
+              state: { type: string, enum: [CANCEL_REQUESTED, CREDIT_NOTE_PENDING, CREDIT_NOTE_ACCEPTED, CANCELLED, REPLACEMENT_DRAFT, REPLACEMENT_ISSUED, REVERSAL_REQUESTED, REPLACEMENT_CANCELLATION_PENDING, REPLACEMENT_CANCELLATION_ACCEPTED, DEBIT_NOTE_PENDING, DEBIT_NOTE_ACCEPTED, REVERSAL_COMPLETED, RECOVERY_REQUIRED, BLOCKED_FISCAL_POLICY] }
+              version: { type: integer, minimum: 0 }
+              originalDocumentId: { type: string, format: uuid }
+              cancellationNoteId: { type: [string, 'null'], format: uuid }
+              replacementDocumentId: { type: [string, 'null'], format: uuid }
+              replacementCancellationNoteId: { type: [string, 'null'], format: uuid }
+              reversalNoteId: { type: [string, 'null'], format: uuid }
+              policyBlock: { type: [string, 'null'] }

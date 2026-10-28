@@ -589,6 +589,11 @@ model FiscalDocument {
   originConsumer               FiscalConsumer?        @relation("V2OriginConsumer", fields: [originConsumerId, tenantId], references: [id, tenantId])
   originAssociation            FiscalConsumerAssociation? @relation("V2OriginAssociation", fields: [originAssociationId, tenantId, environment], references: [id, tenantId, environment])
   idempotencyKeysV2            FiscalIdempotencyKeyV2[]
+  cancellationAsOriginal       FiscalCancellationWorkflow?  @relation("CancellationOriginal")
+  cancellationAsCreditNote     FiscalCancellationWorkflow?  @relation("CancellationCreditNote")
+  cancellationAsReplacement    FiscalCancellationWorkflow?  @relation("CancellationReplacement")
+  cancellationAsReplacementNc  FiscalCancellationWorkflow?  @relation("CancellationReplacementNc")
+  cancellationAsReversalNd     FiscalCancellationWorkflow?  @relation("CancellationReversalNd")
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
@@ -598,6 +603,45 @@ model FiscalDocument {
   @@index([tenantId, companyId, sourceFiscalDocumentId], map: "fiscal_documents_corrections_source_idx")
   @@index([tenantId, originAssociationId, createdAt(sort: Desc)], map: "fiscal_documents_v2_origin_idx")
   @@map("fiscal_documents")
+}
+
+/// Lab-only commercial orchestration; fiscal documents and their evidence remain immutable.
+model FiscalCancellationWorkflow {
+  id                            String              @id @db.Uuid
+  tenantId                      String              @map("tenant_id") @db.Uuid
+  companyId                     String              @map("company_id") @db.Uuid
+  environment                   HaciendaEnvironment
+  consumerId                    String              @map("consumer_id") @db.Uuid
+  associationId                 String              @map("association_id") @db.Uuid
+  originalDocumentId            String              @unique(map: "fcw_original_doc_key") @map("original_document_id") @db.Uuid
+  cancellationNoteId            String?             @unique(map: "fcw_cancel_note_key") @map("cancellation_note_id") @db.Uuid
+  replacementDocumentId         String?             @unique(map: "fcw_replacement_doc_key") @map("replacement_document_id") @db.Uuid
+  replacementCancellationNoteId String?             @unique(map: "fcw_replacement_nc_key") @map("replacement_cancellation_note_id") @db.Uuid
+  reversalNoteId                String?             @unique(map: "fcw_reversal_nd_key") @map("reversal_note_id") @db.Uuid
+  state                         String              @db.VarChar(64)
+  reason                        String              @db.VarChar(180)
+  cancellationKey               String              @map("cancellation_key") @db.VarChar(128)
+  cancellationHash              String              @map("cancellation_hash") @db.Char(64)
+  draftKey                      String?             @map("draft_key") @db.VarChar(128)
+  draftHash                     String?             @map("draft_hash") @db.Char(64)
+  replacementDraft              Json?               @map("replacement_draft")
+  replacementObservation        String?             @map("replacement_observation") @db.VarChar(180)
+  confirmKey                    String?             @map("confirm_key") @db.VarChar(128)
+  confirmHash                   String?             @map("confirm_hash") @db.Char(64)
+  reversalKey                   String?             @map("reversal_key") @db.VarChar(128)
+  reversalHash                  String?             @map("reversal_hash") @db.Char(64)
+  reversalPlan                  Json?               @map("reversal_plan")
+  version                       Int                 @default(0)
+  createdAt                     DateTime            @default(now()) @map("created_at")
+  updatedAt                     DateTime            @updatedAt @map("updated_at")
+  originalDocument              FiscalDocument      @relation("CancellationOriginal", fields: [originalDocumentId], references: [id], onDelete: Restrict, map: "fcw_original_doc_fkey")
+  cancellationNote              FiscalDocument?     @relation("CancellationCreditNote", fields: [cancellationNoteId], references: [id], onDelete: Restrict, map: "fcw_cancel_note_fkey")
+  replacementDocument           FiscalDocument?     @relation("CancellationReplacement", fields: [replacementDocumentId], references: [id], onDelete: Restrict, map: "fcw_replacement_doc_fkey")
+  replacementCancellationNote   FiscalDocument?     @relation("CancellationReplacementNc", fields: [replacementCancellationNoteId], references: [id], onDelete: Restrict, map: "fcw_replacement_nc_fkey")
+  reversalNote                  FiscalDocument?     @relation("CancellationReversalNd", fields: [reversalNoteId], references: [id], onDelete: Restrict, map: "fcw_reversal_nd_fkey")
+
+  @@index([tenantId, companyId, associationId, state], map: "fcw_scope_state_idx")
+  @@map("fiscal_cancellation_workflows")
 }
 
 model FiscalSigningCertificate {

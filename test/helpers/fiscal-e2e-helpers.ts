@@ -87,6 +87,7 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
       await prisma.fiscalXmlArtifact.deleteMany({ where: tenantScope });
       await prisma.fiscalIdempotencyKeyV2.deleteMany({ where: tenantScope });
       await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
+      await prisma.fiscalCancellationWorkflow.deleteMany({ where: tenantScope });
       await prisma.fiscalDocument.deleteMany({ where: tenantScope });
       fiscalDocumentsDeleted = true;
       break;
