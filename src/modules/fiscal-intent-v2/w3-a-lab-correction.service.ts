@@ -15,6 +15,7 @@ import { ConsumerV2LabService } from '../fiscal-consumers/application/consumer-v
 import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
 import {
   CorrectionKind,
+  correctionBalances,
   correctionHash,
   correctionLines,
   parseCorrectionIntent,
@@ -141,7 +142,8 @@ export class W3ALabCorrectionService {
         type: { in: ['CREDIT_NOTE', 'DEBIT_NOTE'] },
         status: { not: 'REJECTED' },
       },
-      select: { type: true, lines: true, referenceSnapshot: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: { id: true, type: true, lines: true, referenceSnapshot: true },
     });
     if (
       correctiveDocuments.some((note) => {
@@ -155,12 +157,17 @@ export class W3ALabCorrectionService {
       })
     )
       throw new ConflictException({ code: 'CORRECTION_EXTERNAL_ID_DUPLICATE' });
-    const lines = correctionLines(
-      kind,
-      intent,
-      source.lines,
-      correctiveDocuments.filter((note) => note.type === 'CREDIT_NOTE').map((note) => note.lines),
-    );
+    const credits = correctiveDocuments.filter((note) => note.type === 'CREDIT_NOTE');
+    const debits = correctiveDocuments.filter((note) => note.type === 'DEBIT_NOTE');
+    if (
+      (kind === 'CREDIT_NOTE' && debits.length > 0) ||
+      (kind === 'DEBIT_NOTE' && credits.length > 0)
+    ) {
+      throw new UnprocessableEntityException({ code: 'CORRECTION_MIXED_NOTE_POLICY_PENDING' });
+    }
+    const creditedLines = credits.map((note) => note.lines);
+    const ledgerBefore = correctionBalances(source.lines, creditedLines);
+    const lines = correctionLines(kind, intent, source.lines, creditedLines);
     if (lines.length === 0) throw new ConflictException({ code: 'CORRECTION_EMPTY' });
     const command: CreateFiscalDocumentCommand = {
       tenantId: p.tenantId,
@@ -190,6 +197,13 @@ export class W3ALabCorrectionService {
           code: intent.referenceReasonCode,
           reason: intent.reason,
           externalCorrectionId: intent.externalCorrectionId,
+          mode: intent.mode,
+          priorCreditNoteIds: credits.map((note) => note.id),
+          priorDebitNoteIds: debits.map((note) => note.id),
+          ledgerBefore,
+          ...(kind === 'CREDIT_NOTE'
+            ? { ledgerAfter: correctionBalances(source.lines, [...creditedLines, lines]) }
+            : {}),
         },
       },
     );

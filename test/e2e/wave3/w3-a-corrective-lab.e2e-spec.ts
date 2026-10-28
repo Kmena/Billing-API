@@ -89,7 +89,7 @@ function invoiceIntent(operation: string, tax: 'TAX' | 'EXEMPT' = 'TAX', mixed =
   return result;
 }
 
-describe('W3-A synthetic corrective laboratory', () => {
+describe('W3-A/B synthetic corrective laboratory', () => {
   jest.setTimeout(120000);
   let app: INestApplication;
   let prisma: PrismaClient;
@@ -107,13 +107,17 @@ describe('W3-A synthetic corrective laboratory', () => {
       .set('X-API-Key', secret)
       .set('Idempotency-Key', key)
       .send(body as object);
-  const credit = (sourceDocumentId: string, mode: 'TOTAL' | 'PARTIAL', quantity?: string) => ({
+  const credit = (
+    sourceDocumentId: string,
+    mode: 'TOTAL' | 'PARTIAL' | 'REMAINING',
+    quantity?: string,
+  ) => ({
     sourceDocumentId,
     mode,
     referenceReasonCode: mode === 'TOTAL' ? '01' : '02',
-    reason: mode === 'TOTAL' ? 'Anulación sintética' : 'Corrección parcial sintética',
+    reason: mode === 'TOTAL' ? 'Anulación sintética' : 'Corrección de monto sintética',
     externalCorrectionId: randomUUID(),
-    correctionLines: mode === 'TOTAL' ? [] : [{ sourceLineNumber: 1, quantity }],
+    correctionLines: mode === 'PARTIAL' ? [{ sourceLineNumber: 1, quantity }] : [],
   });
   const debit = (sourceDocumentId: string, baseAmount: string) => ({
     sourceDocumentId,
@@ -318,11 +322,12 @@ describe('W3-A synthetic corrective laboratory', () => {
       'w3a-exempt-credit',
       credit(exemptId, 'PARTIAL', '1'),
     ).expect(201);
+    const exemptDebitSource = await acceptedInvoice('w3b-exempt-debit-source', 'EXEMPT');
     const exemptDebit = await post(
       'debit-notes',
       apiKey.secret,
       'w3a-exempt-debit',
-      debit(exemptId, '100'),
+      debit(exemptDebitSource, '100'),
     ).expect(201);
     expect(
       (
@@ -422,6 +427,35 @@ describe('W3-A synthetic corrective laboratory', () => {
     );
   });
 
+  it('hides an original from a different company and tenant', async () => {
+    const sourceId = await acceptedInvoice('w3b-foreign-company-source');
+    const foreign = await createFiscalTenantFixture(context);
+    const association = await lab.registerAssociation({
+      tenantId: foreign.tenantId,
+      companyId: foreign.companyId,
+      provider: 'AUDIT_TEST',
+      externalConsumerKey: 'foreign-w3b-app',
+      externalCompanyKey: 'foreign-w3b-issuer',
+      environment: 'SANDBOX',
+      actorId: foreign.userId,
+      correlationId: randomUUID(),
+    });
+    const key = await lab.issueKey({
+      tenantId: foreign.tenantId,
+      associationId: association.associationId,
+      scopes: [...scopes],
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      actorId: foreign.userId,
+      correlationId: randomUUID(),
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v2/lab/companies/${foreign.companyId}/fiscal-documents/SANDBOX/credit-notes`)
+      .set('X-API-Key', key.secret)
+      .set('Idempotency-Key', 'w3b-foreign-company-attempt')
+      .send(credit(sourceId, 'TOTAL'))
+      .expect(404);
+  });
+
   it('recovers a reserved NC and one persisted before XML without duplicate documents', async () => {
     const sourceId = await acceptedInvoice('w3a-recovery-source');
     const body = credit(sourceId, 'PARTIAL', '1');
@@ -448,5 +482,155 @@ describe('W3-A synthetic corrective laboratory', () => {
         where: { sourceFiscalDocumentId: sourceId, type: 'CREDIT_NOTE' },
       }),
     ).toBe(2);
+  });
+
+  it('creates an NC for the exact remaining balance after two partial NCs', async () => {
+    const sourceId = await acceptedInvoice('w3b-remaining-source');
+    const original = await prisma.fiscalDocument.findUniqueOrThrow({ where: { id: sourceId } });
+    const a = await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-partial-a',
+      credit(sourceId, 'PARTIAL', '0.5'),
+    ).expect(201);
+    const b = await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-partial-b',
+      credit(sourceId, 'PARTIAL', '0.75'),
+    ).expect(201);
+    expect(a.body.documentId).not.toBe(b.body.documentId);
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-total-after-partial',
+      credit(sourceId, 'TOTAL'),
+    ).expect(409);
+    const body = credit(sourceId, 'REMAINING');
+    const result = await post('credit-notes', apiKey.secret, 'w3b-remaining', body).expect(201);
+    const note = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: result.body.documentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(note.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    expect(note.referenceSnapshot).toMatchObject({
+      code: '02',
+      mode: 'REMAINING',
+      priorCreditNoteIds: [a.body.documentId, b.body.documentId],
+      ledgerBefore: [
+        {
+          sourceLineNumber: 1,
+          originalQuantity: '2.00000',
+          creditedQuantity: '1.25000',
+          remainingQuantity: '0.75000',
+        },
+      ],
+      ledgerAfter: [
+        {
+          sourceLineNumber: 1,
+          originalQuantity: '2.00000',
+          creditedQuantity: '2.00000',
+          remainingQuantity: '0.00000',
+        },
+      ],
+    });
+    expect(note.lines).toMatchObject([{ sourceLineNumber: 1, quantity: '0.75000' }]);
+    const xml = (
+      await app
+        .get<StoragePort>(STORAGE_PORT)
+        .download(note.xmlArtifacts[0].signedXmlStorageKey ?? '')
+    ).toString('utf8');
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(xml)).isValid).toBe(true);
+    const replay = await post('credit-notes', apiKey.secret, 'w3b-remaining', body).expect(200);
+    expect(replay.body.documentId).toBe(note.id);
+    await post('credit-notes', apiKey.secret, 'w3b-remaining', {
+      ...body,
+      reason: 'Otro motivo de corrección',
+    }).expect(409);
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-no-balance',
+      credit(sourceId, 'REMAINING'),
+    ).expect(409);
+    const unchanged = await prisma.fiscalDocument.findUniqueOrThrow({ where: { id: sourceId } });
+    expect(unchanged.lines).toEqual(original.lines);
+    expect(unchanged.status).toBe('ACCEPTED');
+  });
+
+  it('serializes two NCs competing for the same remaining balance', async () => {
+    const sourceId = await acceptedInvoice('w3b-concurrent-remaining-source');
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-concurrent-prior',
+      credit(sourceId, 'PARTIAL', '1'),
+    ).expect(201);
+    const [a, b] = await Promise.all([
+      post('credit-notes', apiKey.secret, 'w3b-rem-a', credit(sourceId, 'REMAINING')),
+      post('credit-notes', apiKey.secret, 'w3b-rem-b', credit(sourceId, 'REMAINING')),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: {
+          sourceFiscalDocumentId: sourceId,
+          type: 'CREDIT_NOTE',
+        },
+      }),
+    ).toBe(2);
+  });
+
+  it('recovers an interrupted ND without duplicating the correction', async () => {
+    const sourceId = await acceptedInvoice('w3b-debit-recovery-source');
+    const body = debit(sourceId, '100');
+    engine.interruptOnceAfterDocument();
+    await post('debit-notes', apiKey.secret, 'w3b-debit-recovery', body).expect(503);
+    const pending = await prisma.fiscalIdempotencyKeyV2.findFirstOrThrow({
+      where: { associationId, key: 'w3b-debit-recovery' },
+    });
+    expect(pending.fiscalDocumentId).toBeTruthy();
+    const resumed = await post('debit-notes', apiKey.secret, 'w3b-debit-recovery', body).expect(
+      200,
+    );
+    expect(resumed.body.documentId).toBe(pending.fiscalDocumentId);
+    const replay = await post('debit-notes', apiKey.secret, 'w3b-debit-recovery', body).expect(200);
+    expect(replay.body.documentId).toBe(resumed.body.documentId);
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { sourceFiscalDocumentId: sourceId, type: 'DEBIT_NOTE' },
+      }),
+    ).toBe(1);
+  });
+
+  it('blocks ND→NC and NC→ND sequences pending fiscal approval', async () => {
+    const debitFirst = await acceptedInvoice('w3b-debit-first-source');
+    const debitBody = debit(debitFirst, '100');
+    const first = await post('debit-notes', apiKey.secret, 'w3b-debit-first', debitBody).expect(
+      201,
+    );
+    const replay = await post('debit-notes', apiKey.secret, 'w3b-debit-first', debitBody).expect(
+      200,
+    );
+    expect(replay.body.documentId).toBe(first.body.documentId);
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-credit-after-debit',
+      credit(debitFirst, 'REMAINING'),
+    ).expect(422);
+    const creditFirst = await acceptedInvoice('w3b-credit-first-source');
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'w3b-credit-first',
+      credit(creditFirst, 'PARTIAL', '1'),
+    ).expect(201);
+    await post(
+      'debit-notes',
+      apiKey.secret,
+      'w3b-debit-after-credit',
+      debit(creditFirst, '100'),
+    ).expect(422);
   });
 });

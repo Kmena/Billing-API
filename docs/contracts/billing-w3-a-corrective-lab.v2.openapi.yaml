@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Billing W3-A synthetic corrective documents
-  version: 0.1.0-lab
+  version: 0.2.0-lab
   description: >-
     NC/ND for synthetic W2-B2 invoices in SANDBOX. W3AFiscalLabModule is absent
     from AppModule and requires NODE_ENV=test. No Hacienda submission or
@@ -9,7 +9,8 @@ info:
 x-status: lab-only-inactive-in-product
 x-hash-version: w3-a-corrective-lab.v1
 x-approval-gates: [ADR-BIL-011, ADR-BIL-012, ADR-BIL-014, ADR-BIL-016, DF-06]
-x-xsd-gate: Archived v4.4 mirror only; official current NC/ND XSD hashes require verification.
+x-xsd-gate: Official CDN v4.4 bytes pinned; reference-code meaning and date-of-release catalog require DF-06.
+x-correction-ledger: NC REMAINING corrects only the uncredited quantity; TOTAL still requires no prior NC.
 servers:
   - url: /api/v2/lab
 paths:
@@ -35,7 +36,7 @@ paths:
         '403': { description: Scope, association or environment denied }
         '404': { description: Original absent or outside authenticated origin }
         '409': { description: Duplicate external ID, key conflict or overcorrection }
-        '422': { description: Original not accepted, pending fiscal policy or terminal XML failure }
+        '422': { description: Original not accepted, pending NC/ND mixed policy or terminal XML failure }
         '503': { description: Retryable interruption before response }
   /companies/{companyId}/fiscal-documents/{environment}/debit-notes:
     post:
@@ -132,7 +133,7 @@ components:
       required: [sourceDocumentId, mode, referenceReasonCode, reason, externalCorrectionId, correctionLines]
       properties:
         sourceDocumentId: { type: string, format: uuid }
-        mode: { type: string, enum: [TOTAL, PARTIAL, ADJUSTMENT] }
+        mode: { type: string, enum: [TOTAL, PARTIAL, REMAINING, ADJUSTMENT] }
         referenceReasonCode: { type: string, enum: ['01', '02'] }
         reason: { type: string, minLength: 3, maxLength: 180 }
         externalCorrectionId: { type: string, minLength: 1, maxLength: 128,
@@ -146,11 +147,16 @@ components:
         - { $ref: '#/components/schemas/CommonCorrection' }
         - type: object
           properties:
-            mode: { type: string, enum: [TOTAL, PARTIAL] }
+            mode: { type: string, enum: [TOTAL, PARTIAL, REMAINING] }
             correctionLines:
               type: array
               items: { $ref: '#/components/schemas/CreditLine' }
-      description: TOTAL requires empty correctionLines; PARTIAL requires at least one.
+      description: >-
+        TOTAL and REMAINING require empty correctionLines. TOTAL uses reference code 01
+        and is limited to an original with no prior NC. REMAINING derives the exact
+        uncredited lines when the document is allocated under the original row lock,
+        and uses code 02. A reservation before allocation does not fix quantities.
+        PARTIAL supplies quantities and uses 02.
     DebitNoteIntent:
       allOf:
         - { $ref: '#/components/schemas/CommonCorrection' }

@@ -3,9 +3,6 @@
 
 # Official XSD assets are pinned by SHA-256; checkout bytes must match Git bytes.
 resources/hacienda/v4.4/*.xsd text eol=lf
-# These two archived mirror files are pinned to their original CRLF bytes.
-resources/hacienda/v4.4/NotaCreditoElectronica.xsd binary -eol
-resources/hacienda/v4.4/NotaDebitoElectronica.xsd binary -eol
 
 # Prisma stores migration checksums from exact SQL bytes.
 prisma/migrations/**/migration.sql text eol=lf

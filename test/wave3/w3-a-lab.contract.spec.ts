@@ -15,7 +15,17 @@ describe('W3-A corrective laboratory contract', () => {
     ) as {
       'x-status': string;
       'x-hash-version': string;
+      'x-correction-ledger': string;
       servers: Array<{ url: string }>;
+      components: {
+        schemas: {
+          CreditNoteIntent: {
+            allOf: Array<{
+              properties?: { mode?: { enum: string[] } };
+            }>;
+          };
+        };
+      };
       paths: Record<
         string,
         Record<string, { 'x-required-scope': string; responses: Record<string, unknown> }>
@@ -23,6 +33,10 @@ describe('W3-A corrective laboratory contract', () => {
     };
     expect(contract['x-status']).toBe('lab-only-inactive-in-product');
     expect(contract['x-hash-version']).toBe(W3_A_LAB_HASH_VERSION);
+    expect(contract['x-correction-ledger']).toContain('REMAINING');
+    expect(contract.components.schemas.CreditNoteIntent.allOf[1].properties?.mode?.enum).toContain(
+      'REMAINING',
+    );
     expect(contract.servers[0].url).toBe('/api/v2/lab');
     const root = '/companies/{companyId}/fiscal-documents/{environment}';
     for (const [path, scope] of [

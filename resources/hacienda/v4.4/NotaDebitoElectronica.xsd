@@ -563,8 +563,8 @@ Este campo se obtiene de multiplicar la "Cantidad de la unidad de medida a utili
 																							</xs:annotation>
 																							<xs:simpleType>
 																								<xs:restriction base="xs:decimal">
-																									<xs:totalDigits value="5"/>
-																									<xs:fractionDigits value="2"/>
+																									<xs:totalDigits value="10"/>
+																									<xs:fractionDigits value="5"/>
 																								</xs:restriction>
 																							</xs:simpleType>
 																						</xs:element>
@@ -978,7 +978,7 @@ se obtiene de la sumatoria de los campos “Subtotal”, “Impuesto Neto”.</x
 						</xs:sequence>
 					</xs:complexType>
 				</xs:element>
-				<xs:element ref="ds:Signature" minOccurs="1" maxOccurs="1"/>
+				<xs:element ref="ds:Signature" minOccurs="1" maxOccurs="5"/>
 			</xs:sequence>
 		</xs:complexType>
 	</xs:element>
@@ -1203,7 +1203,7 @@ alcohólicas, suministrado por la Dirección General de Aduanas</xs:documentatio
 				</xs:annotation>
 				<xs:simpleType>
 					<xs:restriction base="xs:integer">
-						<xs:minInclusive value="10000000"/>
+						<xs:minInclusive value="100"/>
 						<xs:maxInclusive value="99999999999999999999"/>
 					</xs:restriction>
 				</xs:simpleType>
@@ -1454,8 +1454,8 @@ componentes del surtido que se deben incluir en estos casos</xs:documentation>
 							</xs:annotation>
 							<xs:simpleType>
 								<xs:restriction base="xs:decimal">
-									<xs:totalDigits value="5"/>
-									<xs:fractionDigits value="2"/>
+									<xs:totalDigits value="10"/>
+									<xs:fractionDigits value="5"/>
 								</xs:restriction>
 							</xs:simpleType>
 						</xs:element>

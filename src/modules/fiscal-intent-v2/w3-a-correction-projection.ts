@@ -20,7 +20,7 @@ export interface CorrectionLineRequest {
 }
 export interface CorrectionIntent {
   sourceDocumentId: string;
-  mode: 'TOTAL' | 'PARTIAL' | 'ADJUSTMENT';
+  mode: 'TOTAL' | 'PARTIAL' | 'REMAINING' | 'ADJUSTMENT';
   referenceReasonCode: '01' | '02';
   reason: string;
   externalCorrectionId: string;
@@ -82,7 +82,11 @@ export function parseCorrectionIntent(raw: unknown, kind: CorrectionKind): Corre
     return invalid('CORRECTION_BODY_INVALID');
   }
   const mode = body.mode;
-  if (kind === 'CREDIT_NOTE' ? !['TOTAL', 'PARTIAL'].includes(String(mode)) : mode !== 'ADJUSTMENT')
+  if (
+    kind === 'CREDIT_NOTE'
+      ? !['TOTAL', 'PARTIAL', 'REMAINING'].includes(String(mode))
+      : mode !== 'ADJUSTMENT'
+  )
     return invalid('CORRECTION_MODE_INVALID');
   const referenceReasonCode = body.referenceReasonCode;
   if (referenceReasonCode !== (mode === 'TOTAL' ? '01' : '02')) {
@@ -90,7 +94,9 @@ export function parseCorrectionIntent(raw: unknown, kind: CorrectionKind): Corre
   }
   if (
     body.correctionLines.length > 1000 ||
-    (mode === 'TOTAL' ? body.correctionLines.length !== 0 : body.correctionLines.length === 0)
+    (['TOTAL', 'REMAINING'].includes(String(mode))
+      ? body.correctionLines.length !== 0
+      : body.correctionLines.length === 0)
   ) {
     return invalid('CORRECTION_LINES_INVALID');
   }
@@ -163,50 +169,97 @@ export function correctionHash(
     .digest('hex');
 }
 
+interface LedgerLine {
+  source: Record<string, unknown>;
+  original: bigint;
+  credited: bigint;
+  remaining: bigint;
+}
+
+function correctionLedger(
+  sourceLinesRaw: unknown,
+  priorCreditLinesRaw: unknown[],
+): Map<number, LedgerLine> {
+  if (!Array.isArray(sourceLinesRaw) || sourceLinesRaw.length === 0) {
+    throw new ConflictException({ code: 'CORRECTION_SOURCE_SNAPSHOT_INVALID' });
+  }
+  const sourceLines = sourceLinesRaw as Array<Record<string, unknown>>;
+  const ledger = new Map<number, LedgerLine>();
+  for (const line of sourceLines) {
+    if (!Number.isInteger(line.lineNumber) || ledger.has(line.lineNumber as number)) {
+      throw new ConflictException({ code: 'CORRECTION_SOURCE_SNAPSHOT_INVALID' });
+    }
+    const original = amount(line.quantity, 'CORRECTION_SOURCE_SNAPSHOT_INVALID');
+    if (original <= 0n) throw new ConflictException({ code: 'CORRECTION_SOURCE_SNAPSHOT_INVALID' });
+    ledger.set(line.lineNumber as number, {
+      source: line,
+      original,
+      credited: 0n,
+      remaining: original,
+    });
+  }
+  for (const raw of priorCreditLinesRaw) {
+    if (!Array.isArray(raw)) throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
+    const seen = new Set<number>();
+    for (const line of raw as Array<Record<string, unknown>>) {
+      const number = line.sourceLineNumber;
+      if (!Number.isInteger(number) || seen.has(number as number))
+        throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
+      seen.add(number as number);
+      const current = ledger.get(number as number);
+      if (!current) throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
+      const credited = amount(line.quantity, 'CORRECTION_LEDGER_INVALID');
+      if (credited <= 0n || credited > current.remaining)
+        throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
+      current.credited += credited;
+      current.remaining -= credited;
+    }
+  }
+  return ledger;
+}
+
+export function correctionBalances(sourceLinesRaw: unknown, priorCreditLinesRaw: unknown[]) {
+  return [...correctionLedger(sourceLinesRaw, priorCreditLinesRaw)].map(
+    ([sourceLineNumber, line]) => ({
+      sourceLineNumber,
+      originalQuantity: decimal(line.original),
+      creditedQuantity: decimal(line.credited),
+      remainingQuantity: decimal(line.remaining),
+    }),
+  );
+}
+
 export function correctionLines(
   kind: CorrectionKind,
   intent: CorrectionIntent,
   sourceLinesRaw: unknown,
   priorCreditLinesRaw: unknown[],
 ): FiscalDocumentLineInput[] {
-  if (!Array.isArray(sourceLinesRaw) || sourceLinesRaw.length === 0) {
-    throw new ConflictException({ code: 'CORRECTION_SOURCE_SNAPSHOT_INVALID' });
-  }
-  const sourceLines = sourceLinesRaw as Array<Record<string, unknown>>;
-  const sourceByNumber = new Map<number, Record<string, unknown>>();
-  for (const line of sourceLines) {
-    if (!Number.isInteger(line.lineNumber) || sourceByNumber.has(line.lineNumber as number)) {
-      throw new ConflictException({ code: 'CORRECTION_SOURCE_SNAPSHOT_INVALID' });
-    }
-    sourceByNumber.set(line.lineNumber as number, line);
-  }
-  const credited = new Map<number, bigint>();
-  for (const raw of priorCreditLinesRaw) {
-    if (!Array.isArray(raw)) throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
-    for (const line of raw as Array<Record<string, unknown>>) {
-      const number = line.sourceLineNumber;
-      if (!Number.isInteger(number))
-        throw new ConflictException({ code: 'CORRECTION_LEDGER_INVALID' });
-      credited.set(
-        number as number,
-        (credited.get(number as number) ?? 0n) + amount(line.quantity, 'CORRECTION_LEDGER_INVALID'),
-      );
-    }
-  }
-  if (intent.mode === 'TOTAL' && credited.size > 0) {
+  const ledger = correctionLedger(sourceLinesRaw, priorCreditLinesRaw);
+  if (intent.mode === 'TOTAL' && [...ledger.values()].some((line) => line.credited > 0n)) {
     throw new ConflictException({ code: 'CORRECTION_TOTAL_AFTER_PARTIAL_UNSUPPORTED' });
   }
   const requested: CorrectionLineRequest[] =
     intent.mode === 'TOTAL'
-      ? sourceLines.map((line) => ({
-          sourceLineNumber: line.lineNumber as number,
-          quantity: line.quantity as string,
+      ? [...ledger].map(([sourceLineNumber, line]) => ({
+          sourceLineNumber,
+          quantity: decimal(line.original),
         }))
-      : intent.correctionLines;
+      : intent.mode === 'REMAINING'
+        ? [...ledger]
+            .filter(([, line]) => line.remaining > 0n)
+            .map(([sourceLineNumber, line]) => ({
+              sourceLineNumber,
+              quantity: decimal(line.remaining),
+            }))
+        : intent.correctionLines;
+  if (requested.length === 0)
+    throw new ConflictException({ code: 'CORRECTION_NO_REMAINING_BALANCE' });
   return requested.map((entry, index) => {
-    const source = sourceByNumber.get(entry.sourceLineNumber);
-    if (!source) throw new BadRequestException({ code: 'CORRECTION_SOURCE_LINE_NOT_FOUND' });
-    const sourceQuantity = amount(source.quantity, 'CORRECTION_SOURCE_SNAPSHOT_INVALID');
+    const balance = ledger.get(entry.sourceLineNumber);
+    if (!balance) throw new BadRequestException({ code: 'CORRECTION_SOURCE_LINE_NOT_FOUND' });
+    const source = balance.source;
+    const sourceQuantity = balance.original;
     const sourcePrice = amount(source.unitPrice, 'CORRECTION_SOURCE_SNAPSHOT_INVALID');
     const sourceDiscount = amount(
       source.discountAmount ?? '0',
@@ -223,10 +276,7 @@ export function correctionLines(
     }
     const quantity =
       kind === 'CREDIT_NOTE' ? amount(entry.quantity, 'CORRECTION_QUANTITY_INVALID', true) : SCALE;
-    if (
-      kind === 'CREDIT_NOTE' &&
-      quantity + (credited.get(entry.sourceLineNumber) ?? 0n) > sourceQuantity
-    ) {
+    if (kind === 'CREDIT_NOTE' && quantity > balance.remaining) {
       throw new ConflictException({ code: 'CORRECTION_EXCEEDS_BALANCE' });
     }
     const unitPrice =
