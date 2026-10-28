@@ -90,6 +90,40 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /integrations/consumers/{consumerId}/associations/{associationId}/reassign:
+    post:
+      tags: [Consumer administration]
+      summary: Replace the issuer association for future operations in an isolated lab
+      description: >-
+        DP-01 laboratory operation. The existing external issuer key and historical
+        document origin remain immutable. A new external issuer key and association
+        are required; old active credentials are revoked. The target must pass
+        structural issuer checks. No real credential secret is resolved here.
+        Outstanding reservations or nonterminal documents block reassignment.
+      operationId: reassignFiscalConsumerIssuerV2Lab
+      security: [{ AdminJwt: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/ConsumerId' }
+        - { $ref: '#/components/parameters/AssociationId' }
+        - { $ref: '#/components/parameters/CorrelationId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReassignConsumerIssuer' }
+      responses:
+        '200':
+          description: Old association suspended, new association active, prior keys revoked.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReassignedConsumerIssuer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422':
+          description: Target issuer structure is incomplete or unverified.
   /integrations/consumers/{consumerId}/keys:
     post:
       tags: [Consumer administration]
@@ -224,6 +258,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    AssociationId:
+      name: associationId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     KeyId:
       name: keyId
       in: path
@@ -256,6 +295,25 @@ components:
         companyId: { type: string, format: uuid }
         environment: { type: string, enum: [SANDBOX, PRODUCTION] }
         profileVersion: { type: string, const: fiscal-consumer-v2 }
+    ReassignConsumerIssuer:
+      type: object
+      additionalProperties: false
+      required: [targetCompanyId, newExternalCompanyKey]
+      properties:
+        targetCompanyId: { type: string, format: uuid }
+        newExternalCompanyKey: { type: string, minLength: 1, maxLength: 128, pattern: '^\S(?:.*\S)?$' }
+    ReassignedConsumerIssuer:
+      type: object
+      additionalProperties: false
+      required: [consumerId, previousAssociationId, associationId, companyId, environment, status, revokedKeyCount]
+      properties:
+        consumerId: { type: string, format: uuid }
+        previousAssociationId: { type: string, format: uuid }
+        associationId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, const: ACTIVE }
+        revokedKeyCount: { type: integer, minimum: 0 }
     ConsumerAssociation:
       type: object
       additionalProperties: false

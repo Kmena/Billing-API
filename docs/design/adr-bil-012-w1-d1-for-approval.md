@@ -46,3 +46,7 @@ El lookup **no recalcula** el hash si no recibe el payload original: compara el 
 | Arquitectura y seguridad | Responsable, fecha, hash obligatorio y semántica 404/409 confirmados |
 | DBA | Visto bueno al modelo lógico y retención sin purga; SQL/ventana se autorizan aparte |
 | Dependencia fiscal | ADR-BIL-013/DF pendientes o aprobados con referencia, sin inferencia |
+
+## Decisión operativa W0–W3, 2026-10-28
+
+El operador ratificó para el laboratorio reserva persistente por asociación/ambiente, hash fiscal versionado, protección concurrente, recuperación, conflicto de contenido y lookup seguro. El consumidor queda implícito en la asociación, conforme al namespace de este ADR; no se añade `consumerId` al índice. DP-01 bloquea sucesión mientras haya reservas `RESERVED`/`RECOVERY_REQUIRED` o documentos v2 sin estado terminal. Las reservas históricas conservan su asociación y no se migran ni se recrean. El mecanismo v1 no cambia. La aprobación formal de retención, seguridad y DBA sigue pendiente.

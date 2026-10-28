@@ -66,6 +66,18 @@ export class CreateConsumerKeyV2Dto {
   rotationEndsAt?: string;
 }
 
+/** A new external issuer key preserves the immutable historical mapping. */
+export class ReassignConsumerIssuerV2Dto {
+  @IsUUID('4')
+  targetCompanyId!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(128)
+  @Matches(/^\S(?:.*\S)?$/)
+  newExternalCompanyKey!: string;
+}
+
 export class LookupConsumerOperationV2Dto {
   @IsIn(['CREATE_INVOICE'])
   operation!: ConsumerV2Operation;

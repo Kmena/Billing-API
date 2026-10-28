@@ -1,0 +1,4 @@
+#!/bin/sh
+# Install a symlink to this file in /usr/local/sbin only after STAG approval.
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")") || exit 2
+exec node "$SCRIPT_DIR/billing-update.mjs" "$@"

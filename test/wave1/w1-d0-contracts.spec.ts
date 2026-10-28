@@ -99,7 +99,7 @@ describe('W1-D0 proposed OpenAPI v2 contracts', () => {
     expect(fiscal['x-activation-wave']).toBe('W2-after-fiscal-approval');
     expect(resolveLocalRefs(m2m)).toBeGreaterThan(50);
     expect(resolveLocalRefs(fiscal)).toBeGreaterThan(25);
-    expect(Object.keys(m2m.paths)).toHaveLength(6);
+    expect(Object.keys(m2m.paths)).toHaveLength(7);
     expect(Object.keys(fiscal.paths)).toEqual([
       '/companies/{companyId}/fiscal-documents/{environment}/invoices',
     ]);
@@ -108,10 +108,11 @@ describe('W1-D0 proposed OpenAPI v2 contracts', () => {
 
   it('binds administration to JWT and ordinary consumer operations to an M2M key', () => {
     const entries = operations(m2m);
-    expect(entries).toHaveLength(6);
+    expect(entries).toHaveLength(7);
     expect(entries.map(({ operation }) => operation.operationId)).toEqual([
       'createFiscalConsumerAssociationV2',
       'getFiscalConsumerV2',
+      'reassignFiscalConsumerIssuerV2Lab',
       'createFiscalConsumerKeyV2',
       'revokeFiscalConsumerKeyV2',
       'getFiscalReadinessV2',

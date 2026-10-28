@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -12,6 +13,7 @@ import type {
   ConsumerV2OperationCommand,
   IssueConsumerKeyV2,
   RegisterConsumerAssociationV2,
+  ReassignConsumerIssuerV2,
   RevokeConsumerKeyV2,
 } from '../../application/consumer-v2-lab.service';
 import {
@@ -68,6 +70,237 @@ async function audit(
 @Injectable()
 export class PrismaConsumerV2Repository {
   constructor(private readonly prisma: PrismaService) {}
+
+  /** DP-01: successor association for future operations; historical issuer IDs never change. */
+  async reassignIssuer(command: ReassignConsumerIssuerV2) {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM fiscal_consumer_associations
+            WHERE id = ${command.associationId}::uuid AND tenant_id = ${command.tenantId}::uuid FOR UPDATE`;
+          const old = await tx.fiscalConsumerAssociation.findFirst({
+            where: { id: command.associationId, tenantId: command.tenantId },
+            include: { consumerCompany: { include: { consumer: true } } },
+          });
+          if (!old || old.consumerCompany.consumerId !== command.consumerId)
+            throw new NotFoundException({ code: 'CONSUMER_ASSOCIATION_NOT_FOUND' });
+          if (
+            old.status !== 'ACTIVE' ||
+            old.consumerCompany.status !== 'ACTIVE' ||
+            old.consumerCompany.consumer.status !== 'ACTIVE'
+          )
+            throw new ConflictException({ code: 'CONSUMER_ASSOCIATION_INACTIVE' });
+          if (old.consumerCompany.companyId === command.targetCompanyId)
+            throw new ConflictException({ code: 'CONSUMER_ISSUER_UNCHANGED' });
+          if (old.consumerCompany.externalCompanyKey === command.newExternalCompanyKey)
+            throw new ConflictException({ code: 'CONSUMER_COMPANY_REMAP_FORBIDDEN' });
+          const pending = await tx.fiscalIdempotencyKeyV2.count({
+            where: { associationId: old.id, state: { in: ['RESERVED', 'RECOVERY_REQUIRED'] } },
+          });
+          const unfinishedDocuments = await tx.fiscalDocument.count({
+            where: {
+              originAssociationId: old.id,
+              status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
+            },
+          });
+          if (pending || unfinishedDocuments)
+            throw new ConflictException({ code: 'CONSUMER_ASSOCIATION_PENDING_OPERATIONS' });
+
+          await this.assertTargetIssuerConfigured(
+            tx,
+            command.tenantId,
+            command.targetCompanyId,
+            old.environment,
+          );
+          const mapping = await tx.fiscalConsumerCompany.upsert({
+            where: {
+              tenantId_consumerId_companyId: {
+                tenantId: command.tenantId,
+                consumerId: command.consumerId,
+                companyId: command.targetCompanyId,
+              },
+            },
+            create: {
+              id: randomUUID(),
+              tenantId: command.tenantId,
+              consumerId: command.consumerId,
+              companyId: command.targetCompanyId,
+              externalCompanyKey: command.newExternalCompanyKey,
+            },
+            update: {},
+          });
+          if (
+            mapping.status !== 'ACTIVE' ||
+            mapping.externalCompanyKey !== command.newExternalCompanyKey
+          )
+            throw new ConflictException({ code: 'CONSUMER_TARGET_MAPPING_CONFLICT' });
+          const successor = await tx.fiscalConsumerAssociation.upsert({
+            where: {
+              consumerCompanyId_environment: {
+                consumerCompanyId: mapping.id,
+                environment: old.environment,
+              },
+            },
+            create: {
+              id: randomUUID(),
+              tenantId: command.tenantId,
+              consumerCompanyId: mapping.id,
+              environment: old.environment,
+            },
+            update: {},
+          });
+          if (successor.status !== 'ACTIVE')
+            throw new ConflictException({ code: 'CONSUMER_TARGET_ASSOCIATION_INACTIVE' });
+
+          const now = new Date();
+          const oldBindings = await tx.fiscalConsumerKeyBinding.findMany({
+            where: { associationId: old.id },
+            select: { apiKeyId: true },
+          });
+          const revoked = await tx.apiKey.updateMany({
+            where: {
+              id: { in: oldBindings.map((binding) => binding.apiKeyId) },
+              tenantId: command.tenantId,
+              status: 'ACTIVE',
+            },
+            data: { status: 'REVOKED', revokedAt: now, revokedBy: command.actorId },
+          });
+          await tx.fiscalConsumerAssociation.update({
+            where: { id: old.id },
+            data: { status: 'SUSPENDED' },
+          });
+          await audit(tx, {
+            tenantId: command.tenantId,
+            companyId: command.targetCompanyId,
+            actor: command.actorId,
+            action: 'consumer.association.issuer.reassigned',
+            resource: `FiscalConsumerAssociation:${successor.id}`,
+            correlationId: command.correlationId,
+            eventClass: 'SECURITY',
+            metadata: {
+              consumerId: command.consumerId,
+              previousAssociationId: old.id,
+              previousCompanyId: old.consumerCompany.companyId,
+              successorAssociationId: successor.id,
+              successorCompanyId: command.targetCompanyId,
+              environment: old.environment,
+              revokedKeyCount: revoked.count,
+            },
+          });
+          return {
+            consumerId: command.consumerId,
+            previousAssociationId: old.id,
+            associationId: successor.id,
+            companyId: command.targetCompanyId,
+            environment: old.environment,
+            status: successor.status,
+            revokedKeyCount: revoked.count,
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          maxWait: 30000,
+          timeout: 30000,
+        },
+      );
+    } catch (error) {
+      if (isUnique(error))
+        throw new ConflictException({ code: 'CONSUMER_TARGET_MAPPING_CONFLICT' });
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+        throw new ConflictException({ code: 'CONSUMER_ISSUER_CHANGE_CONCURRENT' });
+      throw error;
+    }
+  }
+
+  private async assertTargetIssuerConfigured(
+    tx: Tx,
+    tenantId: string,
+    companyId: string,
+    environment: 'SANDBOX' | 'PRODUCTION',
+  ) {
+    const company = await tx.company.findFirst({
+      where: { id: companyId, tenantId, status: 'ACTIVE' },
+      select: {
+        identificationNumber: true,
+        identificationType: true,
+        haciendaVerificationStatus: true,
+      },
+    });
+    if (!company) throw new NotFoundException({ code: 'CONSUMER_TARGET_COMPANY_NOT_FOUND' });
+    const blockers: string[] = [];
+    if (
+      !company.identificationNumber ||
+      !company.identificationType ||
+      company.haciendaVerificationStatus !== 'VERIFIED'
+    )
+      blockers.push('ISSUER_IDENTITY_UNVERIFIED');
+    const profile = await tx.companyFiscalProfile.findFirst({
+      where: { tenantId, companyId },
+      select: { defaultEconomicActivityId: true },
+    });
+    const activity = profile?.defaultEconomicActivityId
+      ? await tx.companyEconomicActivity.findFirst({
+          where: {
+            id: profile.defaultEconomicActivityId,
+            tenantId,
+            companyId,
+            haciendaStatus: 'A',
+            billingEnabled: true,
+          },
+          select: { id: true },
+        })
+      : null;
+    if (!activity) blockers.push('ISSUER_ACTIVITY_NOT_CONFIGURED');
+    const point = await tx.fiscalIssuancePoint.findFirst({
+      where: {
+        tenantId,
+        companyId,
+        environment,
+        active: true,
+        isDefault: true,
+        branch: { is: { active: true, tenantId, companyId, environment } },
+        terminal: { is: { active: true, tenantId, companyId, environment } },
+      },
+      select: { id: true },
+    });
+    if (!point) blockers.push('ISSUER_BRANCH_TERMINAL_NOT_CONFIGURED');
+    const connection = await tx.haciendaConnection.findFirst({
+      where: { tenantId, companyId, environment, status: 'CONNECTED' },
+      select: { secretReference: true },
+    });
+    if (!connection?.secretReference) blockers.push('ISSUER_HACIENDA_CREDENTIALS_NOT_CONFIGURED');
+    const cert = await tx.fiscalSigningCertificate.findFirst({
+      where: { tenantId, companyId, environment, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        extractedIdentityNumber: true,
+        extractedIdentityType: true,
+        validFrom: true,
+        validTo: true,
+        certificateSecretReference: true,
+        passwordSecretReference: true,
+      },
+    });
+    const expectedType = { FISICA: '01', JURIDICA: '02', DIMEX: '03', NITE: '04' }[
+      company.identificationType as 'FISICA' | 'JURIDICA' | 'DIMEX' | 'NITE'
+    ];
+    const now = new Date();
+    if (
+      !cert ||
+      cert.extractedIdentityNumber !== company.identificationNumber ||
+      cert.extractedIdentityType !== expectedType ||
+      (cert.validFrom && cert.validFrom > now) ||
+      (cert.validTo && cert.validTo <= now) ||
+      !cert.certificateSecretReference ||
+      !cert.passwordSecretReference
+    )
+      blockers.push('ISSUER_CERTIFICATE_NOT_VERIFIED');
+    if (blockers.length)
+      throw new UnprocessableEntityException({
+        code: 'CONSUMER_TARGET_ISSUER_NOT_READY',
+        blockers,
+      });
+  }
 
   async registerAssociation(command: RegisterConsumerAssociationV2) {
     try {
@@ -509,6 +742,9 @@ export class PrismaConsumerV2Repository {
   }
 
   private async assertPrincipal(tx: Tx, p: ConsumerV2Principal, scope: ConsumerV2Scope) {
+    // Serialize v2 fiscal mutations with DP-01 association suspension.
+    await tx.$queryRaw`SELECT id FROM fiscal_consumer_associations
+      WHERE id = ${p.associationId}::uuid AND tenant_id = ${p.tenantId}::uuid FOR SHARE`;
     const binding = await tx.fiscalConsumerKeyBinding.findUnique({
       where: { apiKeyId: p.apiKeyId },
       include: {

@@ -51,3 +51,7 @@ El DBA define FKs/índices compuestos que impidan asociación cruzada de tenant 
 | Arquitectura e integraciones | Responsable, fecha y versión |
 | Seguridad | Vida máxima de clave aprobada, solapamiento aprobado y responsable |
 | DBA | Visto bueno al modelo lógico; SQL/ventana se autorizan aparte |
+
+## Decisión operativa W0–W3, 2026-10-28
+
+El operador adoptó los criterios de identidad independiente, claves separadas, scopes mínimos, asociación explícita por empresa/ambiente y auditoría para esta implementación aislada. La compatibilidad v1 se conserva. **Discrepancia DP-01:** la petición de asociación modificable no puede ejecutarse como cambio en sitio de `FiscalConsumerCompany.companyId`: esta propuesta y sus índices prohíben remapear el mismo `externalCompanyKey`. El laboratorio implementa sucesión explícita con una clave externa nueva, suspende la asociación anterior y deja intacto el origen histórico. Si negocio exige conservar la clave externa al cambiar de emisor, arquitectura/DBA deben aprobar otro modelo y DDL; no se infiere esa aprobación. El estado formal del ADR sigue pendiente de firmas de arquitectura, seguridad y DBA.

@@ -40,6 +40,16 @@ export interface RevokeConsumerKeyV2 {
   correlationId: string;
 }
 
+export interface ReassignConsumerIssuerV2 {
+  tenantId: string;
+  consumerId: string;
+  associationId: string;
+  targetCompanyId: string;
+  newExternalCompanyKey: string;
+  actorId: string;
+  correlationId: string;
+}
+
 export interface ConsumerV2OperationCommand {
   principal: ConsumerV2Principal;
   operation: ConsumerV2Operation;
@@ -103,6 +113,14 @@ export class ConsumerV2LabService {
 
   revokeKey(command: RevokeConsumerKeyV2) {
     return this.repository.revokeKey(command);
+  }
+
+  reassignIssuer(command: ReassignConsumerIssuerV2) {
+    const key = command.newExternalCompanyKey;
+    if (!key || key.length > 128 || !/^\S(?:.*\S)?$/.test(key)) {
+      throw new BadRequestException({ code: 'CONSUMER_EXTERNAL_KEY_INVALID' });
+    }
+    return this.repository.reassignIssuer(command);
   }
 
   /** Synthetic-only reservation; no fiscal payload, document or consecutive is created. */

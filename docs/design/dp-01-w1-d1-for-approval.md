@@ -38,3 +38,9 @@ El diseño y las pruebas de código genérico con datos sintéticos pueden avanz
 | Resolución | A / B / C, con referencia a la evidencia legal |
 | Dueño del emisor y fiscal | Responsables y fecha |
 | Integración, seguridad y operación | Responsables, ambiente y ventana autorizados |
+
+## Resolución funcional parcial del operador, 2026-10-28
+
+Se autorizó que Inventori y afiliaciones compartan temporalmente **la misma `Company` legal durante pruebas autorizadas**, con asociaciones y claves independientes, y que posteriormente el nuevo consumidor pueda pasar a otro emisor para operaciones futuras. No se proporcionó ni aprobó un emisor real, su identidad legal ni una base objetivo. Por ello la autorización se aplica a fixtures sintéticos; el alta real conserva los gates de identidad, DBA, seguridad y operación de esta ficha.
+
+El cambio se implementa por **sucesión**: `externalCompanyKey` nuevo, asociación destino del mismo consumidor y ambiente, suspensión/revocación de la anterior y auditoría de IDs de emisor antes/después en una transacción. No se altera `FiscalIntegrationAssociation` de Inventori, no se reescribe ningún documento ni se copia una clave. Se bloquean reservas abiertas y documentos no terminales. La nueva asociación tiene namespace de idempotencia propio: las operaciones anteriores quedan en BD para auditoría, pero la clave nueva no recibe lectura M2M retroactiva de esos documentos. El preflight de laboratorio comprueba identidad verificada, actividad, sucursal/terminal, conexión y metadatos de certificado; la disponibilidad real de secretos y la identidad jurídica deben comprobarse en STAG antes de vincular un emisor real. Reusar la misma clave externa para otro emisor contradice ADR-BIL-011 y requiere decisión arquitectónica separada. Estado de piloto real: **PENDIENTE**.

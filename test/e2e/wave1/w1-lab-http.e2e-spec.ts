@@ -150,6 +150,41 @@ describe('W1 isolated v2 HTTP integration, with v1 loaded but unchanged', () => 
     expect(JSON.stringify(read.body)).not.toContain('secret');
   });
 
+  it('guards issuer reassignment with admin role, tenant isolation and target preflight', async () => {
+    const target = (await createTestCompany(prisma, tenantId)).id;
+    const route = `${adminPath}/${consumerId}/associations/${associationId}/reassign`;
+    const body = { targetCompanyId: target, newExternalCompanyKey: 'lab-issuer-next' };
+    await request(app.getHttpServer()).post(route).send(body).expect(401);
+    await request(app.getHttpServer())
+      .post(route)
+      .set('Authorization', `Bearer ${memberJwt}`)
+      .send(body)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(route)
+      .set('Authorization', `Bearer ${foreignJwt}`)
+      .send(body)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(route)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({ ...body, extra: 'forbidden' })
+      .expect(400);
+    await request(app.getHttpServer())
+      .post(route)
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send(body)
+      .expect(422);
+    expect(
+      (
+        await prisma.fiscalConsumerAssociation.findUniqueOrThrow({
+          where: { id: associationId },
+          select: { status: true },
+        })
+      ).status,
+    ).toBe('ACTIVE');
+  });
+
   it('binds minimum scopes, environment and origin; revocation blocks both v2 and v1 escalation', async () => {
     const keysPath = `${adminPath}/${consumerId}/keys`;
     const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();

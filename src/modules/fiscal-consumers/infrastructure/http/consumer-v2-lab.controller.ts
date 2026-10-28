@@ -27,6 +27,7 @@ import {
   CreateConsumerAssociationV2Dto,
   CreateConsumerKeyV2Dto,
   LookupConsumerOperationV2Dto,
+  ReassignConsumerIssuerV2Dto,
 } from './consumer-v2.dto';
 
 function correlationId(header: string | undefined): string {
@@ -78,6 +79,28 @@ export class ConsumerV2LabAdminController {
     @Param('consumerId', ParseUUIDPipe) consumerId: string,
   ) {
     return this.service.getConsumer(req.user.tenantId, consumerId);
+  }
+
+  @Post(':consumerId/associations/:associationId/reassign')
+  async reassignIssuer(
+    @Req() req: { user: JwtRequest },
+    @Param('consumerId', ParseUUIDPipe) consumerId: string,
+    @Param('associationId', ParseUUIDPipe) associationId: string,
+    @Body() body: ReassignConsumerIssuerV2Dto,
+    @Headers('x-correlation-id') requestedCorrelationId: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.service.reassignIssuer({
+      tenantId: req.user.tenantId,
+      consumerId,
+      associationId,
+      targetCompanyId: body.targetCompanyId,
+      newExternalCompanyKey: body.newExternalCompanyKey,
+      actorId: req.user.userId,
+      correlationId: correlationId(requestedCorrelationId),
+    });
+    response.setHeader('Cache-Control', 'no-store');
+    return result;
   }
 
   @Post(':consumerId/keys')

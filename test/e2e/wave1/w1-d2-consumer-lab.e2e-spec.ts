@@ -164,7 +164,13 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       const tenantScope = { tenantId: { in: [...ids] } };
       await prisma.fiscalIdempotencyKeyV2.deleteMany({ where: tenantScope });
       await prisma.fiscalDocument.deleteMany({ where: tenantScope });
+      await prisma.fiscalSigningCertificate.deleteMany({ where: tenantScope });
+      await prisma.haciendaConnection.deleteMany({ where: tenantScope });
       await prisma.fiscalIssuancePoint.deleteMany({ where: tenantScope });
+      await prisma.fiscalTerminal.deleteMany({ where: tenantScope });
+      await prisma.fiscalBranch.deleteMany({ where: tenantScope });
+      await prisma.companyFiscalProfile.deleteMany({ where: tenantScope });
+      await prisma.companyEconomicActivity.deleteMany({ where: tenantScope });
       await prisma.fiscalConsumerKeyBinding.deleteMany({ where: tenantScope });
       await prisma.auditLog.deleteMany({ where: tenantScope });
       await prisma.apiKey.deleteMany({ where: tenantScope });
@@ -577,5 +583,233 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         data: { originAssociationId: null },
       }),
     ).rejects.toBeDefined();
+  });
+
+  it('DP-01 moves future operations to a configured issuer while preserving other consumers', async () => {
+    const old = await register(
+      tenantA,
+      companyA1,
+      'AUDIT_TEST',
+      'dp01-app',
+      'dp01-shared',
+      'SANDBOX',
+    );
+    const oldKey = await issue(tenantA, old.associationId);
+    const actorId = randomUUID();
+    const command = {
+      tenantId: tenantA,
+      consumerId: old.consumerId,
+      associationId: old.associationId,
+      targetCompanyId: companyA2,
+      newExternalCompanyKey: 'dp01-separate',
+      actorId,
+      correlationId: randomUUID(),
+    };
+    await expect(service.reassignIssuer(command)).rejects.toMatchObject({ status: 422 });
+    await expect(service.reassignIssuer({ ...command, tenantId: tenantB })).rejects.toMatchObject({
+      status: 404,
+    });
+
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: companyA2 } });
+    const activity = await prisma.companyEconomicActivity.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        code: '620210',
+        description: 'Synthetic activity',
+        haciendaStatus: 'A',
+        billingEnabled: true,
+        verifiedAt: new Date(),
+        lastSeenAt: new Date(),
+        verificationSource: 'HACIENDA_FE_AE',
+      },
+    });
+    await prisma.companyFiscalProfile.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        economicActivityCode: activity.code,
+        defaultEconomicActivityId: activity.id,
+        province: '1',
+        canton: '01',
+        district: '01',
+        otrasSenas: 'Synthetic test',
+        email: 'synthetic@example.test',
+      },
+    });
+    const branch = await prisma.fiscalBranch.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        environment: 'SANDBOX',
+        code: '001',
+        name: 'Synthetic branch',
+      },
+    });
+    const terminal = await prisma.fiscalTerminal.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        branchId: branch.id,
+        environment: 'SANDBOX',
+        code: '00001',
+        name: 'Synthetic terminal',
+      },
+    });
+    await prisma.fiscalIssuancePoint.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        environment: 'SANDBOX',
+        branchCode: branch.code,
+        terminalCode: terminal.code,
+        branchId: branch.id,
+        terminalId: terminal.id,
+        isDefault: true,
+      },
+    });
+    await prisma.haciendaConnection.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        environment: 'SANDBOX',
+        status: 'CONNECTED',
+        secretReference: 'synthetic-only',
+      },
+    });
+    await prisma.fiscalSigningCertificate.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA2,
+        environment: 'SANDBOX',
+        certificateType: 'HACIENDA_CRYPTOGRAPHIC_KEY',
+        certificateSecretReference: 'synthetic-cert',
+        passwordSecretReference: 'synthetic-pin',
+        extractedIdentityNumber: company.identificationNumber,
+        extractedIdentityType: '02',
+        validFrom: new Date('2025-01-01'),
+        validTo: new Date('2030-01-01'),
+      },
+    });
+
+    await service.reserveSyntheticLab(
+      operation(principal(old, oldKey, tenantA), hash, 'dp01-pending'),
+    );
+    await expect(service.reassignIssuer(command)).rejects.toMatchObject({ status: 409 });
+    await prisma.fiscalIdempotencyKeyV2.updateMany({
+      where: { associationId: old.associationId, key: 'dp01-pending' },
+      data: { state: 'ABORTED_BEFORE_ALLOCATION' },
+    });
+    const oldPoint = await prisma.fiscalIssuancePoint.findFirstOrThrow({
+      where: { tenantId: tenantA, companyId: companyA1, environment: 'SANDBOX' },
+    });
+    const historical = await prisma.fiscalDocument.create({
+      data: {
+        id: randomUUID(),
+        tenantId: tenantA,
+        companyId: companyA1,
+        environment: 'SANDBOX',
+        type: 'INVOICE',
+        status: 'READY_FOR_XML',
+        issuancePointId: oldPoint.id,
+        branchCode: oldPoint.branchCode,
+        terminalCode: oldPoint.terminalCode,
+        sequenceValue: 9001,
+        consecutive: '00100001010000009001',
+        clave: '50601012500310112345600100001010000009001100009001',
+        securityCode: '12345678',
+        issuerSnapshot: {},
+        currency: 'CRC',
+        saleCondition: '01',
+        paymentMethod: '01',
+        lines: [],
+        totals: {},
+        originConsumerId: old.consumerId,
+        originAssociationId: old.associationId,
+      },
+    });
+    await expect(service.reassignIssuer(command)).rejects.toMatchObject({ status: 409 });
+    await prisma.fiscalDocument.update({
+      where: { id: historical.id },
+      data: { status: 'ACCEPTED' },
+    });
+    await expect(
+      service.reassignIssuer({ ...command, correlationId: 'x'.repeat(37) }),
+    ).rejects.toBeDefined();
+    expect(
+      (
+        await prisma.fiscalConsumerAssociation.findUniqueOrThrow({
+          where: { id: old.associationId },
+          select: { status: true },
+        })
+      ).status,
+    ).toBe('ACTIVE');
+    expect(
+      (
+        await prisma.apiKey.findUniqueOrThrow({
+          where: { id: oldKey.apiKeyId },
+          select: { status: true },
+        })
+      ).status,
+    ).toBe('ACTIVE');
+    const moved = await service.reassignIssuer(command);
+    expect(moved).toMatchObject({
+      consumerId: old.consumerId,
+      previousAssociationId: old.associationId,
+      companyId: companyA2,
+      environment: 'SANDBOX',
+    });
+    expect(moved.associationId).not.toBe(old.associationId);
+    expect(
+      await prisma.fiscalDocument.findUniqueOrThrow({
+        where: { id: historical.id },
+        select: { companyId: true, originAssociationId: true },
+      }),
+    ).toEqual({ companyId: companyA1, originAssociationId: old.associationId });
+    expect(
+      await prisma.fiscalConsumerAssociation.findUniqueOrThrow({
+        where: { id: old.associationId },
+        select: { status: true },
+      }),
+    ).toEqual({ status: 'SUSPENDED' });
+    await request(app.getHttpServer())
+      .get(path(companyA1))
+      .set('X-API-Key', oldKey.secret)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(path(companyA1))
+      .set('X-API-Key', partnerKey.secret)
+      .expect(200);
+    const newKey = await issue(tenantA, moved.associationId);
+    await request(app.getHttpServer())
+      .get(path(companyA2))
+      .set('X-API-Key', newKey.secret)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(path(companyA1))
+      .set('X-API-Key', newKey.secret)
+      .expect(403);
+    await expect(service.reassignIssuer(command)).rejects.toMatchObject({ status: 409 });
+    const audit = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        tenantId: tenantA,
+        action: 'consumer.association.issuer.reassigned',
+        correlationId: command.correlationId,
+      },
+    });
+    expect(audit.metadata).toMatchObject({
+      previousAssociationId: old.associationId,
+      successorAssociationId: moved.associationId,
+      previousCompanyId: companyA1,
+      successorCompanyId: companyA2,
+      revokedKeyCount: 1,
+    });
   });
 });
