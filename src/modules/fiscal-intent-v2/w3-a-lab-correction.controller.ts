@@ -59,6 +59,22 @@ export class W3ALabCorrectionController {
     return this.corrections.getDocument(request.consumerV2, documentId);
   }
 
+  @Get('corrective-notes/:documentId/signed-xml')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  async signedXml(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res() response: Response,
+  ) {
+    const artifact = await this.corrections.signedXml(request.consumerV2, documentId);
+    response
+      .status(200)
+      .setHeader('Cache-Control', 'no-store')
+      .setHeader('Content-Type', artifact.contentType)
+      .setHeader('X-Content-SHA256', artifact.sha256)
+      .send(artifact.bytes);
+  }
+
   @Post('corrective-notes/lookup')
   @ConsumerV2RequiredScope('fiscal-v2:operations:read')
   async lookup(

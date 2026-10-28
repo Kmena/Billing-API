@@ -52,6 +52,10 @@ describe('W3-A corrective laboratory contract', () => {
     expect(contract.paths[`${root}/corrective-notes/lookup`].post['x-required-scope']).toBe(
       'fiscal-v2:operations:read',
     );
+    const signedXml = contract.paths[`${root}/corrective-notes/{documentId}/signed-xml`].get;
+    expect(signedXml['x-required-scope']).toBe('fiscal-v2:operations:read');
+    for (const code of ['200', '401', '403', '404', '422'])
+      expect(signedXml.responses).toHaveProperty(code);
     expect(readFileSync(join(process.cwd(), 'src/app.module.ts'), 'utf8')).not.toContain(
       'W3AFiscalLabModule',
     );

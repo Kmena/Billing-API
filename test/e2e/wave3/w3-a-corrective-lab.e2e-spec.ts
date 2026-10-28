@@ -280,6 +280,97 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     await post('credit-notes', apiKey.secret, 'w3a-total-duplicate', body).expect(409);
   });
 
+  it('delivers only integrity-verified signed XML to its original M2M association', async () => {
+    const sourceId = await acceptedInvoice('front-a-xml-source');
+    const created = await post(
+      'debit-notes',
+      apiKey.secret,
+      'front-a-xml-debit',
+      debit(sourceId, '100'),
+    ).expect(201);
+    const url = `${base()}/corrective-notes/${created.body.documentId}/signed-xml`;
+    const response = await request(app.getHttpServer())
+      .get(url)
+      .set('X-API-Key', apiKey.secret)
+      .expect(200);
+    const bytes = Buffer.isBuffer(response.body)
+      ? response.body
+      : Buffer.from(response.text, 'utf8');
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-content-sha256']).toBe(
+      createHash('sha256').update(bytes).digest('hex'),
+    );
+    expect(bytes.toString('utf8')).toContain('<NotaDebitoElectronica');
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(bytes.toString('utf8'))).isValid).toBe(
+      true,
+    );
+    await request(app.getHttpServer())
+      .get(`${base()}/corrective-notes/${sourceId}/signed-xml`)
+      .set('X-API-Key', apiKey.secret)
+      .expect(404);
+
+    const other = await lab.registerAssociation({
+      tenantId,
+      companyId,
+      provider: 'AUDIT_TEST',
+      externalConsumerKey: 'front-a-xml-other',
+      externalCompanyKey: 'same-issuer',
+      environment: 'SANDBOX',
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    const otherKey = await lab.issueKey({
+      tenantId,
+      associationId: other.associationId,
+      scopes: ['fiscal-v2:operations:read'],
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    await request(app.getHttpServer()).get(url).set('X-API-Key', otherKey.secret).expect(404);
+
+    const artifact = await prisma.fiscalXmlArtifact.findFirstOrThrow({
+      where: { fiscalDocumentId: created.body.documentId },
+    });
+    await prisma.fiscalXmlArtifact.update({
+      where: { id: artifact.id },
+      data: { signedXmlSha256: '0'.repeat(64) },
+    });
+    await request(app.getHttpServer())
+      .get(url)
+      .set('X-API-Key', apiKey.secret)
+      .expect(422)
+      .expect(({ body }) => expect(body.error.code).toBe('ARTIFACT_INTEGRITY_FAILURE'));
+    await prisma.fiscalXmlArtifact.update({
+      where: { id: artifact.id },
+      data: { signedXmlSha256: artifact.signedXmlSha256 },
+    });
+  });
+
+  it('rejects a persisted original whose fiscal reference no longer matches its identity', async () => {
+    const sourceId = await acceptedInvoice('front-a-invalid-reference-source');
+    const original = await prisma.fiscalDocument.findUniqueOrThrow({ where: { id: sourceId } });
+    await prisma.fiscalDocument.update({
+      where: { id: sourceId },
+      data: { clave: '0'.repeat(50) },
+    });
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'front-a-invalid-reference',
+      credit(sourceId, 'TOTAL'),
+    )
+      .expect(422)
+      .expect(({ body }) => expect(body.error.code).toBe('CORRECTION_SOURCE_REFERENCE_INVALID'));
+    expect(await prisma.fiscalDocument.count({ where: { sourceFiscalDocumentId: sourceId } })).toBe(
+      0,
+    );
+    await prisma.fiscalDocument.update({
+      where: { id: sourceId },
+      data: { clave: original.clave },
+    });
+  });
+
   it('limits partial NC by remaining line quantity and serializes concurrent correction', async () => {
     const sourceId = await acceptedInvoice('w3a-partial-source');
     await post(

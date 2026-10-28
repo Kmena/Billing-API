@@ -12,6 +12,7 @@ import {
 } from '../fiscal-documents/application/fiscal-document.service';
 import { ConsumerV2Principal } from '../fiscal-consumers/infrastructure/http/consumer-v2.guard';
 import { ConsumerV2LabService } from '../fiscal-consumers/application/consumer-v2-lab.service';
+import { FiscalEvidenceResolverService } from '../fiscal-documents/application/artifacts/fiscal-evidence-resolver.service';
 import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
 import {
   CorrectionKind,
@@ -20,6 +21,7 @@ import {
   correctionLines,
   debitAdjustmentBalances,
   parseCorrectionIntent,
+  validateCorrectionSourceReference,
   W3_A_LAB_HASH_VERSION,
 } from './w3-a-correction-projection';
 
@@ -32,6 +34,7 @@ export class W3ALabCorrectionService {
     private readonly documents: FiscalDocumentService,
     private readonly operations: W2B2LabInvoiceService,
     private readonly consumers: ConsumerV2LabService,
+    private readonly evidence: FiscalEvidenceResolverService,
   ) {}
 
   async create(
@@ -62,6 +65,12 @@ export class W3ALabCorrectionService {
 
   getDocument(principal: ConsumerV2Principal, documentId: string) {
     return this.operations.getDocument(principal, documentId, ['CREDIT_NOTE', 'DEBIT_NOTE']);
+  }
+
+  async signedXml(principal: ConsumerV2Principal, documentId: string) {
+    // The origin-bound read must succeed before the tenant-scoped artifact resolver is called.
+    await this.getDocument(principal, documentId);
+    return this.evidence.resolveSignedXmlBytes(principal.tenantId, principal.companyId, documentId);
   }
 
   lookup(
@@ -115,13 +124,15 @@ export class W3ALabCorrectionService {
       select: { identificationNumber: true },
     });
     if (
+      !company ||
       !issuer ||
       typeof issuer !== 'object' ||
       Array.isArray(issuer) ||
-      issuer.identificationNumber !== company?.identificationNumber
+      issuer.identificationNumber !== company.identificationNumber
     ) {
       throw new UnprocessableEntityException({ code: 'CORRECTION_ISSUER_CHANGED' });
     }
+    validateCorrectionSourceReference(source, company.identificationNumber);
     const sourceXml = await tx.fiscalXmlArtifact.findFirst({
       where: {
         fiscalDocumentId: source.id,

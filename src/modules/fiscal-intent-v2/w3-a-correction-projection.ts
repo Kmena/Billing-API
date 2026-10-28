@@ -6,12 +6,47 @@ import {
 import { createHash } from 'crypto';
 import { FiscalDocumentLineInput } from '../fiscal-documents/application/fiscal-document.service';
 import { ConsumerV2Principal } from '../fiscal-consumers/infrastructure/http/consumer-v2.guard';
+import { buildConsecutive, buildFiscalKey } from '../fiscal-documents/domain/fiscal-key.generator';
 
 export const W3_A_LAB_HASH_VERSION = 'w3-a-corrective-lab.v1' as const;
 const SCALE = 100000n;
 const UUID = /^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i;
 
 export type CorrectionKind = 'CREDIT_NOTE' | 'DEBIT_NOTE';
+/** Check the persisted fiscal identity before a corrective reference is allocated. */
+export function validateCorrectionSourceReference(
+  source: {
+    clave: string;
+    consecutive: string;
+    branchCode: string;
+    terminalCode: string;
+    sequenceValue: bigint;
+    issueDate: Date;
+    securityCode: string;
+    situation: string;
+  },
+  issuerIdentificationNumber: string,
+): void {
+  try {
+    const consecutive = buildConsecutive({
+      branchCode: source.branchCode,
+      terminalCode: source.terminalCode,
+      documentType: 'INVOICE',
+      sequenceValue: source.sequenceValue,
+    });
+    const clave = buildFiscalKey({
+      issuedAt: source.issueDate,
+      issuerIdentificationNumber,
+      consecutive,
+      securityCode: source.securityCode,
+      situation: source.situation,
+    });
+    if (source.consecutive === consecutive && source.clave === clave) return;
+  } catch {
+    // A malformed persisted reference is rejected with the same public code.
+  }
+  throw new UnprocessableEntityException({ code: 'CORRECTION_SOURCE_REFERENCE_INVALID' });
+}
 export interface CorrectionLineRequest {
   sourceLineNumber: number;
   quantity?: string;
