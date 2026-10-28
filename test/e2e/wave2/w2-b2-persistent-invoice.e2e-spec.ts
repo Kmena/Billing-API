@@ -263,6 +263,84 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       );
   });
 
+  it('downloads unchanged invoice XML, verifies SHA-256 and recovers an initially unavailable artifact', async () => {
+    const created = await post(
+      key.secret,
+      'w2b2-xml-download',
+      invoiceIntent('w2b2-xml-download'),
+    ).expect(201);
+    const documentId = created.body.documentId as string;
+    const url = `${endpoint()}/${documentId}/signed-xml`;
+    const artifact = await prisma.fiscalXmlArtifact.findFirstOrThrow({
+      where: { fiscalDocumentId: documentId },
+    });
+    const stored = await app
+      .get<StoragePort>(STORAGE_PORT)
+      .download(artifact.signedXmlStorageKey ?? '');
+    const downloaded = await request(app.getHttpServer())
+      .get(url)
+      .set('X-API-Key', key.secret)
+      .expect(200);
+    const bytes = Buffer.isBuffer(downloaded.body)
+      ? downloaded.body
+      : Buffer.from(downloaded.text, 'utf8');
+    expect(bytes.equals(stored)).toBe(true);
+    expect(downloaded.headers['content-type']).toMatch(/^application\/xml/);
+    expect(downloaded.headers['cache-control']).toBe('no-store');
+    expect(downloaded.headers['x-content-sha256']).toBe(
+      createHash('sha256').update(stored).digest('hex'),
+    );
+    expect(downloaded.headers['x-content-sha256']).toBe(artifact.signedXmlSha256);
+
+    await prisma.fiscalXmlArtifact.update({
+      where: { id: artifact.id },
+      data: { signedXmlSha256: '0'.repeat(64) },
+    });
+    await request(app.getHttpServer())
+      .get(url)
+      .set('X-API-Key', key.secret)
+      .expect(422)
+      .expect(({ body }) => expect(body.error.code).toBe('ARTIFACT_INTEGRITY_FAILURE'));
+    await prisma.fiscalXmlArtifact.update({
+      where: { id: artifact.id },
+      data: { signedXmlSha256: artifact.signedXmlSha256 },
+    });
+
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${randomUUID()}/signed-xml`)
+      .set('X-API-Key', key.secret)
+      .expect(404);
+    invoices.interruptOnceAfterDocument();
+    await post(key.secret, 'w2b2-xml-pending', invoiceIntent('w2b2-xml-pending')).expect(503);
+    const pending = await prisma.fiscalIdempotencyKeyV2.findFirstOrThrow({
+      where: { associationId, key: 'w2b2-xml-pending' },
+    });
+    const pendingUrl = `${endpoint()}/${pending.fiscalDocumentId}/signed-xml`;
+    await request(app.getHttpServer()).get(pendingUrl).set('X-API-Key', key.secret).expect(404);
+    await post(key.secret, 'w2b2-xml-pending', invoiceIntent('w2b2-xml-pending')).expect(200);
+    await request(app.getHttpServer()).get(pendingUrl).set('X-API-Key', key.secret).expect(200);
+
+    const restartedModule = await Test.createTestingModule({
+      imports: [AppModule, W2B2FiscalLabModule],
+    }).compile();
+    const restarted = restartedModule.createNestApplication();
+    try {
+      configureApiPrefixes(restarted);
+      restarted.useGlobalFilters(new GlobalExceptionFilter('test'));
+      await restarted.init();
+      const afterRestart = await request(restarted.getHttpServer())
+        .get(url)
+        .set('X-API-Key', key.secret)
+        .expect(200);
+      const restartedBytes = Buffer.isBuffer(afterRestart.body)
+        ? afterRestart.body
+        : Buffer.from(afterRestart.text, 'utf8');
+      expect(restartedBytes.equals(stored)).toBe(true);
+    } finally {
+      await restarted.close();
+    }
+  });
+
   it('replays exactly and rejects a changed payload without another document', async () => {
     const body = invoiceIntent('w2b2-replay');
     const first = await post(key.secret, 'w2b2-replay', body).expect(201);
@@ -470,6 +548,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       invoiceIntent('w2b2-isolation'),
     ).expect(201);
     expect(independent.body.documentId).not.toBe(own.body.documentId);
+    const ownXml = `${endpoint()}/${own.body.documentId}/signed-xml`;
     expect(
       (
         await prisma.fiscalDocument.findUniqueOrThrow({
@@ -491,6 +570,15 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .get(`${endpoint()}/${own.body.documentId}`)
       .set('X-API-Key', otherKey.secret)
       .expect(404);
+    await request(app.getHttpServer()).get(ownXml).set('X-API-Key', otherKey.secret).expect(404);
+    await request(app.getHttpServer()).get(ownXml).set('X-API-Key', readOnly.secret).expect(404);
+    const anotherCompany = await createFiscalTenantFixture(context);
+    await request(app.getHttpServer())
+      .get(
+        `/api/v2/lab/companies/${anotherCompany.companyId}/fiscal-documents/SANDBOX/invoices/${own.body.documentId}/signed-xml`,
+      )
+      .set('X-API-Key', key.secret)
+      .expect(404);
     await lookup(otherKey.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(404);
     await request(app.getHttpServer())
       .post(`/api/v2/lab/companies/${companyId}/fiscal-documents/PRODUCTION/invoices`)
@@ -499,19 +587,32 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .send(invoiceIntent('w2b2-production'))
       .expect(403);
     await request(app.getHttpServer())
+      .get(
+        `/api/v2/lab/companies/${companyId}/fiscal-documents/PRODUCTION/invoices/${own.body.documentId}/signed-xml`,
+      )
+      .set('X-API-Key', key.secret)
+      .expect(403);
+    await request(app.getHttpServer())
       .post(`/api/v1/fiscal-documents/${own.body.documentId}/prepare-xml`)
+      .set('X-API-Key', key.secret)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(
+        `/api/v1/companies/${companyId}/fiscal-documents/SANDBOX/invoices/${own.body.documentId}/artifacts`,
+      )
       .set('X-API-Key', key.secret)
       .expect(403);
     const rotated = await lab.issueKey({
       tenantId,
       associationId,
-      scopes: [...scopes],
+      scopes: ['fiscal-v2:invoices:create'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
       actorId: randomUUID(),
       correlationId: randomUUID(),
     });
     await post(rotated.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(200);
+    await request(app.getHttpServer()).get(ownXml).set('X-API-Key', rotated.secret).expect(403);
     await lab.revokeKey({
       tenantId,
       associationId,
@@ -520,6 +621,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       correlationId: randomUUID(),
     });
     await post(key.secret, 'w2b2-revoked', invoiceIntent('w2b2-revoked')).expect(401);
+    await request(app.getHttpServer()).get(ownXml).set('X-API-Key', key.secret).expect(401);
     await post(rotated.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(200);
     await post(readOnly.secret, 'w2b2-readonly-again', invoiceIntent('w2b2-readonly-again')).expect(
       403,

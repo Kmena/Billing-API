@@ -80,4 +80,20 @@ export class W2B2LabInvoiceController {
   ) {
     return this.invoices.getDocument(request.consumerV2, documentId);
   }
+
+  @Get(':documentId/signed-xml')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  async signedXml(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res() response: Response,
+  ) {
+    const artifact = await this.invoices.signedInvoiceXml(request.consumerV2, documentId);
+    response
+      .status(200)
+      .setHeader('Cache-Control', 'no-store')
+      .setHeader('Content-Type', artifact.contentType)
+      .setHeader('X-Content-SHA256', artifact.sha256)
+      .send(artifact.bytes);
+  }
 }

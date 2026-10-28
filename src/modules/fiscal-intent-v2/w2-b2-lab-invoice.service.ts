@@ -15,6 +15,7 @@ import {
   CreateFiscalDocumentCommand,
 } from '../fiscal-documents/application/fiscal-document.service';
 import { PrepareFiscalXmlService } from '../fiscal-documents/application/fiscal-xml/prepare-fiscal-xml.service';
+import { FiscalEvidenceResolverService } from '../fiscal-documents/application/artifacts/fiscal-evidence-resolver.service';
 import { FISCAL_XML_ERROR } from '../fiscal-documents/domain/fiscal-xml/fiscal-xml.errors';
 import { ConsumerV2Principal } from '../fiscal-consumers/infrastructure/http/consumer-v2.guard';
 import { PrismaConsumerV2Repository } from '../fiscal-consumers/infrastructure/persistence/prisma-consumer-v2.repository';
@@ -54,6 +55,7 @@ export class W2B2LabInvoiceService {
     private readonly consumers: PrismaConsumerV2Repository,
     private readonly documents: FiscalDocumentService,
     private readonly prepareXml: PrepareFiscalXmlService,
+    private readonly evidence: FiscalEvidenceResolverService,
   ) {}
 
   /** Single-use fault injection for disposable-PostgreSQL recovery tests. */
@@ -255,7 +257,7 @@ export class W2B2LabInvoiceService {
   async getDocument(
     principal: ConsumerV2Principal,
     documentId: string,
-    allowedTypes?: Array<'CREDIT_NOTE' | 'DEBIT_NOTE'>,
+    allowedTypes?: Array<'INVOICE' | 'CREDIT_NOTE' | 'DEBIT_NOTE'>,
   ) {
     this.assertLab(principal);
     return this.prisma.$transaction(async (tx) => {
@@ -275,6 +277,12 @@ export class W2B2LabInvoiceService {
       if (!document) throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
       return document;
     });
+  }
+
+  async signedInvoiceXml(principal: ConsumerV2Principal, documentId: string) {
+    // Authorize the consumer origin before resolving tenant-scoped v1 evidence bytes.
+    await this.getDocument(principal, documentId, ['INVOICE']);
+    return this.evidence.resolveSignedXmlBytes(principal.tenantId, principal.companyId, documentId);
   }
 
   private assertLab(p: ConsumerV2Principal): void {

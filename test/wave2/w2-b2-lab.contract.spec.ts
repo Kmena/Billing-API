@@ -15,7 +15,10 @@ type LabContract = {
   servers: Array<{ url: string }>;
   paths: Record<
     string,
-    { post: { 'x-required-scope': string; responses: Record<string, unknown> } }
+    {
+      post: { 'x-required-scope': string; responses: Record<string, unknown> };
+      get: { 'x-required-scope': string; security: unknown[]; responses: Record<string, unknown> };
+    }
   >;
   components: { parameters: { Environment: { schema: { const: string } } } };
 };
@@ -35,6 +38,14 @@ describe('W2-B2 lab contract and product isolation', () => {
     expect(CONSUMER_V2_LAB_SCOPES).toContain(create['x-required-scope']);
     expect(create.responses).toHaveProperty('202');
     expect(create.responses).toHaveProperty('409');
+    const signedXml =
+      contract.paths[
+        '/companies/{companyId}/fiscal-documents/{environment}/invoices/{documentId}/signed-xml'
+      ].get;
+    expect(signedXml['x-required-scope']).toBe('fiscal-v2:operations:read');
+    expect(signedXml.security).toEqual([{ ConsumerApiKey: [] }]);
+    for (const status of ['200', '400', '401', '403', '404', '422'])
+      expect(signedXml.responses).toHaveProperty(status);
     expect(contract.components.parameters.Environment.schema.const).toBe('SANDBOX');
     const appModule = readFileSync(join(process.cwd(), 'src/app.module.ts'), 'utf8');
     expect(appModule).not.toContain('W2B2FiscalLabModule');

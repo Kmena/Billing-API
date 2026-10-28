@@ -65,6 +65,37 @@ paths:
       responses:
         '200': { description: Document belonging to the authenticated association }
         '404': { description: Document absent or belonging to another association }
+  /companies/{companyId}/fiscal-documents/{environment}/invoices/{documentId}/signed-xml:
+    get:
+      operationId: getSyntheticInvoiceSignedXmlW2B2Lab
+      security: [{ ConsumerApiKey: [] }]
+      x-required-scope: fiscal-v2:operations:read
+      description: >-
+        Laboratory-only download of the existing signed XML for an invoice owned by
+        the authenticated consumer and association. The original stored bytes are
+        returned after SHA-256 verification; no XML is generated or signed here.
+        A document awaiting signed XML returns 404. READY_TO_SUBMIT is a local
+        Billing state and does not mean Hacienda acceptance.
+      parameters:
+        - $ref: '#/components/parameters/CompanyId'
+        - $ref: '#/components/parameters/Environment'
+        - name: documentId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Integrity-verified, unchanged signed invoice XML
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+            X-Content-SHA256: { schema: { type: string, pattern: '^[a-f0-9]{64}$' } }
+          content:
+            application/xml: { schema: { type: string, format: binary } }
+        '400': { description: Invalid document identifier }
+        '401': { description: Missing, expired or revoked M2M key }
+        '403': { description: Scope, association or environment denied }
+        '404': { description: Invoice outside authenticated origin or signed XML unavailable }
+        '422': { description: Stored signed XML fails SHA-256 verification }
 components:
   securitySchemes:
     ConsumerApiKey: { type: apiKey, in: header, name: X-API-Key }
