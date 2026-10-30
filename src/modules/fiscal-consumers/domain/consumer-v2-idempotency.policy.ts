@@ -2,7 +2,8 @@ import { timingSafeEqual } from 'crypto';
 import { FiscalEnvironmentV2 } from './consumer-v2.policy';
 
 /** Contract evaluation only. No reservation writer or fiscal operation is registered. */
-export type ConsumerV2Operation = 'CREATE_INVOICE' | 'CREATE_CREDIT_NOTE' | 'CREATE_DEBIT_NOTE';
+export type ConsumerV2Operation =
+  'CREATE_INVOICE' | 'CREATE_TICKET' | 'CREATE_CREDIT_NOTE' | 'CREATE_DEBIT_NOTE';
 export type ConsumerV2ReservationState =
   'RESERVED' | 'COMMITTED' | 'RECOVERY_REQUIRED' | 'ABORTED_BEFORE_ALLOCATION' | 'FAILED_TERMINAL';
 

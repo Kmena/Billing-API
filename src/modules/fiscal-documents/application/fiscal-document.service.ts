@@ -335,7 +335,7 @@ export class FiscalDocumentService {
     if (
       process.env.NODE_ENV !== 'test' ||
       command.environment !== 'SANDBOX' ||
-      command.type !== 'INVOICE'
+      !['INVOICE', 'TICKET'].includes(command.type)
     ) {
       throw new ForbiddenException({ code: 'W2_B2_LAB_ONLY' });
     }

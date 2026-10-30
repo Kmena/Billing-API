@@ -143,7 +143,9 @@ export class ConsumerV2LabService {
 
   private validateOperation(command: ConsumerV2OperationCommand): void {
     if (
-      !['CREATE_INVOICE', 'CREATE_CREDIT_NOTE', 'CREATE_DEBIT_NOTE'].includes(command.operation) ||
+      !['CREATE_INVOICE', 'CREATE_TICKET', 'CREATE_CREDIT_NOTE', 'CREATE_DEBIT_NOTE'].includes(
+        command.operation,
+      ) ||
       !command.idempotencyKey ||
       command.idempotencyKey.length > 128 ||
       command.idempotencyKey.trim() !== command.idempotencyKey ||

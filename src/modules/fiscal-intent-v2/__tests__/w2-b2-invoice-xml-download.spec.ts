@@ -47,6 +47,8 @@ describe('W2-B2 invoice XML adapter', () => {
       status: 'READY_TO_SUBMIT',
       clave: 'key',
       consecutive: 'number',
+      submissionStatus: null,
+      errors: [],
     });
     const result = await service.signedInvoiceXml(principal, 'invoice');
     expect(evidence.resolveSignedXmlBytes).toHaveBeenCalledWith('tenant', 'company', 'invoice');

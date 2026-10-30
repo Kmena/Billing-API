@@ -79,7 +79,7 @@ export class ReassignConsumerIssuerV2Dto {
 }
 
 export class LookupConsumerOperationV2Dto {
-  @IsIn(['CREATE_INVOICE'])
+  @IsIn(['CREATE_INVOICE', 'CREATE_TICKET'])
   operation!: ConsumerV2Operation;
 
   @IsString()

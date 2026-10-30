@@ -176,7 +176,10 @@ function normalizeLine(
 }
 
 /** Pure structural admission. It does not validate CABYS, tax treatment, rates, payment policy or XSD. */
-export function normalizeW2AInvoiceIntent(raw: unknown): {
+export function normalizeW2AInvoiceIntent(
+  raw: unknown,
+  documentType: 'INVOICE' | 'TICKET' = 'INVOICE',
+): {
   intent: W2AInvoiceIntentDto;
   structuralTotals: W2AStructuralTotals;
 } {
@@ -192,6 +195,9 @@ export function normalizeW2AInvoiceIntent(raw: unknown): {
   });
   if (errors.length) {
     throw new W2AStructuralValidationError('W2A_STRUCTURE_INVALID', firstValidationPath(errors));
+  }
+  if (documentType === 'INVOICE' && !dto.receiver) {
+    throw new W2AStructuralValidationError('W2A_STRUCTURE_INVALID', 'receiver');
   }
   const seen = new Set<number>();
   let gross = 0n;
@@ -213,12 +219,16 @@ export function normalizeW2AInvoiceIntent(raw: unknown): {
   const intent: W2AInvoiceIntentDto = {
     externalOperationId: dto.externalOperationId,
     policyVersion: dto.policyVersion,
-    receiver: {
-      identificationType: dto.receiver.identificationType,
-      identificationNumber: dto.receiver.identificationNumber,
-      name: dto.receiver.name,
-      ...(dto.receiver.email !== undefined ? { email: dto.receiver.email } : {}),
-    },
+    ...(dto.receiver
+      ? {
+          receiver: {
+            identificationType: dto.receiver.identificationType,
+            identificationNumber: dto.receiver.identificationNumber,
+            name: dto.receiver.name,
+            ...(dto.receiver.email !== undefined ? { email: dto.receiver.email } : {}),
+          },
+        }
+      : {}),
     currency: dto.currency,
     ...(dto.exchangeRate !== undefined
       ? { exchangeRate: dto.exchangeRate === null ? null : normalizeDecimal(dto.exchangeRate) }
@@ -268,9 +278,13 @@ function validateOrigin(origin: W2ATrustedOrigin): void {
 }
 
 /** Candidate hash for fixtures and comparison only; ADR-BIL-013 must approve a distinct final version. */
-export function prepareW2AStructuralHash(raw: unknown, origin: W2ATrustedOrigin) {
+export function prepareW2AStructuralHash(
+  raw: unknown,
+  origin: W2ATrustedOrigin,
+  documentType: 'INVOICE' | 'TICKET' = 'INVOICE',
+) {
   validateOrigin(origin);
-  const normalized = normalizeW2AInvoiceIntent(raw);
+  const normalized = normalizeW2AInvoiceIntent(raw, documentType);
   const canonicalJson = JSON.stringify({
     version: W2A_STRUCTURAL_HASH_VERSION,
     origin: {

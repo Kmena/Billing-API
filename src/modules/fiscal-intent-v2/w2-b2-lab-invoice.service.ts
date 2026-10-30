@@ -20,16 +20,18 @@ import { FISCAL_XML_ERROR } from '../fiscal-documents/domain/fiscal-xml/fiscal-x
 import { ConsumerV2Principal } from '../fiscal-consumers/infrastructure/http/consumer-v2.guard';
 import { PrismaConsumerV2Repository } from '../fiscal-consumers/infrastructure/persistence/prisma-consumer-v2.repository';
 import { ConsumerV2Scope } from '../fiscal-consumers/domain/consumer-v2.policy';
-import { projectW2BInvoiceLab, W2B_LAB_HASH_VERSION } from './w2-b-lab-projection';
+import { projectW2BInvoiceLab, projectW2BTicketLab } from './w2-b-lab-projection';
 
 type Tx = PrismaTransactionClient;
 const CREATE_SCOPE = 'fiscal-v2:invoices:create' as const;
+const CREATE_TICKET_SCOPE = 'fiscal-v2:tickets:create' as const;
 const READ_SCOPE = 'fiscal-v2:operations:read' as const;
 const OPERATION = 'CREATE_INVOICE' as const;
+const TICKET_OPERATION = 'CREATE_TICKET' as const;
 const XML_LEASE_MS = 5 * 60_000;
 
 export interface LabFiscalOperationSpec {
-  operation: 'CREATE_INVOICE' | 'CREATE_CREDIT_NOTE' | 'CREATE_DEBIT_NOTE';
+  operation: 'CREATE_INVOICE' | 'CREATE_TICKET' | 'CREATE_CREDIT_NOTE' | 'CREATE_DEBIT_NOTE';
   scope: ConsumerV2Scope;
   hashVersion: string;
   requestHash: string;
@@ -70,6 +72,14 @@ export class W2B2LabInvoiceService {
   }
 
   async create(input: W2B2CreateInput) {
+    return this.createDocument(input, 'INVOICE');
+  }
+
+  async createTicket(input: W2B2CreateInput) {
+    return this.createDocument(input, 'TICKET');
+  }
+
+  private async createDocument(input: W2B2CreateInput, type: 'INVOICE' | 'TICKET') {
     this.assertLab(input.principal);
     if (
       !input.idempotencyKey ||
@@ -80,19 +90,25 @@ export class W2B2LabInvoiceService {
       throw new BadRequestException({ code: 'IDEMPOTENCY_KEY_INVALID' });
     }
     const p = input.principal;
-    const projection = projectW2BInvoiceLab(input.intent, {
+    const origin = {
       tenantId: p.tenantId,
       consumerId: p.consumerId,
       associationId: p.associationId,
       companyId: p.companyId,
       environment: p.environment,
-    });
+    };
+    const projection =
+      type === 'INVOICE'
+        ? projectW2BInvoiceLab(input.intent, origin)
+        : projectW2BTicketLab(input.intent, origin);
     const command: CreateFiscalDocumentCommand = {
       tenantId: p.tenantId,
       companyId: p.companyId,
       environment: 'SANDBOX',
-      type: 'INVOICE',
-      receiver: projection.intent.receiver as unknown as Record<string, unknown>,
+      type,
+      ...(projection.intent.receiver
+        ? { receiver: projection.intent.receiver as unknown as Record<string, unknown> }
+        : {}),
       currency: projection.intent.currency,
       saleCondition: projection.intent.saleCondition,
       paymentMethod: projection.intent.paymentMethods[0].code,
@@ -100,9 +116,9 @@ export class W2B2LabInvoiceService {
     };
     this.documents.validateV2LabCommand(command);
     return this.executePrepared(input, {
-      operation: OPERATION,
-      scope: CREATE_SCOPE,
-      hashVersion: W2B_LAB_HASH_VERSION,
+      operation: type === 'INVOICE' ? OPERATION : TICKET_OPERATION,
+      scope: type === 'INVOICE' ? CREATE_SCOPE : CREATE_TICKET_SCOPE,
+      hashVersion: projection.hashVersion,
       requestHash: projection.requestHash,
       createDocument: (tx) =>
         this.documents.createDocumentV2LabInTransaction(tx, command, projection.requestHash, {
@@ -257,7 +273,7 @@ export class W2B2LabInvoiceService {
   async getDocument(
     principal: ConsumerV2Principal,
     documentId: string,
-    allowedTypes?: Array<'INVOICE' | 'CREDIT_NOTE' | 'DEBIT_NOTE'>,
+    allowedTypes?: Array<'INVOICE' | 'TICKET' | 'CREDIT_NOTE' | 'DEBIT_NOTE'>,
   ) {
     this.assertLab(principal);
     return this.prisma.$transaction(async (tx) => {
@@ -272,16 +288,49 @@ export class W2B2LabInvoiceService {
           originAssociationId: principal.associationId,
           ...(allowedTypes ? { type: { in: allowedTypes } } : {}),
         },
-        select: { id: true, status: true, clave: true, consecutive: true },
+        select: {
+          id: true,
+          status: true,
+          clave: true,
+          consecutive: true,
+          xmlArtifacts: { select: { lastErrorCode: true }, take: 1 },
+          submission: { select: { status: true, lastNormalizedErrorCode: true } },
+        },
       });
       if (!document) throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
-      return document;
+      return {
+        id: document.id,
+        status: document.status,
+        clave: document.clave,
+        consecutive: document.consecutive,
+        submissionStatus: document.submission?.status ?? null,
+        errors: [
+          ...(document.xmlArtifacts[0]?.lastErrorCode
+            ? [{ phase: 'XML', code: document.xmlArtifacts[0].lastErrorCode }]
+            : []),
+          ...(document.submission?.lastNormalizedErrorCode
+            ? [{ phase: 'SUBMISSION', code: document.submission.lastNormalizedErrorCode }]
+            : []),
+        ],
+      };
     });
   }
 
   async signedInvoiceXml(principal: ConsumerV2Principal, documentId: string) {
-    // Authorize the consumer origin before resolving tenant-scoped v1 evidence bytes.
-    await this.getDocument(principal, documentId, ['INVOICE']);
+    return this.signedDocumentXml(principal, documentId, 'INVOICE');
+  }
+
+  async signedTicketXml(principal: ConsumerV2Principal, documentId: string) {
+    return this.signedDocumentXml(principal, documentId, 'TICKET');
+  }
+
+  private async signedDocumentXml(
+    principal: ConsumerV2Principal,
+    documentId: string,
+    type: 'INVOICE' | 'TICKET',
+  ) {
+    // Authorize the consumer origin and document type before resolving tenant-scoped evidence bytes.
+    await this.getDocument(principal, documentId, [type]);
     return this.evidence.resolveSignedXmlBytes(principal.tenantId, principal.companyId, documentId);
   }
 

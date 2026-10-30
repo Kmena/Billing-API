@@ -1,4 +1,9 @@
-import { projectW2BInvoiceLab, W2BLabProjectionError } from '../w2-b-lab-projection';
+import {
+  projectW2BInvoiceLab,
+  projectW2BTicketLab,
+  W2BLabProjectionError,
+} from '../w2-b-lab-projection';
+import { W2AStructuralValidationError } from '../w2-a-structural-intent';
 import { HaciendaV44XmlSerializerAdapter } from '../../fiscal-documents/infrastructure/xml/hacienda-v44-xml-serializer.adapter';
 import { Xsd11ValidatorAdapter } from '../../fiscal-documents/infrastructure/xml/xsd11-validator.adapter';
 import {
@@ -84,6 +89,18 @@ describe('W2-B synthetic FE projection (unregistered)', () => {
   const validator = new Xsd11ValidatorAdapter();
   const signer = new NodeXadesEpesSignerAdapter();
   const signingMaterial = createTestSigningMaterial();
+
+  it('keeps FE receiver required while TE omits it and uses a distinct hash namespace', () => {
+    const { receiver: _receiver, ...withoutReceiver } = intent();
+    expect(() => projectW2BInvoiceLab(withoutReceiver, origin)).toThrow(
+      W2AStructuralValidationError,
+    );
+    const ticket = projectW2BTicketLab(withoutReceiver, origin);
+    expect(ticket.intent.receiver).toBeUndefined();
+    expect(ticket.hashVersion).toBe('w2-b-ticket-fiscal-lab.v1');
+    expect(ticket.requestHash).not.toBe(projectW2BInvoiceLab(intent(), origin).requestHash);
+    expect(ticket.totals.totalAmount).toBe('1130.00000');
+  });
 
   it.each([
     ['single taxed', [line()]],

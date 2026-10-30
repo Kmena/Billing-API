@@ -26,6 +26,14 @@ const fixture = JSON.parse(
     'utf8',
   ),
 ) as { canonicalInput: Record<string, unknown>; expectedSha256: string };
+type CanonicalFixture = Record<string, unknown> & {
+  receiver: Record<string, unknown>;
+  lines: Array<Record<string, unknown>>;
+};
+type FiscalServiceInternals = {
+  validateCreateCommand(command: unknown): void;
+  hashRequest(command: unknown): string;
+};
 
 describe('fiscal payload equivalence v1', () => {
   it('matches the shared sanitized INV-966 historical vector exactly', () => {
@@ -35,7 +43,7 @@ describe('fiscal payload equivalence v1', () => {
   });
 
   it('uses deterministic object ordering, decimal normalization, null normalization, and UTC dates', () => {
-    const base = fixture.canonicalInput as Record<string, any>;
+    const base = fixture.canonicalInput as CanonicalFixture;
     const alternative = {
       ...base,
       receiver: {
@@ -70,7 +78,7 @@ describe('fiscal payload equivalence v1', () => {
   });
 
   it('binds optional affiliation transaction type without changing legacy hashes', () => {
-    const base = fixture.canonicalInput as Record<string, any>;
+    const base = fixture.canonicalInput as CanonicalFixture;
     expect(canonicalFiscalPayloadHash(base as never)).toBe(fixture.expectedSha256);
     const affiliation = {
       ...base,
@@ -82,6 +90,7 @@ describe('fiscal payload equivalence v1', () => {
 
   it('accepts explicit exempt affiliation and rejects inconsistent tax metadata', () => {
     const service = new FiscalDocumentService({} as never, {} as never);
+    const internals = service as unknown as FiscalServiceInternals;
     const base = {
       tenantId: '11111111-1111-4111-8111-111111111111',
       companyId: '22222222-2222-4222-8222-222222222222',
@@ -114,15 +123,15 @@ describe('fiscal payload equivalence v1', () => {
         },
       ],
     };
-    expect(() => (service as any).validateCreateCommand(base)).not.toThrow();
+    expect(() => internals.validateCreateCommand(base)).not.toThrow();
     expect(() =>
-      (service as any).validateCreateCommand({
+      internals.validateCreateCommand({
         ...base,
         lines: [{ ...base.lines[0], taxRateCode: '08' }],
       }),
     ).toThrow(BadRequestException);
     expect(() =>
-      (service as any).validateCreateCommand({
+      internals.validateCreateCommand({
         ...base,
         lines: [{ ...base.lines[0], taxCode: undefined }],
       }),
@@ -130,7 +139,7 @@ describe('fiscal payload equivalence v1', () => {
   });
 
   it('preserves fiscal line order as evidence', () => {
-    const base = fixture.canonicalInput as Record<string, any>;
+    const base = fixture.canonicalInput as CanonicalFixture;
     const twoLines = {
       ...base,
       lines: [base.lines[0], { ...base.lines[0], lineNumber: 2, description: 'Second line' }],
@@ -174,6 +183,7 @@ describe('fiscal payload equivalence v1', () => {
       ],
     };
     const service = new FiscalDocumentService({} as never, {} as never);
+    const internals = service as unknown as FiscalServiceInternals;
     const canonicalHash = canonicalFiscalPayloadHash(fiscalPayloadInputFromCommand(command));
     const withHeaders = {
       ...command,
@@ -183,10 +193,10 @@ describe('fiscal payload equivalence v1', () => {
       },
     };
 
-    expect(() => (service as any).validateCreateCommand(withHeaders)).not.toThrow();
-    expect((service as any).hashRequest(withHeaders)).toBe((service as any).hashRequest(command));
+    expect(() => internals.validateCreateCommand(withHeaders)).not.toThrow();
+    expect(internals.hashRequest(withHeaders)).toBe(internals.hashRequest(command));
     expect(() =>
-      (service as any).validateCreateCommand({
+      internals.validateCreateCommand({
         ...withHeaders,
         fiscalPayloadEquivalence: {
           contractVersion: FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,

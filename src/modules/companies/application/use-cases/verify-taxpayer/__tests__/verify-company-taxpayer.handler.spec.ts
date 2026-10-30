@@ -24,6 +24,8 @@ const TENANT_ID = 'tenant-aaa';
 const COMPANY_ID = 'company-bbb';
 const FISICA_ID = '207530251';
 const JURIDICA_ID = '3101234567';
+type TestActivity = { code: string; description: string; status: string; type: string };
+type TestTaxpayer = { found: boolean; economicActivities?: TestActivity[]; [key: string]: unknown };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -61,7 +63,7 @@ function makeTaxpayerResult(overrides: Record<string, unknown> = {}) {
 
 function buildHandler(opts: {
   company?: object | null;
-  taxpayer?: object;
+  taxpayer?: TestTaxpayer;
   haciendaThrows?: Error;
   existingActivities?: object[];
   existingProfile?: object | null;
@@ -72,27 +74,31 @@ function buildHandler(opts: {
   const existingProfile = opts.existingProfile !== undefined ? opts.existingProfile : null;
 
   // activity upsert + updateMany tracker
-  const upserted: object[] = [];
-  const updatedMany: object[] = [];
+  const upserted: Array<Record<string, unknown>> = [];
+  const updatedMany: Array<{ data?: { haciendaStatus?: string } }> = [];
   const companyUpdated: object[] = [];
   const profileUpdated: object[] = [];
 
-  const activitiesAfterUpsert =
-    taxpayer && (taxpayer as any).found
-      ? (taxpayer as any).economicActivities.map((a: any, i: number) => ({
-          id: `act-${i}`,
-          code: a.code,
-          description: a.description,
-          haciendaStatus: a.status,
-          haciendaKind: a.type,
-          billingEnabled: true,
-          verifiedAt: new Date(),
-          lastSeenAt: new Date(),
-          verificationSource: 'HACIENDA_FE_AE',
-        }))
-      : existingActivities;
+  const activitiesAfterUpsert = taxpayer.found
+    ? (taxpayer.economicActivities ?? []).map((a, i: number) => ({
+        id: `act-${i}`,
+        code: a.code,
+        description: a.description,
+        haciendaStatus: a.status,
+        haciendaKind: a.type,
+        billingEnabled: true,
+        verifiedAt: new Date(),
+        lastSeenAt: new Date(),
+        verificationSource: 'HACIENDA_FE_AE',
+      }))
+    : existingActivities;
 
-  const prisma: any = {
+  const prisma: {
+    company: { findFirst: jest.Mock; update: jest.Mock };
+    companyEconomicActivity: { upsert: jest.Mock; updateMany: jest.Mock; findMany: jest.Mock };
+    companyFiscalProfile: { findFirst: jest.Mock; update: jest.Mock };
+    $transaction: jest.Mock;
+  } = {
     company: {
       findFirst: jest.fn().mockResolvedValue(company),
       update: jest.fn().mockImplementation((args) => {
@@ -179,10 +185,10 @@ describe('VerifyCompanyTaxpayerHandler — FISICA normalization', () => {
     });
 
     expect(upserted.length).toBe(1);
-    expect((upserted[0] as any).code).toBe('9609.0');
-    expect((upserted[0] as any).haciendaStatus).toBe('A');
-    expect((upserted[0] as any).haciendaKind).toBe('P');
-    expect((upserted[0] as any).verificationSource).toBe('HACIENDA_FE_AE');
+    expect(upserted[0].code).toBe('9609.0');
+    expect(upserted[0].haciendaStatus).toBe('A');
+    expect(upserted[0].haciendaKind).toBe('P');
+    expect(upserted[0].verificationSource).toBe('HACIENDA_FE_AE');
     expect(result.activities[0].code).toBe('9609.0');
   });
 
@@ -250,10 +256,10 @@ describe('VerifyCompanyTaxpayerHandler — JURIDICA / multiple activities', () =
 
     expect(result.moroso).toBe(true);
     expect(upserted).toHaveLength(3);
-    const principal = upserted.find((a: any) => a.code === '6110.0') as any;
-    expect(principal.haciendaKind).toBe('P');
-    const secondary = upserted.find((a: any) => a.code === '3510.0') as any;
-    expect(secondary.haciendaKind).toBe('S');
+    const principal = upserted.find((a) => a.code === '6110.0');
+    expect(principal?.haciendaKind).toBe('P');
+    const secondary = upserted.find((a) => a.code === '3510.0');
+    expect(secondary?.haciendaKind).toBe('S');
   });
 });
 
@@ -323,7 +329,7 @@ describe('VerifyCompanyTaxpayerHandler — historical activity preservation', ()
 
     expect(updatedMany.length).toBeGreaterThan(0);
     // updateMany for activities not in current set
-    const staleUpdate = updatedMany.find((u: any) => u.data?.haciendaStatus === 'I') as any;
+    const staleUpdate = updatedMany.find((u) => u.data?.haciendaStatus === 'I');
     expect(staleUpdate).toBeDefined();
   });
 });
@@ -372,7 +378,7 @@ describe('VerifyCompanyTaxpayerHandler — security', () => {
     await handler.execute({ tenantId: TENANT_ID, companyId: COMPANY_ID, actor: 'admin' });
 
     for (const act of upserted) {
-      expect((act as any).verificationSource).toBe('HACIENDA_FE_AE');
+      expect(act.verificationSource).toBe('HACIENDA_FE_AE');
     }
   });
 

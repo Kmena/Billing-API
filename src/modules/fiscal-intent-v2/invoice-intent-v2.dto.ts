@@ -237,10 +237,11 @@ export class W2AInvoiceIntentDto {
   @Matches(OPAQUE_PATTERN)
   policyVersion!: string;
 
+  @ValidateIf((_, value) => value !== undefined)
   @IsObject()
   @ValidateNested()
   @Type(() => W2AReceiverDto)
-  receiver!: W2AReceiverDto;
+  receiver?: W2AReceiverDto;
 
   @IsString()
   @Matches(/^[A-Z]{3}$/)

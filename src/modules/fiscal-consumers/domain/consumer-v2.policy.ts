@@ -8,6 +8,7 @@ export const CONSUMER_V2_W1_SCOPES = [
 export const CONSUMER_V2_LAB_SCOPES = [
   ...CONSUMER_V2_W1_SCOPES,
   'fiscal-v2:invoices:create',
+  'fiscal-v2:tickets:create',
   'fiscal-v2:credit-notes:create',
   'fiscal-v2:debit-notes:create',
 ] as const;

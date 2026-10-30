@@ -78,7 +78,7 @@ export class W2B2LabInvoiceController {
     @Req() request: { consumerV2: ConsumerV2Principal },
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ) {
-    return this.invoices.getDocument(request.consumerV2, documentId);
+    return this.invoices.getDocument(request.consumerV2, documentId, ['INVOICE']);
   }
 
   @Get(':documentId/signed-xml')

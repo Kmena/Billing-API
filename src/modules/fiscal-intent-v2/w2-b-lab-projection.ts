@@ -8,6 +8,7 @@ import { W2ATrustedOrigin, prepareW2AStructuralHash } from './w2-a-structural-in
 
 /** Deliberately unusable as fiscal-payload.v2 until ADR-BIL-013 and issuer tax policy are approved. */
 export const W2B_LAB_HASH_VERSION = 'w2-b-fiscal-lab.v1' as const;
+export const W2B_LAB_TICKET_HASH_VERSION = 'w2-b-ticket-fiscal-lab.v1' as const;
 export const W2B_LAB_POLICY = 'LAB_SYNTHETIC_V44_ONLY' as const;
 const SCALE = 100000n;
 const MAX_XML_AMOUNT = 9999999999999n * SCALE + 99999n;
@@ -59,13 +60,17 @@ function exactProduct(a: bigint, b: bigint, path: string): bigint {
   return product / SCALE;
 }
 
-/** Pure, SANDBOX-only adapter to the existing FE line representation. It does not authorize an issuer. */
-export function projectW2BInvoiceLab(raw: unknown, origin: W2ATrustedOrigin) {
+/** Pure, SANDBOX-only adapter to the existing FE/TE line representation. It does not authorize an issuer. */
+function projectW2BDocumentLab(
+  raw: unknown,
+  origin: W2ATrustedOrigin,
+  documentType: 'INVOICE' | 'TICKET',
+) {
   if (origin?.environment !== 'SANDBOX') {
     throw new W2BLabProjectionError('W2B_LAB_ORIGIN_REQUIRED', 'origin.environment');
   }
   // Reuse W2-A validation of server-derived UUID binding and strict DTO admission.
-  const { intent } = prepareW2AStructuralHash(raw, origin);
+  const { intent } = prepareW2AStructuralHash(raw, origin, documentType);
   if (
     intent.policyVersion !== W2B_LAB_POLICY ||
     intent.currency !== 'CRC' ||
@@ -77,7 +82,10 @@ export function projectW2BInvoiceLab(raw: unknown, origin: W2ATrustedOrigin) {
   ) {
     throw new W2BLabProjectionError('W2B_TAX_POLICY_PENDING', 'intent');
   }
-  if (intent.paymentMethods.length !== 1 || intent.paymentMethods[0].code !== '01') {
+  if (
+    intent.paymentMethods.length !== 1 ||
+    !['01', '02', '04'].includes(intent.paymentMethods[0].code)
+  ) {
     throw new W2BLabProjectionError('W2B_ENGINE_COMBINATION_UNSUPPORTED', 'paymentMethods');
   }
   const lines: FiscalDocumentLineInput[] = [];
@@ -186,8 +194,10 @@ export function projectW2BInvoiceLab(raw: unknown, origin: W2ATrustedOrigin) {
     taxAmount: decimal(taxTotal),
     totalAmount: decimal(payable),
   };
+  const hashVersion =
+    documentType === 'INVOICE' ? W2B_LAB_HASH_VERSION : W2B_LAB_TICKET_HASH_VERSION;
   const canonicalJson = JSON.stringify({
-    version: W2B_LAB_HASH_VERSION,
+    version: hashVersion,
     origin: {
       tenantId: origin.tenantId,
       consumerId: origin.consumerId,
@@ -204,8 +214,16 @@ export function projectW2BInvoiceLab(raw: unknown, origin: W2ATrustedOrigin) {
     lines,
     lineTotals,
     totals,
-    hashVersion: W2B_LAB_HASH_VERSION,
+    hashVersion,
     canonicalJson,
     requestHash: createHash('sha256').update(canonicalJson, 'utf8').digest('hex'),
   };
+}
+
+export function projectW2BInvoiceLab(raw: unknown, origin: W2ATrustedOrigin) {
+  return projectW2BDocumentLab(raw, origin, 'INVOICE');
+}
+
+export function projectW2BTicketLab(raw: unknown, origin: W2ATrustedOrigin) {
+  return projectW2BDocumentLab(raw, origin, 'TICKET');
 }

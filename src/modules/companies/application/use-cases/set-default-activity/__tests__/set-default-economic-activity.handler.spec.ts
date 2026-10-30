@@ -43,7 +43,7 @@ function buildHandler(opts: {
 
   const profileUpdated: object[] = [];
 
-  const prisma: any = {
+  const prisma = {
     company: { findFirst: jest.fn().mockResolvedValue(company) },
     companyEconomicActivity: {
       findUnique: jest.fn().mockResolvedValue(activity),

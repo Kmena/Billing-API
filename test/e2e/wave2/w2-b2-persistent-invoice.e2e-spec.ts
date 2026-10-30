@@ -21,6 +21,7 @@ import { W2B2FiscalLabModule } from '../../../src/modules/fiscal-intent-v2/w2-b2
 import { W2B2LabInvoiceService } from '../../../src/modules/fiscal-intent-v2/w2-b2-lab-invoice.service';
 import {
   projectW2BInvoiceLab,
+  projectW2BTicketLab,
   W2B_LAB_HASH_VERSION,
 } from '../../../src/modules/fiscal-intent-v2/w2-b-lab-projection';
 import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
@@ -35,7 +36,11 @@ import {
 } from '../../helpers/fiscal-e2e-helpers';
 
 const signing = createTestSigningMaterial();
-const scopes = ['fiscal-v2:invoices:create', 'fiscal-v2:operations:read'] as const;
+const scopes = [
+  'fiscal-v2:invoices:create',
+  'fiscal-v2:tickets:create',
+  'fiscal-v2:operations:read',
+] as const;
 
 function invoiceIntent(externalOperationId: string, description = 'Servicio sintético') {
   return {
@@ -68,6 +73,11 @@ function invoiceIntent(externalOperationId: string, description = 'Servicio sint
   };
 }
 
+function ticketIntent(externalOperationId: string) {
+  const { receiver: _receiver, ...intent } = invoiceIntent(externalOperationId);
+  return intent;
+}
+
 describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   jest.setTimeout(120000);
   let context: FiscalE2eContext;
@@ -87,6 +97,36 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .set('X-API-Key', secret)
       .set('Idempotency-Key', keyValue)
       .send(body);
+  const ticketEndpoint = () =>
+    `/api/v2/lab/companies/${companyId}/fiscal-documents/SANDBOX/tickets`;
+  const postTicket = (secret: string, keyValue: string, body: ReturnType<typeof ticketIntent>) =>
+    request(app.getHttpServer())
+      .post(ticketEndpoint())
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', keyValue)
+      .send(body);
+  const lookupTicket = (
+    secret: string,
+    keyValue: string,
+    body: ReturnType<typeof ticketIntent>,
+  ) => {
+    const projection = projectW2BTicketLab(body, {
+      tenantId,
+      consumerId,
+      associationId,
+      companyId,
+      environment: 'SANDBOX',
+    });
+    return request(app.getHttpServer())
+      .post(`/api/v2/companies/${companyId}/fiscal-documents/SANDBOX/operations/lookup`)
+      .set('X-API-Key', secret)
+      .send({
+        operation: 'CREATE_TICKET',
+        idempotencyKey: keyValue,
+        requestHashVersion: projection.hashVersion,
+        requestHash: projection.requestHash,
+      });
+  };
   const lookup = (
     secret: string,
     keyValue: string,
@@ -135,6 +175,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     await createEnabledHaciendaConnection(prisma, tenantId, companyId);
     await configureValidCompanyFiscalProfile(context, fixture);
     await configureDefaultFiscalSetup(context, fixture, 'INVOICE');
+    await configureDefaultFiscalSetup(context, fixture, 'TICKET');
     const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
     const secretRef = `W2B2_TEST_CERT_${companyId.replace(/-/g, '_')}`;
     const passRef = `W2B2_TEST_PASS_${companyId.replace(/-/g, '_')}`;
@@ -518,6 +559,180 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
         },
       }),
     ).toBe(0);
+  });
+
+  it('creates a real signed XSD-valid TE without receiver and with taxed and exempt lines', async () => {
+    const body = ticketIntent('w2b2-ticket-signed');
+    body.paymentMethods = [{ code: '02', amount: '2130' }];
+    body.lines.push({
+      ...body.lines[0],
+      lineNumber: 2,
+      source: { allocationId: 'w2b2-ticket-line-2' },
+      description: 'Concepto exento sintético',
+      taxTreatment: 'LAB_EXEMPT_XML',
+      taxes: [{ code: '01', rateCode: '10', rate: '0', base: '1000', amount: '0' }],
+    });
+    const created = await postTicket(key.secret, 'w2b2-ticket-signed', body).expect(201);
+    expect(created.body).toMatchObject({ state: 'COMMITTED', documentStatus: 'READY_TO_SUBMIT' });
+    const documentId = created.body.documentId as string;
+    const document = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: documentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(document.type).toBe('TICKET');
+    expect(document.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    const response = await request(app.getHttpServer())
+      .get(`${ticketEndpoint()}/${documentId}/signed-xml`)
+      .set('X-API-Key', key.secret)
+      .expect(200);
+    const bytes = Buffer.isBuffer(response.body)
+      ? response.body
+      : Buffer.from(response.text, 'utf8');
+    const xml = bytes.toString('utf8');
+    expect(xml).toContain('<TiqueteElectronico');
+    expect(xml).not.toContain('<Receptor>');
+    expect(xml.match(/<LineaDetalle>/g)).toHaveLength(2);
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(xml)).isValid).toBe(true);
+    expect(response.headers['x-content-sha256']).toBe(
+      createHash('sha256').update(bytes).digest('hex'),
+    );
+    await lookupTicket(key.secret, 'w2b2-ticket-signed', body)
+      .expect(200)
+      .expect(({ body: lookupBody }) =>
+        expect(lookupBody).toMatchObject({
+          state: 'COMMITTED',
+          fiscalDocumentId: documentId,
+        }),
+      );
+    await request(app.getHttpServer())
+      .get(`${ticketEndpoint()}/${documentId}`)
+      .set('X-API-Key', key.secret)
+      .expect(200)
+      .expect(({ body: status }) =>
+        expect(status).toMatchObject({
+          id: documentId,
+          status: 'READY_TO_SUBMIT',
+          errors: [],
+        }),
+      );
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${documentId}`)
+      .set('X-API-Key', key.secret)
+      .expect(404);
+  });
+
+  it('isolates FE and TE idempotency namespaces and serializes concurrent TE retries', async () => {
+    const operation = 'w2b2-fe-te-same-key';
+    const invoice = await post(key.secret, operation, invoiceIntent(operation)).expect(201);
+    const ticket = ticketIntent(operation);
+    ticket.paymentMethods = [{ code: '04', amount: '1130' }];
+    const [a, b] = await Promise.all([
+      postTicket(key.secret, operation, ticket),
+      postTicket(key.secret, operation, ticket),
+    ]);
+    expect([200, 201, 202]).toContain(a.status);
+    expect([200, 201, 202]).toContain(b.status);
+    const replay = await postTicket(key.secret, operation, ticket).expect(200);
+    expect(replay.body.documentId).toBe(a.body.documentId);
+    expect(replay.body.documentId).toBe(b.body.documentId);
+    expect(replay.body.documentId).not.toBe(invoice.body.documentId);
+    expect(
+      await prisma.fiscalIdempotencyKeyV2.count({
+        where: { associationId, key: operation },
+      }),
+    ).toBe(2);
+    const changed = ticketIntent(operation);
+    changed.lines[0].description = 'Cambio no idempotente';
+    await postTicket(key.secret, operation, changed).expect(409);
+  });
+
+  it('recovers a TE after a simulated timeout and exposes a terminal fiscal error code', async () => {
+    const pendingBody = ticketIntent('w2b2-ticket-timeout');
+    invoices.interruptOnceAfterDocument();
+    await postTicket(key.secret, 'w2b2-ticket-timeout', pendingBody).expect(503);
+    const pending = await lookupTicket(key.secret, 'w2b2-ticket-timeout', pendingBody).expect(202);
+    expect(pending.body.state).toBe('RECOVERY_REQUIRED');
+    const recovered = await postTicket(key.secret, 'w2b2-ticket-timeout', pendingBody).expect(200);
+    expect(recovered.body).toMatchObject({
+      state: 'COMMITTED',
+      documentId: pending.body.fiscalDocumentId,
+    });
+    const failedBody = ticketIntent('w2b2-ticket-error');
+    const signer = app.get<XmlSignerPort>(XML_SIGNER);
+    const spy = jest.spyOn(signer, 'verify').mockResolvedValueOnce({
+      isValid: false,
+      validationErrors: ['synthetic-invalid-signature'],
+    });
+    await postTicket(key.secret, 'w2b2-ticket-error', failedBody).expect(422);
+    spy.mockRestore();
+    const failed = await lookupTicket(key.secret, 'w2b2-ticket-error', failedBody).expect(200);
+    expect(failed.body.state).toBe('FAILED_TERMINAL');
+    await request(app.getHttpServer())
+      .get(`${ticketEndpoint()}/${failed.body.fiscalDocumentId}`)
+      .set('X-API-Key', key.secret)
+      .expect(200)
+      .expect(({ body: status }) =>
+        expect(status.errors).toEqual([{ phase: 'XML', code: expect.any(String) }]),
+      );
+    await postTicket(key.secret, 'w2b2-ticket-error', failedBody).expect(422);
+    expect(await prisma.fiscalDocument.count({ where: { id: failed.body.fiscalDocumentId } })).toBe(
+      1,
+    );
+  });
+
+  it('rejects invalid TE fiscal data and enforces scopes and company isolation', async () => {
+    const invalid = ticketIntent('w2b2-ticket-bad-cabys');
+    invalid.lines[0].cabysCode = '123';
+    await postTicket(key.secret, 'w2b2-ticket-bad-cabys', invalid).expect(400);
+    const unsupported = ticketIntent('w2b2-ticket-tax-pending');
+    unsupported.lines[0].taxTreatment = 'UNAPPROVED';
+    await postTicket(key.secret, 'w2b2-ticket-tax-pending', unsupported).expect(422);
+    expect(
+      await prisma.fiscalIdempotencyKeyV2.count({
+        where: { associationId, key: { in: ['w2b2-ticket-bad-cabys', 'w2b2-ticket-tax-pending'] } },
+      }),
+    ).toBe(0);
+    const scopeAssociation = await lab.registerAssociation({
+      tenantId,
+      companyId,
+      provider: 'AUDIT_TEST',
+      externalConsumerKey: 'ticket-scope-only',
+      externalCompanyKey: 'ticket-scope-issuer',
+      environment: 'SANDBOX',
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    const invoiceOnly = await lab.issueKey({
+      tenantId,
+      associationId: scopeAssociation.associationId,
+      scopes: ['fiscal-v2:invoices:create'],
+      expiresAt: new Date(Date.now() + 30 * 86_400_000),
+      actorId: randomUUID(),
+      correlationId: randomUUID(),
+    });
+    await postTicket(
+      invoiceOnly.secret,
+      'w2b2-ticket-no-scope',
+      ticketIntent('w2b2-ticket-no-scope'),
+    ).expect(403);
+    const own = await postTicket(
+      key.secret,
+      'w2b2-ticket-isolation',
+      ticketIntent('w2b2-ticket-isolation'),
+    ).expect(201);
+    const another = await createFiscalTenantFixture(context);
+    await request(app.getHttpServer())
+      .get(
+        `/api/v2/lab/companies/${another.companyId}/fiscal-documents/SANDBOX/tickets/${own.body.documentId}/signed-xml`,
+      )
+      .set('X-API-Key', key.secret)
+      .expect(404);
+    await request(app.getHttpServer())
+      .post(`/api/v2/lab/companies/${companyId}/fiscal-documents/PRODUCTION/tickets`)
+      .set('X-API-Key', key.secret)
+      .set('Idempotency-Key', 'w2b2-ticket-prod')
+      .send(ticketIntent('w2b2-ticket-prod'))
+      .expect(403);
   });
 
   it('enforces scope, origin isolation, rotation, revocation and v1 separation', async () => {
