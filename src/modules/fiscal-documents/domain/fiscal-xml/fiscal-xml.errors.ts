@@ -4,6 +4,7 @@ export const FISCAL_XML_ERROR = {
   xmlSnapshotIncomplete: 'FISCAL_XML_SNAPSHOT_INCOMPLETE',
   xmlGenerationFailed: 'FISCAL_XML_GENERATION_FAILED',
   xmlValidationFailed: 'FISCAL_XML_VALIDATION_FAILED',
+  xmlValidatorUnavailable: 'FISCAL_XML_VALIDATOR_UNAVAILABLE',
   schemaChecksumMismatch: 'FISCAL_XML_SCHEMA_CHECKSUM_MISMATCH',
   certificateNotConfigured: 'FISCAL_SIGNING_CERTIFICATE_NOT_CONFIGURED',
   certificateDisabled: 'FISCAL_SIGNING_CERTIFICATE_DISABLED',

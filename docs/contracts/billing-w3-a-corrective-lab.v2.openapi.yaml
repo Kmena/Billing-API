@@ -3,7 +3,7 @@ info:
   title: Billing W3-A synthetic corrective documents
   version: 0.3.0-lab
   description: >-
-    NC/ND for synthetic W2-B2 invoices in SANDBOX. W3AFiscalLabModule is absent
+    NC/ND for synthetic W2-B2 invoices and total NC for accepted tickets in SANDBOX. W3AFiscalLabModule is absent
     from AppModule and requires NODE_ENV=test. No Hacienda submission or
     production entitlement is implied.
 x-status: lab-only-inactive-in-product
@@ -19,6 +19,12 @@ paths:
       operationId: createSyntheticCreditNoteW3A
       security: [{ ConsumerApiKey: [] }]
       x-required-scope: fiscal-v2:credit-notes:create
+      description: >-
+        An accepted FE supports TOTAL, PARTIAL and REMAINING NC. An accepted TE
+        supports TOTAL NC only, including a TE without receptor. The signed source
+        must be XSD-valid and origin-bound; the NC copies each source line,
+        discount and tax and references TipoDocIR 04 with code 01 for a TE.
+        The NC is local until it receives its own fiscal acceptance.
       parameters: [{ $ref: '#/components/parameters/CompanyId' },
         { $ref: '#/components/parameters/Environment' },
         { $ref: '#/components/parameters/IdempotencyKey' }]
@@ -36,13 +42,14 @@ paths:
         '403': { description: Scope, association or environment denied }
         '404': { description: Original absent or outside authenticated origin }
         '409': { description: Duplicate external ID, key conflict or overcorrection }
-        '422': { description: Original not accepted, pending NC/ND mixed policy or terminal XML failure }
+        '422': { description: Original not accepted, TE mode other than TOTAL, pending NC/ND mixed policy or terminal XML failure }
         '503': { description: Retryable interruption before response }
   /companies/{companyId}/fiscal-documents/{environment}/debit-notes:
     post:
       operationId: createSyntheticDebitNoteW3A
       security: [{ ConsumerApiKey: [] }]
       x-required-scope: fiscal-v2:debit-notes:create
+      description: FE adjustment only; TE debit notes are not enabled by this contract.
       parameters: [{ $ref: '#/components/parameters/CompanyId' },
         { $ref: '#/components/parameters/Environment' },
         { $ref: '#/components/parameters/IdempotencyKey' }]
@@ -179,7 +186,8 @@ components:
         and is limited to an original with no prior NC. REMAINING derives the exact
         uncredited lines when the document is allocated under the original row lock,
         and uses code 02. A reservation before allocation does not fix quantities.
-        PARTIAL supplies quantities and uses 02.
+        PARTIAL supplies quantities and uses 02. For TE only TOTAL is accepted;
+        TE partial and remaining corrections are blocked.
     DebitNoteIntent:
       allOf:
         - { $ref: '#/components/schemas/CommonCorrection' }

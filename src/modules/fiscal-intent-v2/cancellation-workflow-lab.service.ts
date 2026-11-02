@@ -180,7 +180,7 @@ export class CancellationWorkflowLabService {
             tenantId: p.tenantId,
             companyId: p.companyId,
             environment: 'SANDBOX',
-            type: 'INVOICE',
+            type: { in: ['INVOICE', 'TICKET'] },
             originConsumerId: p.consumerId,
             originAssociationId: p.associationId,
             disposedAt: null,

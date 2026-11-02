@@ -3,7 +3,7 @@ info:
   title: Billing cancellation, replacement and reversal laboratory
   version: 0.1.0-lab
   description: >-
-    SANDBOX-only workflow. W3AFiscalLabModule is absent from AppModule and requires
+    SANDBOX-only FE/TE total-NC workflow. W3AFiscalLabModule is absent from AppModule and requires
     NODE_ENV=test. It never sends to Hacienda. Reversal ND issuance is blocked by
     DF-06 until reference code and tax treatment receive fiscal approval.
 x-status: lab-only-inactive-in-product
@@ -17,6 +17,10 @@ paths:
       operationId: requestTotalCancellationLab
       security: [{ ConsumerApiKey: [] }]
       x-required-scope: fiscal-v2:credit-notes:create
+      description: >-
+        An accepted FE or TE owned by the M2M association receives one total NC.
+        A TE without receptor remains without receptor in the NC. The original
+        discount and tax snapshots are preserved. TE replacement is not supported.
       parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true
@@ -50,6 +54,7 @@ paths:
       operationId: createReplacementDraftLab
       security: [{ ConsumerApiKey: [] }]
       x-required-scope: fiscal-v2:invoices:create
+      description: FE workflow only; TE cancellation cannot create a replacement draft.
       parameters: [{ $ref: '#/components/parameters/CompanyId' }, { $ref: '#/components/parameters/Environment' }, { $ref: '#/components/parameters/WorkflowId' }, { $ref: '#/components/parameters/IdempotencyKey' }]
       requestBody:
         required: true

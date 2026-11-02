@@ -12,6 +12,10 @@ import {
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
 import { STORAGE_PORT, StoragePort } from '../../../src/infrastructure/storage/ports/storage.port';
 import {
+  XSD_VALIDATOR,
+  XsdValidatorPort,
+} from '../../../src/modules/fiscal-documents/application/fiscal-xml/xsd-validator.port';
+import {
   XML_SIGNER,
   XmlSignerPort,
 } from '../../../src/infrastructure/signing/ports/xml-signer.port';
@@ -91,7 +95,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   let associationId: string;
   let key: { apiKeyId: string; secret: string };
   const endpoint = () => `/api/v2/lab/companies/${companyId}/fiscal-documents/SANDBOX/invoices`;
-  const post = (secret: string, keyValue: string, body: ReturnType<typeof invoiceIntent>) =>
+  const post = (secret: string, keyValue: string, body: object) =>
     request(app.getHttpServer())
       .post(endpoint())
       .set('X-API-Key', secret)
@@ -304,6 +308,58 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       );
   });
 
+  it('emits a discounted FE with taxable and exempt lines and rejects percent syntax', async () => {
+    const operation = 'front-a-fe-discount';
+    const source = invoiceIntent(operation);
+    const body = {
+      ...source,
+      paymentMethods: [{ code: '01', amount: '1517' }],
+      lines: [
+        {
+          ...source.lines[0],
+          quantity: '2',
+          unitPrice: '500',
+          discounts: [{ amount: '100', reasonCode: '07', reason: 'Descuento comercial' }],
+          taxes: [{ code: '01', rateCode: '08', rate: '13', base: '900', amount: '117' }],
+        },
+        {
+          ...source.lines[0],
+          lineNumber: 2,
+          quantity: '1',
+          unitPrice: '500',
+          taxTreatment: 'LAB_EXEMPT_XML',
+          taxes: [{ code: '01', rateCode: '10', rate: '0', base: '500', amount: '0' }],
+        },
+      ],
+    };
+    const created = await post(key.secret, operation, body).expect(201);
+    const doc = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: created.body.documentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(doc.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    const signed = (
+      await app
+        .get<StoragePort>(STORAGE_PORT)
+        .download(doc.xmlArtifacts[0].signedXmlStorageKey ?? '')
+    ).toString('utf8');
+    expect(signed).toContain('<MontoDescuento>100.00000</MontoDescuento>');
+    expect(signed).toContain('<TotalDescuentos>100.00000</TotalDescuentos>');
+    expect(signed).toContain('<TotalComprobante>1517.00000</TotalComprobante>');
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(signed)).isValid).toBe(true);
+    const invalid = {
+      ...body,
+      externalOperationId: 'front-a-fe-percent',
+      lines: [
+        {
+          ...body.lines[0],
+          discounts: [{ amount: '10%', reasonCode: '07', reason: 'Descuento comercial' }],
+        },
+      ],
+    };
+    await post(key.secret, 'front-a-fe-percent', invalid).expect(400);
+  });
+
   it('downloads unchanged invoice XML, verifies SHA-256 and recovers an initially unavailable artifact', async () => {
     const created = await post(
       key.secret,
@@ -500,6 +556,31 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       state: 'COMMITTED',
       documentStatus: 'READY_TO_SUBMIT',
     });
+  });
+
+  it('recovers a transient XSD engine timeout with one fiscal document', async () => {
+    const body = invoiceIntent('front-a-validator-timeout');
+    const validator = app.get<XsdValidatorPort>(XSD_VALIDATOR);
+    const spy = jest.spyOn(validator, 'validate').mockReturnValueOnce({
+      isValid: false,
+      schemaVersion: 'v4.4',
+      errors: [{ code: 'FISCAL_XML_VALIDATOR_TIMEOUT', message: 'XSD validation timed out.' }],
+    });
+    const first = await post(key.secret, 'front-a-validator-timeout', body).expect(202);
+    spy.mockRestore();
+    expect(first.body.state).toBe('RECOVERY_REQUIRED');
+    const pending = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: first.body.documentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(pending.xmlArtifacts[0].lastErrorCode).toBe('FISCAL_XML_VALIDATOR_UNAVAILABLE');
+    const recovered = await post(key.secret, 'front-a-validator-timeout', body).expect(200);
+    expect(recovered.body).toMatchObject({
+      documentId: first.body.documentId,
+      state: 'COMMITTED',
+      documentStatus: 'READY_TO_SUBMIT',
+    });
+    expect(await prisma.fiscalDocument.count({ where: { id: first.body.documentId } })).toBe(1);
   });
 
   it('reconciles a signed document after a lost final state update', async () => {

@@ -105,7 +105,7 @@ export class W3ALabCorrectionService {
         tenantId: p.tenantId,
         companyId: p.companyId,
         environment: 'SANDBOX',
-        type: 'INVOICE',
+        type: { in: kind === 'CREDIT_NOTE' ? ['INVOICE', 'TICKET'] : ['INVOICE'] },
         originConsumerId: p.consumerId,
         originAssociationId: p.associationId,
         disposedAt: null,
@@ -115,8 +115,11 @@ export class W3ALabCorrectionService {
     if (source.status !== 'ACCEPTED') {
       throw new UnprocessableEntityException({ code: 'CORRECTION_SOURCE_NOT_ACCEPTED' });
     }
-    if (!source.receiverSnapshot || !source.requestHash) {
+    if ((source.type === 'INVOICE' && !source.receiverSnapshot) || !source.requestHash) {
       throw new UnprocessableEntityException({ code: 'CORRECTION_SOURCE_UNSUPPORTED' });
+    }
+    if (source.type === 'TICKET' && (kind !== 'CREDIT_NOTE' || intent.mode !== 'TOTAL')) {
+      throw new UnprocessableEntityException({ code: 'TICKET_CORRECTION_TOTAL_ONLY' });
     }
     const issuer = source.issuerSnapshot;
     const company = await tx.company.findUnique({
@@ -188,7 +191,9 @@ export class W3ALabCorrectionService {
       companyId: p.companyId,
       environment: 'SANDBOX',
       type: kind,
-      receiver: source.receiverSnapshot as Record<string, unknown>,
+      ...(source.receiverSnapshot
+        ? { receiver: source.receiverSnapshot as Record<string, unknown> }
+        : {}),
       currency: source.currency,
       exchangeRate: source.exchangeRate?.toString(),
       saleCondition: source.saleCondition,
@@ -204,7 +209,7 @@ export class W3ALabCorrectionService {
       {
         sourceFiscalDocumentId: source.id,
         referenceSnapshot: {
-          documentTypeCode: '01',
+          documentTypeCode: source.type === 'TICKET' ? '04' : '01',
           clave: source.clave,
           consecutive: source.consecutive,
           issueDate: source.issueDate.toISOString(),

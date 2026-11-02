@@ -43,6 +43,7 @@ import {
 const signing = createTestSigningMaterial();
 const scopes = [
   'fiscal-v2:invoices:create',
+  'fiscal-v2:tickets:create',
   'fiscal-v2:credit-notes:create',
   'fiscal-v2:debit-notes:create',
   'fiscal-v2:operations:read',
@@ -168,6 +169,51 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       .send(invoiceIntent(operation, tax, mixed))
       .expect(201);
     // Synthetic Hacienda acceptance is fixture state in the disposable database only.
+    await prisma.fiscalDocument.update({
+      where: { id: created.body.documentId },
+      data: { status: 'ACCEPTED' },
+    });
+    return created.body.documentId as string;
+  }
+
+  function discountedIntent(operation: string) {
+    const intent = invoiceIntent(operation, 'TAX', true);
+    return {
+      ...intent,
+      paymentMethods: [{ code: '01', amount: '1517' }],
+      lines: [
+        {
+          ...intent.lines[0],
+          discounts: [{ amount: '100', reasonCode: '07', reason: 'Descuento comercial' }],
+          taxes: [{ code: '01', rateCode: '08', rate: '13', base: '900', amount: '117' }],
+        },
+        intent.lines[1],
+      ],
+    };
+  }
+
+  async function acceptedDiscountedTicket(operation: string) {
+    const { receiver: _receiver, ...body } = discountedIntent(operation);
+    const created = await request(app.getHttpServer())
+      .post(`${base()}/tickets`)
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', operation)
+      .send(body)
+      .expect(201);
+    await prisma.fiscalDocument.update({
+      where: { id: created.body.documentId },
+      data: { status: 'ACCEPTED' },
+    });
+    return created.body.documentId as string;
+  }
+
+  async function acceptedDiscountedInvoice(operation: string) {
+    const created = await request(app.getHttpServer())
+      .post(`${base()}/invoices`)
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', operation)
+      .send(discountedIntent(operation))
+      .expect(201);
     await prisma.fiscalDocument.update({
       where: { id: created.body.documentId },
       data: { status: 'ACCEPTED' },
@@ -311,6 +357,59 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       reason: 'Un motivo diferente',
     }).expect(409);
     await post('credit-notes', apiKey.secret, 'w3a-total-duplicate', body).expect(409);
+  });
+
+  it('cancels an accepted discounted TE by one signed total NC with TE reference', async () => {
+    const sourceId = await acceptedDiscountedTicket('front-a-ticket-discount');
+    const first = await cancelInvoice(sourceId, 'front-a-ticket-cancel').expect(200);
+    const noteId = first.body.cancellationNoteId as string;
+    const note = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: noteId },
+      include: { xmlArtifacts: true },
+    });
+    expect(note).toMatchObject({
+      type: 'CREDIT_NOTE',
+      sourceFiscalDocumentId: sourceId,
+      receiverSnapshot: null,
+      referenceSnapshot: { documentTypeCode: '04' },
+    });
+    expect(note.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    const xml = (
+      await app
+        .get<StoragePort>(STORAGE_PORT)
+        .download(note.xmlArtifacts[0].signedXmlStorageKey ?? '')
+    ).toString('utf8');
+    expect(xml).toContain('<TipoDocIR>04</TipoDocIR>');
+    expect(xml).toContain('<MontoDescuento>100.00000</MontoDescuento>');
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(xml)).isValid).toBe(true);
+    const downloaded = await request(app.getHttpServer())
+      .get(`${base()}/corrective-notes/${noteId}/signed-xml`)
+      .set('X-API-Key', apiKey.secret)
+      .expect(200);
+    const bytes = Buffer.isBuffer(downloaded.body)
+      ? downloaded.body
+      : Buffer.from(downloaded.text, 'utf8');
+    expect(bytes.toString('utf8')).toBe(xml);
+    expect(downloaded.headers['x-content-sha256']).toBe(
+      createHash('sha256').update(bytes).digest('hex'),
+    );
+    const replay = await cancelInvoice(sourceId, 'front-a-ticket-cancel').expect(200);
+    expect(replay.body.cancellationNoteId).toBe(noteId);
+    await cancelInvoice(sourceId, 'front-a-ticket-other').expect(409);
+    await post(
+      'credit-notes',
+      apiKey.secret,
+      'front-a-ticket-partial',
+      credit(sourceId, 'PARTIAL', '1'),
+    ).expect(422);
+    await post('debit-notes', apiKey.secret, 'front-a-ticket-debit', debit(sourceId, '100')).expect(
+      404,
+    );
+    expect(
+      await prisma.fiscalDocument.count({
+        where: { sourceFiscalDocumentId: sourceId, type: 'CREDIT_NOTE' },
+      }),
+    ).toBe(1);
   });
 
   it('delivers only integrity-verified signed XML to its original M2M association', async () => {
@@ -880,6 +979,60 @@ describe('W3-A/B synthetic corrective laboratory', () => {
         'cancellation.replacement_issued',
       ]),
     );
+  });
+
+  it('preserves a fixed discount through FE total NC and signed replacement', async () => {
+    const originalId = await acceptedDiscountedInvoice('front-a-discount-replacement');
+    const cancelled = await cancelInvoice(originalId, 'front-a-discount-cancel').expect(200);
+    const workflowId = cancelled.body.workflowId as string;
+    const noteId = cancelled.body.cancellationNoteId as string;
+    const note = await prisma.fiscalDocument.findUniqueOrThrow({ where: { id: noteId } });
+    expect(note.totals).toMatchObject({
+      discountAmount: '100.00000',
+      totalAmount: '1517.00000',
+    });
+    await prisma.fiscalDocument.update({ where: { id: noteId }, data: { status: 'ACCEPTED' } });
+    await workflowGet(workflowId).expect(200);
+    const drafted = await workflowPost(
+      workflowId,
+      'replacement-draft',
+      'front-a-discount-draft',
+    ).expect(200);
+    expect(drafted.body.draft.lines[0].discounts).toMatchObject([
+      { amount: '100', reasonCode: '07' },
+    ]);
+    const confirmed = await workflowPost(
+      workflowId,
+      'replacement-confirmation',
+      'front-a-discount-confirm',
+      { intent: drafted.body.draft },
+    ).expect(200);
+    expect(confirmed.body.state).toBe('REPLACEMENT_ISSUED');
+    const replacement = await prisma.fiscalDocument.findUniqueOrThrow({
+      where: { id: confirmed.body.replacementDocumentId },
+      include: { xmlArtifacts: true },
+    });
+    expect(replacement.totals).toMatchObject({
+      discountAmount: '100.00000',
+      totalAmount: '1517.00000',
+    });
+    expect(replacement.xmlArtifacts[0].xsdValidationStatus).toBe('VALID');
+    const xml = (
+      await app
+        .get<StoragePort>(STORAGE_PORT)
+        .download(replacement.xmlArtifacts[0].signedXmlStorageKey ?? '')
+    ).toString('utf8');
+    expect(xml).toContain('<TotalDescuentos>100.00000</TotalDescuentos>');
+    expect((await app.get<XmlSignerPort>(XML_SIGNER).verify(xml)).isValid).toBe(true);
+    const replay = await workflowPost(
+      workflowId,
+      'replacement-confirmation',
+      'front-a-discount-confirm',
+      {
+        intent: drafted.body.draft,
+      },
+    ).expect(200);
+    expect(replay.body.replacementDocumentId).toBe(replacement.id);
   });
 
   it('prepares reversal against the accepted NC without a replacement and blocks ND policy', async () => {

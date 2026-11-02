@@ -300,6 +300,10 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       const reference = this.requireCorrectionReference(
         document.referenceSnapshot,
         allowLabNcReference,
+        process.env.NODE_ENV === 'test' &&
+          document.environment === 'SANDBOX' &&
+          document.type === 'CREDIT_NOTE' &&
+          (document.referenceSnapshot as Record<string, unknown> | null)?.mode === 'TOTAL',
       );
       const element = root.ele('InformacionReferencia');
       element.ele('TipoDocIR').txt(reference.documentTypeCode).up();
@@ -323,6 +327,7 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
   private requireCorrectionReference(
     value: unknown,
     allowLabNcReference = false,
+    allowLabTicketCancellation = false,
   ): {
     documentTypeCode: string;
     clave: string;
@@ -336,6 +341,7 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     const item = value as Record<string, unknown>;
     if (
       (item.documentTypeCode !== '01' &&
+        !(allowLabTicketCancellation && item.documentTypeCode === '04' && item.code === '01') &&
         !(allowLabNcReference && item.documentTypeCode === '03' && item.code === '01')) ||
       typeof item.clave !== 'string' ||
       !/^\d{50}$/.test(item.clave) ||

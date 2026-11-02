@@ -288,6 +288,35 @@ describe('PrepareFiscalXmlService', () => {
     );
   });
 
+  it('keeps a validator timeout recoverable instead of marking valid XML terminal', async () => {
+    const document = createDocument('INVOICE');
+    const xsdValidator = {
+      validate: jest.fn(() => ({
+        isValid: false,
+        schemaVersion: 'v4.4',
+        errors: [{ code: 'FISCAL_XML_VALIDATOR_TIMEOUT', message: 'XSD validation timed out.' }],
+      })),
+    };
+    const { service, artifact, storage } = createService(document, { xsdValidator });
+
+    await expect(
+      service.execute({
+        tenantId: document.tenantId,
+        documentId: document.id,
+        apiKeyId,
+        scopes: ['invoices:write'],
+      }),
+    ).rejects.toMatchObject({
+      response: { code: FISCAL_XML_ERROR.xmlValidatorUnavailable },
+      status: 503,
+    });
+    expect(artifact().xsdValidationStatus).not.toBe('INVALID');
+    expect(artifact().lastErrorCode).toBe(FISCAL_XML_ERROR.xmlValidatorUnavailable);
+    expect(artifact().signedXmlStorageKey).toBeNull();
+    expect(storage.upload).toHaveBeenCalledTimes(1);
+    expect(document.status).toBe('SIGNED');
+  });
+
   it('does not record XML bodies or signing secrets in audit metadata', async () => {
     const document = createDocument('INVOICE');
     const { service, auditService } = createService(document);

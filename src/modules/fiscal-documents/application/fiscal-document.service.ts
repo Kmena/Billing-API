@@ -323,7 +323,12 @@ export class FiscalDocumentService {
       process.env.NODE_ENV !== 'test' ||
       command.environment !== 'SANDBOX' ||
       !['CREDIT_NOTE', 'DEBIT_NOTE'].includes(command.type) ||
-      !command.receiver
+      (!command.receiver &&
+        !(
+          command.type === 'CREDIT_NOTE' &&
+          correction.referenceSnapshot.documentTypeCode === '04' &&
+          correction.referenceSnapshot.mode === 'TOTAL'
+        ))
     ) {
       throw new ForbiddenException({ code: 'W3_A_LAB_ONLY' });
     }

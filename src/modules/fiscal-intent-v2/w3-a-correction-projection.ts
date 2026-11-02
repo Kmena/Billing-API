@@ -16,6 +16,7 @@ export type CorrectionKind = 'CREDIT_NOTE' | 'DEBIT_NOTE';
 /** Check the persisted fiscal identity before a corrective reference is allocated. */
 export function validateCorrectionSourceReference(
   source: {
+    type: string;
     clave: string;
     consecutive: string;
     branchCode: string;
@@ -28,10 +29,13 @@ export function validateCorrectionSourceReference(
   issuerIdentificationNumber: string,
 ): void {
   try {
+    if (source.type !== 'INVOICE' && source.type !== 'TICKET') {
+      throw new Error('Unsupported source type');
+    }
     const consecutive = buildConsecutive({
       branchCode: source.branchCode,
       terminalCode: source.terminalCode,
-      documentType: 'INVOICE',
+      documentType: source.type,
       sequenceValue: source.sequenceValue,
     });
     const clave = buildFiscalKey({

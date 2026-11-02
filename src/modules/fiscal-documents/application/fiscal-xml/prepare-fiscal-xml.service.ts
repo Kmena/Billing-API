@@ -185,6 +185,21 @@ export class PrepareFiscalXmlService {
       const signedGenerated = { ...generated, xml: signedXml };
       const validation = this.xsdValidator.validate(signedGenerated);
       if (!validation.isValid) {
+        const engineFailure = validation.errors.find((issue) =>
+          ['FISCAL_XML_VALIDATOR_TIMEOUT', 'FISCAL_XML_VALIDATOR_FAILED'].includes(issue.code),
+        );
+        if (engineFailure) {
+          await this.markFailure(
+            artifact.id,
+            FISCAL_XML_ERROR.xmlValidatorUnavailable,
+            engineFailure.code,
+          );
+          this.recordAudit(input, document, 'fiscal-xml.validator-unavailable', {
+            normalizedErrorCode: FISCAL_XML_ERROR.xmlValidatorUnavailable,
+            validatorCode: engineFailure.code,
+          });
+          throw new ServiceUnavailableException({ code: FISCAL_XML_ERROR.xmlValidatorUnavailable });
+        }
         await this.markFailure(
           artifact.id,
           FISCAL_XML_ERROR.xmlValidationFailed,
@@ -277,7 +292,12 @@ export class PrepareFiscalXmlService {
 
       return this.toResult(document.id, 'READY_TO_SUBMIT', completed);
     } catch (error) {
-      if (error instanceof BadRequestException || error instanceof ConflictException) throw error;
+      if (
+        error instanceof BadRequestException ||
+        error instanceof ConflictException ||
+        error instanceof ServiceUnavailableException
+      )
+        throw error;
       const code =
         error instanceof Error && error.message.includes('SIGN')
           ? FISCAL_XML_ERROR.signingFailed
