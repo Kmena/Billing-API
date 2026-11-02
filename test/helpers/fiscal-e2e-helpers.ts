@@ -110,6 +110,7 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
   await prisma.fiscalIntegrationAssociation.deleteMany({ where: tenantScope });
   await prisma.haciendaConnection.deleteMany({ where: tenantScope });
   await prisma.auditLog.deleteMany({ where: tenantScope });
+  await prisma.fiscalOnboardingMutationV2.deleteMany({ where: tenantScope });
   await prisma.fiscalConsumerKeyBinding.deleteMany({ where: tenantScope });
   await prisma.apiKeyCompany.deleteMany({ where: { apiKey: tenantScope } });
   await prisma.apiKey.deleteMany({ where: tenantScope });

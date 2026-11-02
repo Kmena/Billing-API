@@ -90,6 +90,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   let lab: ConsumerV2LabService;
   let invoices: W2B2LabInvoiceService;
   let tenantId: string;
+  let adminUserId: string;
   let companyId: string;
   let consumerId: string;
   let associationId: string;
@@ -175,6 +176,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     invoices = app.get(W2B2LabInvoiceService);
     const fixture = await createFiscalTenantFixture(context);
     tenantId = fixture.tenantId;
+    adminUserId = fixture.userId;
     companyId = fixture.companyId;
     await createEnabledHaciendaConnection(prisma, tenantId, companyId);
     await configureValidCompanyFiscalProfile(context, fixture);
@@ -780,7 +782,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       externalConsumerKey: 'ticket-scope-only',
       externalCompanyKey: 'ticket-scope-issuer',
       environment: 'SANDBOX',
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     const invoiceOnly = await lab.issueKey({
@@ -788,7 +790,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       associationId: scopeAssociation.associationId,
       scopes: ['fiscal-v2:invoices:create'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await postTicket(
@@ -827,7 +829,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       externalConsumerKey: 'other-app',
       externalCompanyKey: 'same-issuer',
       environment: 'SANDBOX',
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     const otherKey = await lab.issueKey({
@@ -835,7 +837,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       associationId: otherAssociation.associationId,
       scopes: [...scopes],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     const independent = await post(
@@ -858,7 +860,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       scopes: ['fiscal-v2:operations:read'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post(readOnly.secret, 'w2b2-readonly', invoiceIntent('w2b2-readonly')).expect(403);
@@ -904,7 +906,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       scopes: ['fiscal-v2:invoices:create'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post(rotated.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(200);
@@ -913,7 +915,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       tenantId,
       associationId,
       apiKeyId: key.apiKeyId,
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post(key.secret, 'w2b2-revoked', invoiceIntent('w2b2-revoked')).expect(401);

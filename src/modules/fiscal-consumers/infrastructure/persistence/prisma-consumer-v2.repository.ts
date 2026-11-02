@@ -71,6 +71,15 @@ async function audit(
 export class PrismaConsumerV2Repository {
   constructor(private readonly prisma: PrismaService) {}
 
+  private async assertBillingAdmin(tx: Tx, tenantId: string, actorId: string) {
+    await tx.$queryRaw`SELECT id FROM users WHERE id = ${actorId}::uuid AND tenant_id = ${tenantId}::uuid FOR SHARE`;
+    const admin = await tx.user.findFirst({
+      where: { id: actorId, tenantId, role: 'TENANT_ADMIN', status: 'ACTIVE' },
+      select: { id: true },
+    });
+    if (!admin) throw new ForbiddenException({ code: 'TENANT_ADMIN_REQUIRED' });
+  }
+
   /** DP-01: successor association for future operations; historical issuer IDs never change. */
   async reassignIssuer(command: ReassignConsumerIssuerV2) {
     try {
@@ -84,6 +93,7 @@ export class PrismaConsumerV2Repository {
           });
           if (!old || old.consumerCompany.consumerId !== command.consumerId)
             throw new NotFoundException({ code: 'CONSUMER_ASSOCIATION_NOT_FOUND' });
+          await this.assertBillingAdmin(tx, command.tenantId, command.actorId);
           if (
             old.status !== 'ACTIVE' ||
             old.consumerCompany.status !== 'ACTIVE' ||
@@ -306,6 +316,7 @@ export class PrismaConsumerV2Repository {
     try {
       return await this.prisma.$transaction(
         async (tx) => {
+          await this.assertBillingAdmin(tx, command.tenantId, command.actorId);
           const tenant = await tx.tenant.findFirst({
             where: { id: command.tenantId, status: 'ACTIVE' },
             select: { id: true },
@@ -445,6 +456,7 @@ export class PrismaConsumerV2Repository {
     const secretPart = randomBytes(16).toString('hex');
     try {
       return await this.prisma.$transaction(async (tx) => {
+        await this.assertBillingAdmin(tx, command.tenantId, command.actorId);
         await tx.$queryRaw`SELECT id FROM fiscal_consumer_associations
           WHERE id = ${command.associationId}::uuid AND tenant_id = ${command.tenantId}::uuid FOR UPDATE`;
         const now = new Date();
@@ -548,6 +560,7 @@ export class PrismaConsumerV2Repository {
 
   async revokeKey(command: RevokeConsumerKeyV2) {
     return this.prisma.$transaction(async (tx) => {
+      await this.assertBillingAdmin(tx, command.tenantId, command.actorId);
       const selected = await tx.fiscalConsumerKeyBinding.findFirst({
         where: { apiKeyId: command.apiKeyId, tenantId: command.tenantId },
         include: { association: { include: { consumerCompany: true } } },

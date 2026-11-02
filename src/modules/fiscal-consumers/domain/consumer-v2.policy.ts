@@ -16,6 +16,7 @@ export const CONSUMER_V2_LAB_SCOPES = [
   'fiscal-v2:onboarding:association:write',
   'fiscal-v2:onboarding:certificate:write',
   'fiscal-v2:onboarding:credentials:write',
+  'fiscal-v2:onboarding:recovery:write',
   'fiscal-v2:onboarding:issuance-point:write',
   'fiscal-v2:onboarding:connection:test',
   'fiscal-v2:onboarding:audit:read',

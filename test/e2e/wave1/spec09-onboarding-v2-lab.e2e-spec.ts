@@ -2,6 +2,8 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { spawnSync } from 'child_process';
+import { join } from 'path';
 import * as request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
@@ -13,6 +15,7 @@ import {
   SecretProvider,
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
 import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/application/consumer-v2-lab.service';
+import { OnboardingV2MutationService } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/onboarding-v2-mutation.service';
 import { CONSUMER_V2_LAB_SCOPES } from '../../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import { FiscalOnboardingAdminV2LabModule } from '../../../src/modules/fiscal-consumers/fiscal-onboarding-admin-v2-lab.module';
 import { createTestSigningMaterialWithFiscalId } from '../../../src/modules/fiscal-documents/domain/fiscal-xml/__tests__/fiscal-xml-test-fixtures';
@@ -22,6 +25,7 @@ import {
   FiscalE2eContext,
 } from '../../helpers/fiscal-e2e-helpers';
 import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
+import { createTestCompany } from '../../helpers/test-factories';
 import { installGuardedTestDatabaseEnvironment } from '../../helpers/test-database-safety';
 
 describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
@@ -31,6 +35,8 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
   let context: FiscalE2eContext;
   let lab: ConsumerV2LabService;
   let tenantId: string;
+  let adminUserId: string;
+  let adminJwt: string;
   let companyId: string;
   let consumerId: string;
   let associationId: string;
@@ -41,6 +47,8 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.env.USE_REAL_HACIENDA = 'false';
+    process.env.FISCAL_ONBOARDING_V2_HMAC_KEY =
+      'synthetic-spec09-hmac-key-for-disposable-tests-only';
     installGuardedTestDatabaseEnvironment();
     ({ prisma } = await createGuardedTestPrisma());
     const module = await Test.createTestingModule({
@@ -58,6 +66,8 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     lab = app.get(ConsumerV2LabService);
     const fixture = await createFiscalTenantFixture(context);
     tenantId = fixture.tenantId;
+    adminUserId = fixture.userId;
+    adminJwt = fixture.jwtToken;
     companyId = fixture.companyId;
     const association = await lab.registerAssociation({
       tenantId,
@@ -124,6 +134,122 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     });
   });
 
+  it('requires a current Billing administrator for the first association and rejects M2M self-grant', async () => {
+    const body = {
+      companyId,
+      provider: 'AFFILIATIONS',
+      externalConsumerKey: 'spec09-lab-app',
+      externalCompanyKey: 'spec09-lab-company',
+      environment: 'SANDBOX',
+      profileVersion: 'fiscal-consumer-v2',
+    };
+    await request(app.getHttpServer())
+      .post('/api/v2/integrations/consumers')
+      .set('X-API-Key', secret)
+      .send(body)
+      .expect(401);
+    await request(app.getHttpServer())
+      .post(`${base()}/associations/reassign`)
+      .set('X-API-Key', secret)
+      .send({ targetCompanyId: randomUUID(), newExternalCompanyKey: 'self-granted-issuer' })
+      .expect(404);
+    const replay = await request(app.getHttpServer())
+      .post('/api/v2/integrations/consumers')
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send(body)
+      .expect(200);
+    expect(replay.body.associationId).toBe(associationId);
+    await request(app.getHttpServer())
+      .post('/api/v2/integrations/consumers')
+      .set('Authorization', `Bearer ${adminJwt}`)
+      .send({ ...body, companyId: randomUUID() })
+      .expect(404);
+    await prisma.user.update({ where: { id: adminUserId }, data: { role: 'MEMBER' } });
+    try {
+      await request(app.getHttpServer())
+        .post('/api/v2/integrations/consumers')
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({ ...body, externalCompanyKey: 'new-binding-blocked' })
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/v2/integrations/consumers/${consumerId}/keys`)
+        .set('Authorization', `Bearer ${adminJwt}`)
+        .send({
+          associationId,
+          scopes: ['fiscal-v2:onboarding:read'],
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        })
+        .expect(403);
+    } finally {
+      await prisma.user.update({ where: { id: adminUserId }, data: { role: 'TENANT_ADMIN' } });
+    }
+  });
+
+  it('isolates credential writes from another company and another tenant', async () => {
+    const sibling = await createTestCompany(prisma, tenantId);
+    const foreign = await createFiscalTenantFixture(context);
+    for (const [target, expected] of [
+      [sibling.id, 403],
+      [foreign.companyId, 404],
+    ] as const) {
+      await request(app.getHttpServer())
+        .put(`/api/v2/companies/${target}/fiscal-onboarding/SANDBOX/credentials`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'isolation-check-001')
+        .send({ username: 'foreign-user', password: 'foreign-password' })
+        .expect(expected);
+    }
+    expect(
+      await prisma.haciendaConnection.count({
+        where: { companyId: { in: [sibling.id, foreign.companyId] } },
+      }),
+    ).toBe(0);
+  });
+
+  it('provisions the first SANDBOX binding from a local admin command and safely replays after interruption', async () => {
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { id: adminUserId },
+      select: { email: true },
+    });
+    const args = [
+      'node_modules/ts-node/dist/bin.js',
+      '-r',
+      'tsconfig-paths/register',
+      join('scripts', 'spec09-bind-affiliations-lab.ts'),
+      tenantId,
+      companyId,
+      admin.email,
+      'spec09-local-app',
+      'spec09-local-company',
+    ];
+    const invoke = (password: string) =>
+      spawnSync(process.execPath, args, {
+        cwd: process.cwd(),
+        env: process.env,
+        input: `${password}\n`,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+    const denied = invoke('invalid-synthetic-password');
+    expect(denied.status).toBe(1);
+    expect(denied.stdout).toBe('');
+    const first = invoke('SecurePass123!');
+    expect(first.status).toBe(0);
+    const binding = JSON.parse(first.stdout) as { associationId: string; created: boolean };
+    expect(binding.created).toBe(true);
+    const replay = invoke('SecurePass123!');
+    expect(replay.status).toBe(0);
+    expect(JSON.parse(replay.stdout)).toMatchObject({
+      associationId: binding.associationId,
+      created: false,
+    });
+    expect(
+      await prisma.fiscalConsumerAssociation.count({
+        where: { tenantId, consumerCompany: { externalCompanyKey: 'spec09-local-company' } },
+      }),
+    ).toBe(1);
+  });
+
   it('reuses Billing stores, handles synthetic PKCS#12 and hides credentials', async () => {
     const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
     const prefix = `CPJ-${company.identificationNumber}`;
@@ -133,6 +259,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     await request(app.getHttpServer())
       .post(`${base()}/certificate`)
       .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'wrong-pin-001')
       .field('pin', 'wrong-pin')
       .attach('certificate', signing.pkcs12Bytes, {
         filename: 'synthetic.p12',
@@ -142,6 +269,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     const uploaded = await request(app.getHttpServer())
       .post(`${base()}/certificate`)
       .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'certificate-001')
       .field('pin', signing.passphrase)
       .attach('certificate', signing.pkcs12Bytes, {
         filename: 'synthetic.p12',
@@ -153,6 +281,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     const credentials = await request(app.getHttpServer())
       .put(`${base()}/credentials`)
       .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'credentials-001')
       .send({ username: 'synthetic-user', password: 'synthetic-password' })
       .expect(200);
     expect(JSON.stringify(credentials.body)).not.toContain('synthetic-password');
@@ -162,6 +291,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     await request(app.getHttpServer())
       .post(`${base()}/credentials/rotate`)
       .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'credentials-rotate-001')
       .send({ username: 'synthetic-user-2', password: 'synthetic-password-2' })
       .expect(200);
     const second = await prisma.haciendaConnection.findFirstOrThrow({
@@ -227,5 +357,373 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
         identificationType: company.identificationType,
       })
       .expect(409);
+  });
+
+  it('replays safe responses and rejects a changed idempotency payload', async () => {
+    const first = await request(app.getHttpServer())
+      .post(`${base()}/credentials/rotate`)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'rotation-replay-001')
+      .send({ username: 'replay-user', password: 'replay-password' })
+      .expect(200);
+    const connection = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    const replay = await request(app.getHttpServer())
+      .post(`${base()}/credentials/rotate`)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'rotation-replay-001')
+      .send({ username: 'replay-user', password: 'replay-password' })
+      .expect(200);
+    expect(replay.body).toEqual(first.body);
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: connection.id } }))
+        .secretReference,
+    ).toBe(connection.secretReference);
+    await request(app.getHttpServer())
+      .post(`${base()}/credentials/rotate`)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'rotation-replay-001')
+      .send({ username: 'replay-user', password: 'changed-password' })
+      .expect(409);
+    expect(
+      JSON.stringify(await prisma.fiscalOnboardingMutationV2.findMany({ where: { tenantId } })),
+    ).not.toContain('replay-password');
+  });
+
+  it('compensates provider and audit failures without activating partial credentials', async () => {
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const current = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    const originalStore = isolatedSecrets.storeSecret.bind(isolatedSecrets);
+    const storeSpy = jest
+      .spyOn(isolatedSecrets, 'storeSecret')
+      .mockImplementation(async (reference, value) => {
+        await originalStore(reference, value);
+        throw new Error('synthetic provider failure');
+      });
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/credentials/rotate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'provider-failure-001')
+        .send({ username: 'provider-failure', password: 'secret-provider-failure' })
+        .expect(503);
+    } finally {
+      storeSpy.mockRestore();
+    }
+    const providerMutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'provider-failure-001' },
+    });
+    expect(providerMutation.state).toBe('COMPENSATED');
+    await expect(
+      isolatedSecrets.getSecret((providerMutation.newSecretReferences as string[])[0]),
+    ).rejects.toBeDefined();
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: current.id } }))
+        .secretReference,
+    ).toBe(current.secretReference);
+
+    const mutator = app.get(OnboardingV2MutationService);
+    const originalAudit = Reflect.get(mutator, 'audit') as (...args: unknown[]) => Promise<void>;
+    let auditCalls = 0;
+    Reflect.set(mutator, 'audit', async (...args: unknown[]) => {
+      auditCalls += 1;
+      if (auditCalls === 2) throw new Error('synthetic audit failure');
+      return originalAudit.apply(mutator, args);
+    });
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/credentials/rotate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'audit-failure-001')
+        .send({ username: 'audit-failure', password: 'secret-audit-failure' })
+        .expect(503);
+    } finally {
+      Reflect.set(mutator, 'audit', originalAudit);
+    }
+    const auditMutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'audit-failure-001' },
+    });
+    expect(auditMutation.state).toBe('COMPENSATED');
+    await expect(
+      isolatedSecrets.getSecret((auditMutation.newSecretReferences as string[])[0]),
+    ).rejects.toBeDefined();
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: current.id } }))
+        .secretReference,
+    ).toBe(current.secretReference);
+    expect(JSON.stringify(await prisma.auditLog.findMany({ where: { tenantId } }))).not.toContain(
+      'secret-audit-failure',
+    );
+  });
+
+  it('compensates both certificate and PIN references when the second secret write fails', async () => {
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
+    const signing = createTestSigningMaterialWithFiscalId(
+      `CPJ-${company.identificationNumber}`,
+      'certificate-failure-pin',
+    );
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const originalStore = isolatedSecrets.storeSecret.bind(isolatedSecrets);
+    let writes = 0;
+    const storeSpy = jest
+      .spyOn(isolatedSecrets, 'storeSecret')
+      .mockImplementation(async (reference, value) => {
+        writes += 1;
+        await originalStore(reference, value);
+        if (writes === 2) throw new Error('synthetic PIN store failure');
+      });
+    const before = await prisma.fiscalSigningCertificate.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX', status: 'ACTIVE' },
+    });
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/certificate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'certificate-store-failure-001')
+        .field('pin', signing.passphrase)
+        .attach('certificate', signing.pkcs12Bytes, {
+          filename: 'synthetic.p12',
+          contentType: 'application/x-pkcs12',
+        })
+        .expect(503);
+    } finally {
+      storeSpy.mockRestore();
+    }
+    const mutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'certificate-store-failure-001' },
+    });
+    expect(mutation.state).toBe('COMPENSATED');
+    for (const reference of mutation.newSecretReferences as string[]) {
+      await expect(isolatedSecrets.getSecret(reference)).rejects.toBeDefined();
+    }
+    const active = await prisma.fiscalSigningCertificate.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX', status: 'ACTIVE' },
+    });
+    expect(active.id).toBe(before.id);
+  });
+
+  it('replaces a synthetic certificate while retaining encrypted historical material', async () => {
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: companyId } });
+    const signing = createTestSigningMaterialWithFiscalId(
+      `CPJ-${company.identificationNumber}`,
+      'replacement-pin',
+    );
+    const previous = await prisma.fiscalSigningCertificate.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX', status: 'ACTIVE' },
+    });
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    await request(app.getHttpServer())
+      .post(`${base()}/certificate`)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'certificate-replace-001')
+      .field('pin', signing.passphrase)
+      .attach('certificate', signing.pkcs12Bytes, {
+        filename: 'synthetic.p12',
+        contentType: 'application/x-pkcs12',
+      })
+      .expect(201);
+    const old = await prisma.fiscalSigningCertificate.findUniqueOrThrow({
+      where: { id: previous.id },
+    });
+    expect(old.status).toBe('REPLACED');
+    expect(old.replacedById).toBeTruthy();
+    expect(await isolatedSecrets.getSecret(old.certificateSecretReference)).toContain(
+      'pkcs12Base64',
+    );
+    expect(await isolatedSecrets.getSecret(old.passwordSecretReference)).toBeTruthy();
+    expect(
+      await prisma.fiscalSigningCertificate.count({
+        where: { companyId, environment: 'SANDBOX', status: 'ACTIVE' },
+      }),
+    ).toBe(1);
+  });
+
+  it('blocks a revoked key between staging and activation, and recovers an interrupted operation', async () => {
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const current = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    const originalStore = isolatedSecrets.storeSecret.bind(isolatedSecrets);
+    const storeSpy = jest
+      .spyOn(isolatedSecrets, 'storeSecret')
+      .mockImplementation(async (reference, value) => {
+        await originalStore(reference, value);
+        await prisma.apiKey.update({
+          where: { id: keyId },
+          data: { status: 'REVOKED', revokedAt: new Date() },
+        });
+      });
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/credentials/rotate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'revoked-during-write-001')
+        .send({ username: 'revoked-user', password: 'revoked-password' })
+        .expect(403);
+    } finally {
+      storeSpy.mockRestore();
+      await prisma.apiKey.update({
+        where: { id: keyId },
+        data: { status: 'ACTIVE', revokedAt: null },
+      });
+    }
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: current.id } }))
+        .secretReference,
+    ).toBe(current.secretReference);
+    const revokedMutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'revoked-during-write-001' },
+    });
+    expect(revokedMutation.state).toBe('COMPENSATED');
+    await expect(
+      isolatedSecrets.getSecret((revokedMutation.newSecretReferences as string[])[0]),
+    ).rejects.toBeDefined();
+
+    const orphanRef = `hacienda-conn/${companyId}/SANDBOX/${randomUUID()}`;
+    await isolatedSecrets.storeSecret(orphanRef, 'synthetic-interrupted-secret');
+    const operationId = randomUUID();
+    await prisma.fiscalOnboardingMutationV2.create({
+      data: {
+        id: operationId,
+        tenantId,
+        companyId,
+        associationId,
+        environment: 'SANDBOX',
+        operation: 'CREDENTIALS_ROTATE',
+        idempotencyKey: 'interrupted-write-001',
+        requestDigest: '0'.repeat(64),
+        state: 'RECOVERY_REQUIRED',
+        newSecretReferences: [orphanRef],
+        retiredSecretReferences: [],
+      },
+    });
+    await request(app.getHttpServer())
+      .post(`${base()}/mutations/${operationId}/recover`)
+      .set('X-API-Key', secret)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('COMPENSATED'));
+    await expect(isolatedSecrets.getSecret(orphanRef)).rejects.toBeDefined();
+    await request(app.getHttpServer())
+      .post(`${base()}/mutations/${operationId}/recover`)
+      .set('X-API-Key', secret)
+      .expect(200);
+  });
+
+  it('serializes concurrent rotations and leaves one active credential reference', async () => {
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const responses = await Promise.all(
+      ['concurrent-a-001', 'concurrent-b-001'].map((key) =>
+        request(app.getHttpServer())
+          .post(`${base()}/credentials/rotate`)
+          .set('X-API-Key', secret)
+          .set('Idempotency-Key', key)
+          .send({ username: key, password: `synthetic-${key}` }),
+      ),
+    );
+    expect(responses.some((response) => response.status === 200)).toBe(true);
+    expect(responses.every((response) => [200, 409, 503].includes(response.status))).toBe(true);
+    const connection = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    expect(await isolatedSecrets.getSecret(connection.secretReference)).toContain(
+      'synthetic-concurrent-',
+    );
+    const mutations = await prisma.fiscalOnboardingMutationV2.findMany({
+      where: { associationId, idempotencyKey: { in: ['concurrent-a-001', 'concurrent-b-001'] } },
+    });
+    for (const mutation of mutations) {
+      if (mutation.state === 'COMPENSATED') {
+        await expect(
+          isolatedSecrets.getSecret((mutation.newSecretReferences as string[])[0]),
+        ).rejects.toBeDefined();
+      }
+    }
+    expect(JSON.stringify(responses.map((response) => response.body))).not.toContain(
+      'synthetic-concurrent-',
+    );
+  });
+
+  it('records a committed cleanup obligation and retires the old secret on recovery', async () => {
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const before = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    const deleteSpy = jest
+      .spyOn(isolatedSecrets, 'deleteSecret')
+      .mockRejectedValueOnce(new Error('synthetic secret deletion failure'));
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/credentials/rotate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'cleanup-pending-001')
+        .send({ username: 'cleanup-user', password: 'cleanup-password' })
+        .expect(200);
+    } finally {
+      deleteSpy.mockRestore();
+    }
+    const mutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'cleanup-pending-001' },
+    });
+    expect(mutation.state).toBe('COMMITTED_CLEANUP_PENDING');
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: before.id } }))
+        .secretReference,
+    ).not.toBe(before.secretReference);
+    expect(await isolatedSecrets.getSecret(before.secretReference)).toBeTruthy();
+    await request(app.getHttpServer())
+      .post(`${base()}/mutations/${mutation.id}/recover`)
+      .set('X-API-Key', secret)
+      .expect(200)
+      .expect(({ body }) => expect(body.state).toBe('COMMITTED'));
+    await expect(isolatedSecrets.getSecret(before.secretReference)).rejects.toBeDefined();
+  });
+
+  it('does not activate credentials after recovery claims an interrupted staged operation', async () => {
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    const before = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId, environment: 'SANDBOX' },
+    });
+    const originalStore = isolatedSecrets.storeSecret.bind(isolatedSecrets);
+    const storeSpy = jest
+      .spyOn(isolatedSecrets, 'storeSecret')
+      .mockImplementation(async (reference, value) => {
+        await originalStore(reference, value);
+        const staged = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+          where: { associationId, idempotencyKey: 'recovery-race-001' },
+        });
+        await prisma.fiscalOnboardingMutationV2.update({
+          where: { id: staged.id },
+          data: { updatedAt: new Date(Date.now() - 11 * 60_000) },
+        });
+        await request(app.getHttpServer())
+          .post(`${base()}/mutations/${staged.id}/recover`)
+          .set('X-API-Key', secret)
+          .expect(200)
+          .expect(({ body }) => expect(body.state).toBe('COMPENSATED'));
+      });
+    try {
+      await request(app.getHttpServer())
+        .post(`${base()}/credentials/rotate`)
+        .set('X-API-Key', secret)
+        .set('Idempotency-Key', 'recovery-race-001')
+        .send({ username: 'recovery-race', password: 'recovery-race-secret' })
+        .expect(409);
+    } finally {
+      storeSpy.mockRestore();
+    }
+    expect(
+      (await prisma.haciendaConnection.findUniqueOrThrow({ where: { id: before.id } }))
+        .secretReference,
+    ).toBe(before.secretReference);
+    const mutation = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({
+      where: { associationId, idempotencyKey: 'recovery-race-001' },
+    });
+    expect(mutation.state).toBe('COMPENSATED');
+    await expect(
+      isolatedSecrets.getSecret((mutation.newSecretReferences as string[])[0]),
+    ).rejects.toBeDefined();
   });
 });

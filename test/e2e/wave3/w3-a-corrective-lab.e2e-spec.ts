@@ -108,6 +108,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
   let lab: ConsumerV2LabService;
   let engine: W2B2LabInvoiceService;
   let tenantId: string;
+  let adminUserId: string;
   let companyId: string;
   let associationId: string;
   let apiKey: { apiKeyId: string; secret: string };
@@ -241,6 +242,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     engine = app.get(W2B2LabInvoiceService);
     const fixture = await createFiscalTenantFixture(context);
     tenantId = fixture.tenantId;
+    adminUserId = fixture.userId;
     companyId = fixture.companyId;
     await createEnabledHaciendaConnection(prisma, tenantId, companyId);
     await configureValidCompanyFiscalProfile(context, fixture);
@@ -448,7 +450,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       externalConsumerKey: 'front-a-xml-other',
       externalCompanyKey: 'same-issuer',
       environment: 'SANDBOX',
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     const otherKey = await lab.issueKey({
@@ -456,7 +458,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       associationId: other.associationId,
       scopes: ['fiscal-v2:operations:read'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await request(app.getHttpServer()).get(url).set('X-API-Key', otherKey.secret).expect(404);
@@ -604,7 +606,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       externalConsumerKey: 'other-w3a-app',
       externalCompanyKey: 'same-issuer',
       environment: 'SANDBOX',
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     const otherKey = await lab.issueKey({
@@ -612,7 +614,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       associationId: other.associationId,
       scopes: [...scopes],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post('credit-notes', otherKey.secret, 'w3a-cross', credit(sourceId, 'TOTAL')).expect(404);
@@ -622,7 +624,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       scopes: ['fiscal-v2:operations:read'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post('credit-notes', readOnly.secret, 'w3a-scope', credit(sourceId, 'TOTAL')).expect(403);
@@ -630,7 +632,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       tenantId,
       associationId: other.associationId,
       apiKeyId: otherKey.apiKeyId,
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post('credit-notes', otherKey.secret, 'w3a-revoked', credit(sourceId, 'TOTAL')).expect(
@@ -642,7 +644,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       scopes: [...scopes],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await post('credit-notes', rotated.secret, 'w3a-rotation', credit(sourceId, 'TOTAL')).expect(
@@ -1455,7 +1457,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       scopes: ['fiscal-v2:operations:read'],
       expiresAt: new Date(Date.now() + 30 * 86_400_000),
       rotationEndsAt: new Date(Date.now() + 60_000),
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await cancelInvoice(source, 'cancel-security-limited', limited.secret).expect(403);
@@ -1464,7 +1466,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       tenantId,
       associationId,
       apiKeyId: limited.apiKeyId,
-      actorId: randomUUID(),
+      actorId: adminUserId,
       correlationId: randomUUID(),
     });
     await workflowGet(cancel.body.workflowId, '/history', limited.secret).expect(401);

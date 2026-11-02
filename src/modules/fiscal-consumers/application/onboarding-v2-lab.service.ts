@@ -1,21 +1,9 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../infrastructure/database/prisma.service';
-import {
-  SECRET_PROVIDER,
-  SecretProvider,
-} from '../../../infrastructure/secrets/ports/secret-provider.port';
-import { Inject } from '@nestjs/common';
 import { FiscalOnboardingV1Service } from '../../fiscal-onboarding/application/fiscal-onboarding-v1.service';
-import { ConfigureConnectionHandler } from '../../hacienda-connection/application/use-cases/configure-connection/configure-connection.handler';
-import { UploadFiscalSigningCertificateService } from '../../fiscal-documents/application/fiscal-xml/upload-fiscal-signing-certificate.service';
 import { FiscalReadCertificateMetadataService } from '../../fiscal-documents/application/fiscal-xml/fiscal-read-certificate-metadata.service';
-import { ConsumerV2LabService } from './consumer-v2-lab.service';
+import { OnboardingV2MutationService } from '../infrastructure/persistence/onboarding-v2-mutation.service';
 import { PrismaConsumerV2Repository } from '../infrastructure/persistence/prisma-consumer-v2.repository';
 import { ConsumerV2Principal } from '../infrastructure/http/consumer-v2.guard';
 import {
@@ -31,12 +19,9 @@ export class OnboardingV2LabService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly onboarding: FiscalOnboardingV1Service,
-    private readonly configureConnection: ConfigureConnectionHandler,
-    private readonly uploadCertificate: UploadFiscalSigningCertificateService,
+    private readonly mutation: OnboardingV2MutationService,
     private readonly readCertificate: FiscalReadCertificateMetadataService,
-    private readonly consumers: ConsumerV2LabService,
     private readonly repository: PrismaConsumerV2Repository,
-    @Inject(SECRET_PROVIDER) private readonly secrets: SecretProvider,
   ) {}
 
   private actor(p: ConsumerV2Principal) {
@@ -174,63 +159,17 @@ export class OnboardingV2LabService {
     };
   }
 
-  async credentials(p: ConsumerV2Principal, dto: ConfigureCredentialsV2Dto, rotate: boolean) {
-    await this.assertCurrent(p, 'fiscal-v2:onboarding:credentials:write');
-    const previous = await this.prisma.haciendaConnection.findFirst({
-      where: { tenantId: p.tenantId, companyId: p.companyId, environment: p.environment },
-      select: { secretReference: true },
-    });
-    if (rotate && !previous) throw new NotFoundException({ code: 'HACIENDA_CONNECTION_NOT_FOUND' });
-    if (!rotate && previous)
-      throw new ConflictException({ code: 'HACIENDA_CONNECTION_ALREADY_CONFIGURED' });
-    const saved = await this.configureConnection.execute({
-      tenantId: p.tenantId,
-      companyId: p.companyId,
-      environment: p.environment,
-      username: dto.username,
-      password: dto.password,
-    });
-    if (rotate && previous?.secretReference !== saved.secretReference) {
-      // The previous reference is no longer in the connection row. Retire it only
-      // after the new credential is committed and its cache entry invalidated.
-      await this.secrets.deleteSecret(previous!.secretReference);
-    }
-    await this.prisma.auditLog.create({
-      data: {
-        id: randomUUID(),
-        tenantId: p.tenantId,
-        companyId: p.companyId,
-        apiKeyId: p.apiKeyId,
-        actor: this.actor(p),
-        action: rotate
-          ? 'onboarding-v2.credentials.rotated'
-          : 'onboarding-v2.credentials.configured',
-        eventClass: 'SECURITY',
-        metadata: { environment: p.environment, associationId: p.associationId },
-      },
-    });
-    return {
-      companyId: p.companyId,
-      environment: p.environment,
-      status: saved.status,
-      lastValidatedAt: saved.lastValidatedAt,
-    };
+  credentials(
+    p: ConsumerV2Principal,
+    dto: ConfigureCredentialsV2Dto,
+    rotate: boolean,
+    idempotencyKey: string,
+  ) {
+    return this.mutation.credentials(p, dto, rotate, idempotencyKey);
   }
 
-  async certificate(p: ConsumerV2Principal, bytes: Buffer, pin: string) {
-    await this.assertCurrent(p, 'fiscal-v2:onboarding:certificate:write');
-    if (!bytes.length || bytes.length > 1_048_576 || !pin?.trim())
-      throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_INPUT_INVALID' });
-    if (bytes[0] !== 0x30)
-      throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_FORMAT_INVALID' });
-    return this.uploadCertificate.execute({
-      tenantId: p.tenantId,
-      companyId: p.companyId,
-      environment: p.environment,
-      pkcs12Bytes: bytes,
-      pin,
-      actorUserId: this.actor(p),
-    });
+  certificate(p: ConsumerV2Principal, bytes: Buffer, pin: string, idempotencyKey: string) {
+    return this.mutation.certificate(p, bytes, pin, idempotencyKey);
   }
 
   async certificateMetadata(p: ConsumerV2Principal) {
@@ -242,33 +181,12 @@ export class OnboardingV2LabService {
     });
   }
 
-  async configureBranch(p: ConsumerV2Principal, dto: ConfigureBranchV2Dto) {
-    await this.assertCurrent(p, 'fiscal-v2:onboarding:issuance-point:write');
-    const branch = await this.onboarding.createBranch({
-      tenantId: p.tenantId,
-      companyId: p.companyId,
-      environment: p.environment,
-      code: dto.branchCode,
-      name: dto.branchName,
-      actor: this.actor(p),
-    });
-    const terminal = await this.onboarding.createTerminal({
-      tenantId: p.tenantId,
-      companyId: p.companyId,
-      environment: p.environment,
-      branchId: branch.id,
-      code: dto.terminalCode,
-      name: dto.terminalName,
-      actor: this.actor(p),
-    });
-    const point = await this.onboarding.selectDefaultIssuancePoint({
-      tenantId: p.tenantId,
-      companyId: p.companyId,
-      environment: p.environment,
-      terminalId: terminal.id,
-      actor: this.actor(p),
-    });
-    return { branch, terminal, issuancePoint: point };
+  configureBranch(p: ConsumerV2Principal, dto: ConfigureBranchV2Dto) {
+    return this.mutation.issuancePoint(p, dto);
+  }
+
+  recover(p: ConsumerV2Principal, operationId: string) {
+    return this.mutation.recover(p, operationId);
   }
 
   async testConnection(p: ConsumerV2Principal) {
@@ -360,19 +278,6 @@ export class OnboardingV2LabService {
       orderBy: { createdAt: 'desc' },
       take: 50,
       select: { id: true, action: true, createdAt: true, actor: true },
-    });
-  }
-
-  async reassign(p: ConsumerV2Principal, targetCompanyId: string, newExternalCompanyKey: string) {
-    await this.assertCurrent(p, 'fiscal-v2:onboarding:association:write');
-    return this.consumers.reassignIssuer({
-      tenantId: p.tenantId,
-      consumerId: p.consumerId,
-      associationId: p.associationId,
-      targetCompanyId,
-      newExternalCompanyKey,
-      actorId: p.apiKeyId,
-      correlationId: randomUUID(),
     });
   }
 }

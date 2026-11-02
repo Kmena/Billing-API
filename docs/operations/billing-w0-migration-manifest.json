@@ -114,5 +114,9 @@
   {
     "name": "20261118000000_billing_v2_fe_te_lab",
     "sha256": "0db23759ce22a592f19c3b6da11b7be2bfeb77e6f8e464ef91da1eacf77c39b5"
+  },
+  {
+    "name": "20261119000000_spec09_secure_onboarding",
+    "sha256": "c79d1c7928fcd076db82769111e8c81cb84fc767b87c76932bb838d19b361c5c"
   }
 ]

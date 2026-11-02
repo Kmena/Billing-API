@@ -3,8 +3,11 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Post,
+  Param,
+  ParseUUIDPipe,
   Put,
   Req,
   UploadedFile,
@@ -35,7 +38,6 @@ import {
   ConfigureBranchV2Dto,
   ConfigureCredentialsV2Dto,
   ConfigureIssuerV2Dto,
-  ReassignIssuerM2MV2Dto,
 } from './onboarding-v2.dto';
 
 /** Registered only in FiscalOnboardingAdminV2LabModule. No production route is enabled. */
@@ -69,19 +71,14 @@ export class OnboardingV2LabController {
     return this.service.associate(req.consumerV2, dto.externalCompanyKey);
   }
 
-  @Post('associations/reassign')
-  @ConsumerV2RequiredScope('fiscal-v2:onboarding:association:write')
-  reassign(@Req() req: { consumerV2: ConsumerV2Principal }, @Body() dto: ReassignIssuerM2MV2Dto) {
-    return this.service.reassign(req.consumerV2, dto.targetCompanyId, dto.newExternalCompanyKey);
-  }
-
   @Put('credentials')
   @ConsumerV2RequiredScope('fiscal-v2:onboarding:credentials:write')
   configureCredentials(
     @Req() req: { consumerV2: ConsumerV2Principal },
     @Body() dto: ConfigureCredentialsV2Dto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
-    return this.service.credentials(req.consumerV2, dto, false);
+    return this.service.credentials(req.consumerV2, dto, false, idempotencyKey ?? '');
   }
 
   @Post('credentials/rotate')
@@ -90,8 +87,9 @@ export class OnboardingV2LabController {
   rotateCredentials(
     @Req() req: { consumerV2: ConsumerV2Principal },
     @Body() dto: ConfigureCredentialsV2Dto,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
-    return this.service.credentials(req.consumerV2, dto, true);
+    return this.service.credentials(req.consumerV2, dto, true, idempotencyKey ?? '');
   }
 
   @Get('certificate')
@@ -112,10 +110,21 @@ export class OnboardingV2LabController {
     @Req() req: { consumerV2: ConsumerV2Principal },
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('pin') pin: string | undefined,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     if (!file?.buffer || !pin || file.mimetype !== 'application/x-pkcs12')
       throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_INPUT_INVALID' });
-    return this.service.certificate(req.consumerV2, file.buffer, pin);
+    return this.service.certificate(req.consumerV2, file.buffer, pin, idempotencyKey ?? '');
+  }
+
+  @Post('mutations/:operationId/recover')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:recovery:write')
+  @HttpCode(200)
+  recover(
+    @Req() req: { consumerV2: ConsumerV2Principal },
+    @Param('operationId', ParseUUIDPipe) operationId: string,
+  ) {
+    return this.service.recover(req.consumerV2, operationId);
   }
 
   @Put('issuance-point')

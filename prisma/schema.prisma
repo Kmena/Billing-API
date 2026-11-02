@@ -212,6 +212,7 @@ model Tenant {
   fiscalConsumerAssociations FiscalConsumerAssociation[]
   fiscalConsumerKeyBindings FiscalConsumerKeyBinding[]
   fiscalIdempotencyKeysV2   FiscalIdempotencyKeyV2[]
+  fiscalOnboardingMutationsV2 FiscalOnboardingMutationV2[]
 
   @@map("tenants")
 }
@@ -255,6 +256,7 @@ model Company {
   fiscalBranches             FiscalBranch[]
   fiscalTerminals            FiscalTerminal[]
   fiscalConsumerCompanies    FiscalConsumerCompany[]
+  fiscalOnboardingMutationsV2 FiscalOnboardingMutationV2[]
 
   @@unique([id, tenantId], map: "companies_id_tenant_v2_key")
 
@@ -428,11 +430,38 @@ model FiscalConsumerAssociation {
   keyBindings         FiscalConsumerKeyBinding[]
   idempotencyKeys     FiscalIdempotencyKeyV2[]
   originDocuments     FiscalDocument[]            @relation("V2OriginAssociation")
+  onboardingMutations FiscalOnboardingMutationV2[]
 
   @@unique([consumerCompanyId, environment], map: "fiscal_consumer_associations_company_environment_key")
   @@unique([id, tenantId], map: "fiscal_consumer_associations_id_tenant_key")
   @@unique([id, tenantId, environment], map: "fiscal_consumer_associations_id_tenant_environment_key")
   @@map("fiscal_consumer_associations")
+}
+
+// SPEC-09: durable operation ledger contains references and safe metadata only.
+model FiscalOnboardingMutationV2 {
+  id                      String              @id @db.Uuid
+  tenantId                String              @map("tenant_id") @db.Uuid
+  companyId               String              @map("company_id") @db.Uuid
+  associationId           String              @map("association_id") @db.Uuid
+  environment             HaciendaEnvironment
+  operation               String              @db.VarChar(40)
+  idempotencyKey          String              @map("idempotency_key") @db.VarChar(128)
+  requestDigest           String              @map("request_digest") @db.Char(64)
+  state                   String              @db.VarChar(40)
+  newSecretReferences     Json                @map("new_secret_references")
+  retiredSecretReferences Json                @map("retired_secret_references")
+  response                Json?
+  createdAt               DateTime            @default(now()) @map("created_at")
+  updatedAt               DateTime            @updatedAt @map("updated_at")
+  tenant                  Tenant              @relation(fields: [tenantId], references: [id])
+  company                 Company             @relation(fields: [companyId, tenantId], references: [id, tenantId])
+  association             FiscalConsumerAssociation @relation(fields: [associationId, tenantId, environment], references: [id, tenantId, environment])
+
+  @@unique([associationId, operation, idempotencyKey], map: "fiscal_onboarding_mutation_v2_idempotency_key")
+  @@index([state, updatedAt], map: "fiscal_onboarding_mutation_v2_recovery_idx")
+  @@index([tenantId, companyId, environment], map: "fiscal_onboarding_mutation_v2_scope_idx")
+  @@map("fiscal_onboarding_mutations_v2")
 }
 
 model FiscalConsumerKeyBinding {

@@ -3,6 +3,7 @@ info:
   title: Billing administrative fiscal onboarding M2M v2 laboratory
   version: 2.0.0-lab
   description: Isolated test module only. AppModule does not register these routes. No Hacienda call or document issuance is made by connection-test.
+x-initial-binding: A local disposable-lab command verifies an active Billing TENANT_ADMIN password and creates the initial SANDBOX association. M2M keys cannot self-grant.
 servers:
   - url: http://127.0.0.1:3000
 security:
@@ -13,6 +14,10 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+    BillingAdminJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     companyId:
       in: path
@@ -24,6 +29,27 @@ components:
       name: environment
       required: true
       schema: { type: string, enum: [SANDBOX, PRODUCTION] }
+    idempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      schema: { type: string, pattern: '^[A-Za-z0-9:_-]{8,128}$' }
+      description: Unique per association and operation. Reuse with a different payload returns 409.
+    operationId:
+      in: path
+      name: operationId
+      required: true
+      schema: { type: string, format: uuid }
+    consumerId:
+      in: path
+      name: consumerId
+      required: true
+      schema: { type: string, format: uuid }
+    associationId:
+      in: path
+      name: associationId
+      required: true
+      schema: { type: string, format: uuid }
   schemas:
     Error:
       type: object
@@ -174,17 +200,18 @@ paths:
     post:
       operationId: associateCompanyV2
       x-required-scope: fiscal-v2:onboarding:association:write
-      description: Idempotently confirms the bound external company key. Initial association uses Billing administrator JWT; a different issuer uses reassignment.
+      description: Idempotently confirms the bound external company key. This M2M route cannot create a first association or reassign an issuer.
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Association' } } } }
       responses:
         '201': { description: Association created or replayed. }
         '409': { description: External key differs from the bound key. }
-  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/associations/reassign:
-    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+  /api/v2/integrations/consumers/{consumerId}/associations/{associationId}/reassign:
+    parameters: [{ $ref: '#/components/parameters/consumerId' }, { $ref: '#/components/parameters/associationId' }]
     post:
-      operationId: reassignFiscalIssuerV2
-      x-required-scope: fiscal-v2:onboarding:association:write
-      description: Creates a successor after target preflight and pending-operation checks; revokes old association keys and keeps historical documents.
+      operationId: reassignFiscalIssuerByBillingAdminV2
+      security: [{ BillingAdminJWT: [] }]
+      x-required-role: TENANT_ADMIN
+      description: Billing administrator route only. Rechecks the current user role in the same transaction as issuer succession, target preflight, old-key revocation and audit. M2M keys cannot call this route.
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reassignment' } } } }
       responses:
         '201': { description: Successor association. }
@@ -195,6 +222,7 @@ paths:
     put:
       operationId: configureHaciendaCredentialsV2
       x-required-scope: fiscal-v2:onboarding:credentials:write
+      parameters: [{ $ref: '#/components/parameters/idempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } } }
       responses:
         '200': { description: Status only; secrets and references are never returned. }
@@ -204,6 +232,7 @@ paths:
     post:
       operationId: rotateHaciendaCredentialsV2
       x-required-scope: fiscal-v2:onboarding:credentials:write
+      parameters: [{ $ref: '#/components/parameters/idempotencyKey' }]
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } } }
       responses:
         '200': { description: New secret reference committed; old reference deleted; validation state reset. }
@@ -219,6 +248,7 @@ paths:
     post:
       operationId: uploadCertificateV2
       x-required-scope: fiscal-v2:onboarding:certificate:write
+      parameters: [{ $ref: '#/components/parameters/idempotencyKey' }]
       requestBody:
         required: true
         content:
@@ -233,6 +263,17 @@ paths:
         '201': { description: Safe certificate metadata after identity and PIN validation. }
         '400': { description: File, media type, size or PIN field invalid. }
         '422': { description: Certificate PIN, identity or validity invalid. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/mutations/{operationId}/recover:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }, { $ref: '#/components/parameters/operationId' }]
+    post:
+      operationId: recoverFiscalOnboardingMutationV2
+      x-required-scope: fiscal-v2:onboarding:recovery:write
+      description: Retries compensation of an interrupted secret write or retirement after commit. A STAGED operation must be older than ten minutes. No secret value is returned.
+      responses:
+        '200': { description: Operation ID and durable recovery state only. }
+        '403': { description: Key, association, environment or scope invalid. }
+        '404': { description: Operation is not visible to this association. }
+        '409': { description: Operation is still in progress. }
   /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/issuance-point:
     parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
     put:

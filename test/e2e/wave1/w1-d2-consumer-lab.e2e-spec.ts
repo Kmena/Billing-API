@@ -14,7 +14,7 @@ import {
 } from '../../../src/modules/fiscal-consumers/infrastructure/http/consumer-v2.guard';
 import { ConsumerV2RequiredScope } from '../../../src/modules/fiscal-consumers/infrastructure/http/consumer-v2-scope.decorator';
 import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
-import { createTestCompany, createTestTenant } from '../../helpers/test-factories';
+import { createTestCompany, createTestTenant, createTestUser } from '../../helpers/test-factories';
 import {
   assertOwnedTestTenants,
   releaseOwnedTestTenants,
@@ -54,6 +54,8 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
   let service: ConsumerV2LabService;
   let tenantA: string;
   let tenantB: string;
+  let adminA: string;
+  let adminB: string;
   let companyA1: string;
   let companyA2: string;
   let companyB: string;
@@ -93,7 +95,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       externalConsumerKey,
       externalCompanyKey,
       environment,
-      actorId: randomUUID(),
+      actorId: tenantId === tenantA ? adminA : adminB,
       correlationId: randomUUID(),
     });
   const issue = (tenantId: string, associationId: string, requestedScopes = [...scopes]) =>
@@ -102,7 +104,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       associationId,
       scopes: requestedScopes,
       expiresAt: expiresAt(),
-      actorId: randomUUID(),
+      actorId: tenantId === tenantA ? adminA : adminB,
       correlationId: randomUUID(),
     });
   const operation = (
@@ -129,6 +131,8 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
     service = app.get(ConsumerV2LabService);
     tenantA = (await createTestTenant(prisma)).id;
     tenantB = (await createTestTenant(prisma)).id;
+    adminA = (await createTestUser(prisma, tenantA)).id;
+    adminB = (await createTestUser(prisma, tenantB)).id;
     companyA1 = (await createTestCompany(prisma, tenantA)).id;
     companyA2 = (await createTestCompany(prisma, tenantA)).id;
     companyB = (await createTestCompany(prisma, tenantB)).id;
@@ -172,11 +176,13 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       await prisma.companyFiscalProfile.deleteMany({ where: tenantScope });
       await prisma.companyEconomicActivity.deleteMany({ where: tenantScope });
       await prisma.fiscalConsumerKeyBinding.deleteMany({ where: tenantScope });
+      await prisma.fiscalOnboardingMutationV2.deleteMany({ where: tenantScope });
       await prisma.auditLog.deleteMany({ where: tenantScope });
       await prisma.apiKey.deleteMany({ where: tenantScope });
       await prisma.fiscalConsumerAssociation.deleteMany({ where: tenantScope });
       await prisma.fiscalConsumerCompany.deleteMany({ where: tenantScope });
       await prisma.fiscalConsumer.deleteMany({ where: tenantScope });
+      await prisma.user.deleteMany({ where: tenantScope });
       await prisma.company.deleteMany({ where: tenantScope });
       await prisma.tenant.deleteMany({ where: { id: { in: [...ids] } } });
       await releaseOwnedTestTenants(prisma, ids);
@@ -266,7 +272,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       scopes: ['fiscal-v2:readiness:read'],
       expiresAt: expiresAt(),
       rotationEndsAt: new Date(Date.now() + 3600_000),
-      actorId: randomUUID(),
+      actorId: adminA,
       correlationId: randomUUID(),
     });
     await request(app.getHttpServer())
@@ -350,7 +356,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       scopes: [...scopes],
       expiresAt: expiresAt(),
       rotationEndsAt,
-      actorId: randomUUID(),
+      actorId: adminA,
       correlationId: randomUUID(),
     });
     expect(
@@ -369,7 +375,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         scopes: [...scopes],
         expiresAt: expiresAt(),
         rotationEndsAt: new Date(Date.now() + 3600_000),
-        actorId: randomUUID(),
+        actorId: adminA,
         correlationId: randomUUID(),
       }),
     ).rejects.toMatchObject({ status: 409 });
@@ -381,7 +387,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         tenantId: tenantA,
         associationId: first.associationId,
         apiKeyId: firstKey.apiKeyId,
-        actorId: randomUUID(),
+        actorId: adminA,
         correlationId: randomUUID(),
       }),
     ).toEqual({ revoked: true });
@@ -398,7 +404,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         tenantId: tenantA,
         associationId: first.associationId,
         apiKeyId: firstKey.apiKeyId,
-        actorId: randomUUID(),
+        actorId: adminA,
         correlationId: randomUUID(),
       }),
     ).toEqual({ revoked: false });
@@ -407,7 +413,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         tenantId: tenantA,
         associationId: partner.associationId,
         apiKeyId: rotation.apiKeyId,
-        actorId: randomUUID(),
+        actorId: adminA,
         correlationId: randomUUID(),
       }),
     ).rejects.toMatchObject({ status: 404 });
@@ -491,7 +497,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
         externalConsumerKey: 'rollback-me',
         externalCompanyKey: 'rollback-issuer',
         environment: 'SANDBOX',
-        actorId: randomUUID(),
+        actorId: adminA,
         correlationId: 'x'.repeat(37),
       }),
     ).rejects.toBeDefined();
@@ -595,7 +601,7 @@ describe('W1-D2 isolated PostgreSQL and M2M guard lab', () => {
       'SANDBOX',
     );
     const oldKey = await issue(tenantA, old.associationId);
-    const actorId = randomUUID();
+    const actorId = adminA;
     const command = {
       tenantId: tenantA,
       consumerId: old.consumerId,
