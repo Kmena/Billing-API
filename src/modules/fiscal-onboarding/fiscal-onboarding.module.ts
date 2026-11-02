@@ -35,5 +35,6 @@ import {
     IntegrationProfileGuard,
     BootstrapIntegrationProfileGuard,
   ],
+  exports: [FiscalOnboardingV1Service],
 })
 export class FiscalOnboardingModule {}

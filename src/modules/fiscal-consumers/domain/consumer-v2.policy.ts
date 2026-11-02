@@ -11,6 +11,14 @@ export const CONSUMER_V2_LAB_SCOPES = [
   'fiscal-v2:tickets:create',
   'fiscal-v2:credit-notes:create',
   'fiscal-v2:debit-notes:create',
+  'fiscal-v2:onboarding:read',
+  'fiscal-v2:onboarding:issuer:write',
+  'fiscal-v2:onboarding:association:write',
+  'fiscal-v2:onboarding:certificate:write',
+  'fiscal-v2:onboarding:credentials:write',
+  'fiscal-v2:onboarding:issuance-point:write',
+  'fiscal-v2:onboarding:connection:test',
+  'fiscal-v2:onboarding:audit:read',
 ] as const;
 export type ConsumerV2Scope = (typeof CONSUMER_V2_LAB_SCOPES)[number];
 export type FiscalEnvironmentV2 = 'SANDBOX' | 'PRODUCTION';

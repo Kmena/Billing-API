@@ -1,0 +1,257 @@
+openapi: 3.0.3
+info:
+  title: Billing administrative fiscal onboarding M2M v2 laboratory
+  version: 2.0.0-lab
+  description: Isolated test module only. AppModule does not register these routes. No Hacienda call or document issuance is made by connection-test.
+servers:
+  - url: http://127.0.0.1:3000
+security:
+  - M2MKey: []
+components:
+  securitySchemes:
+    M2MKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    companyId:
+      in: path
+      name: companyId
+      required: true
+      schema: { type: string, format: uuid }
+    environment:
+      in: path
+      name: environment
+      required: true
+      schema: { type: string, enum: [SANDBOX, PRODUCTION] }
+  schemas:
+    Error:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    ConfigurationResponse:
+      type: object
+      required: [contractVersion, companyId, environment, associationId, issuer, hacienda, certificate, productionAuthorized]
+      properties:
+        contractVersion: { type: string, enum: ['2.0-lab'] }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        associationId: { type: string, format: uuid }
+        issuer: { $ref: '#/components/schemas/Issuer' }
+        hacienda:
+          type: object
+          properties:
+            status: { type: string, enum: [NOT_CONFIGURED, PENDING_VALIDATION, CONNECTED, INVALID_CREDENTIALS, UNAVAILABLE, DISABLED] }
+            lastValidatedAt: { type: string, format: date-time, nullable: true }
+        certificate: { $ref: '#/components/schemas/CertificateMetadata' }
+        issuancePoint: { type: object, nullable: true }
+        productionAuthorized: { type: boolean, enum: [false] }
+    CertificateMetadata:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [ACTIVE, MISSING] }
+        fingerprintSha256: { type: string, nullable: true }
+        validFrom: { type: string, format: date-time, nullable: true }
+        validTo: { type: string, format: date-time, nullable: true }
+      description: Contains metadata only, never the PKCS#12, PIN, password or secret references.
+    ReadinessResponse:
+      type: object
+      required: [companyId, environment, status, readyToIssue, blockers, dimensions]
+      properties:
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX, PRODUCTION] }
+        status: { type: string, enum: [READY, NOT_READY] }
+        readyToIssue: { type: boolean }
+        blockers: { type: array, items: { type: string } }
+        dimensions: { type: object, additionalProperties: true }
+    AuditEvent:
+      type: object
+      required: [id, action, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string }
+        actor: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Issuer:
+      type: object
+      required: [legalName, identificationType, identificationNumber]
+      additionalProperties: false
+      properties:
+        legalName: { type: string, minLength: 2, maxLength: 255, example: 'Emisor sintético S.A.' }
+        identificationType: { type: string, enum: [FISICA, JURIDICA, DIMEX, NITE] }
+        identificationNumber: { type: string, example: '3102123456' }
+    Association:
+      type: object
+      required: [externalCompanyKey]
+      additionalProperties: false
+      properties:
+        externalCompanyKey: { type: string, minLength: 1, maxLength: 128, example: 'affiliations:test-company-01' }
+    Reassignment:
+      type: object
+      required: [targetCompanyId, newExternalCompanyKey]
+      additionalProperties: false
+      properties:
+        targetCompanyId: { type: string, format: uuid }
+        newExternalCompanyKey: { type: string, minLength: 1, maxLength: 128 }
+    Credentials:
+      type: object
+      required: [username, password]
+      additionalProperties: false
+      properties:
+        username: { type: string, minLength: 1, maxLength: 100, example: 'synthetic-user' }
+        password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 200, example: 'synthetic-secret' }
+    IssuancePoint:
+      type: object
+      required: [branchCode, branchName, terminalCode, terminalName]
+      additionalProperties: false
+      properties:
+        branchCode: { type: string, pattern: '^\d{3}$', example: '001' }
+        branchName: { type: string, maxLength: 120, example: 'Principal sintética' }
+        terminalCode: { type: string, pattern: '^\d{5}$', example: '00001' }
+        terminalName: { type: string, maxLength: 120, example: 'Caja sintética' }
+    ConnectionTest:
+      type: object
+      properties:
+        technicalConnection: { type: string, enum: [READY, INCOMPLETE] }
+        productionAuthorization: { type: string, enum: [NOT_VERIFIED] }
+        issuedDocument: { type: boolean, enum: [false] }
+        externalCall: { type: boolean, enum: [false] }
+        checks:
+          type: object
+          properties:
+            service: { type: boolean }
+            m2mIdentity: { type: boolean }
+            association: { type: boolean }
+            environment: { type: boolean }
+            scopes: { type: boolean }
+            certificate: { type: boolean }
+            hacienda: { type: boolean }
+            issuancePoint: { type: boolean }
+            fe: { type: boolean }
+            te: { type: boolean }
+  responses:
+    Unauthorized:
+      description: Missing, invalid, revoked or expired M2M key.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Scope, binding, environment or browser origin denied.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Company or association not visible to this key.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+paths:
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    get:
+      operationId: getFiscalConfigurationV2
+      x-required-scope: fiscal-v2:onboarding:read
+      responses:
+        '200': { description: Sanitized fiscal configuration, content: { application/json: { schema: { $ref: '#/components/schemas/ConfigurationResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/status:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    get:
+      operationId: getFiscalOnboardingStatusV2
+      x-required-scope: fiscal-v2:onboarding:read
+      responses:
+        '200': { description: Billing readiness dimensions and blockers, content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessResponse' } } } }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/issuer:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    put:
+      operationId: configureFiscalIssuerV2
+      x-required-scope: fiscal-v2:onboarding:issuer:write
+      description: Legal identification must equal the existing Billing company. A different identity requires association succession.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Issuer' } } } }
+      responses:
+        '200': { description: Issuer display name updated for future operations. }
+        '409': { description: Legal identity mismatch or pending fiscal operations. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/associations:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: associateCompanyV2
+      x-required-scope: fiscal-v2:onboarding:association:write
+      description: Idempotently confirms the bound external company key. Initial association uses Billing administrator JWT; a different issuer uses reassignment.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Association' } } } }
+      responses:
+        '201': { description: Association created or replayed. }
+        '409': { description: External key differs from the bound key. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/associations/reassign:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: reassignFiscalIssuerV2
+      x-required-scope: fiscal-v2:onboarding:association:write
+      description: Creates a successor after target preflight and pending-operation checks; revokes old association keys and keeps historical documents.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Reassignment' } } } }
+      responses:
+        '201': { description: Successor association. }
+        '409': { description: Pending operations, mapping conflict or concurrency conflict. }
+        '422': { description: Target issuer lacks verified configuration. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/credentials:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    put:
+      operationId: configureHaciendaCredentialsV2
+      x-required-scope: fiscal-v2:onboarding:credentials:write
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } } }
+      responses:
+        '200': { description: Status only; secrets and references are never returned. }
+        '409': { description: Credentials already configured. Use rotation. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/credentials/rotate:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: rotateHaciendaCredentialsV2
+      x-required-scope: fiscal-v2:onboarding:credentials:write
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Credentials' } } } }
+      responses:
+        '200': { description: New secret reference committed; old reference deleted; validation state reset. }
+        '404': { description: No connection to rotate. }
+        '409': { description: Concurrent rotation conflict. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/certificate:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    get:
+      operationId: getCertificateMetadataV2
+      x-required-scope: fiscal-v2:onboarding:read
+      responses:
+        '200': { description: Certificate metadata only, without PKCS#12, PIN or secret references, content: { application/json: { schema: { $ref: '#/components/schemas/CertificateMetadata' } } } }
+    post:
+      operationId: uploadCertificateV2
+      x-required-scope: fiscal-v2:onboarding:certificate:write
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [certificate, pin]
+              properties:
+                certificate: { type: string, format: binary, description: PKCS#12, maximum 1048576 bytes }
+                pin: { type: string, format: password, writeOnly: true }
+      responses:
+        '201': { description: Safe certificate metadata after identity and PIN validation. }
+        '400': { description: File, media type, size or PIN field invalid. }
+        '422': { description: Certificate PIN, identity or validity invalid. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/issuance-point:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    put:
+      operationId: configureIssuancePointV2
+      x-required-scope: fiscal-v2:onboarding:issuance-point:write
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/IssuancePoint' } } } }
+      responses:
+        '200': { description: Branch, terminal and selected default point. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/connection-test:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: testFiscalConnectionV2
+      x-required-scope: fiscal-v2:onboarding:connection:test
+      responses:
+        '200': { description: Local technical checks only, content: { application/json: { schema: { $ref: '#/components/schemas/ConnectionTest' } } } }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/audit:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    get:
+      operationId: getFiscalOnboardingAuditV2
+      x-required-scope: fiscal-v2:onboarding:audit:read
+      responses:
+        '200': { description: Last 50 safe v2 action metadata records, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } } } } }
