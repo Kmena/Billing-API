@@ -1,5 +1,7 @@
 /** W1 policy used only by the isolated laboratory module. */
 export const BILLING_CONSUMER_V2_PROFILE = 'billing-consumer-v2' as const;
+/** Issued by a Billing administrator for one company and SANDBOX only. */
+export const AFFILIATIONS_ENROLLMENT_V2_PROFILE = 'affiliations-enrollment-v2' as const;
 export const CONSUMER_V2_ASSOCIATION_CONTRACT = 'fiscal-consumer-v2' as const;
 export const CONSUMER_V2_W1_SCOPES = [
   'fiscal-v2:readiness:read',
@@ -11,6 +13,19 @@ export const CONSUMER_V2_LAB_SCOPES = [
   'fiscal-v2:tickets:create',
   'fiscal-v2:credit-notes:create',
   'fiscal-v2:debit-notes:create',
+  'fiscal-v2:onboarding:read',
+  'fiscal-v2:onboarding:issuer:write',
+  'fiscal-v2:onboarding:association:write',
+  'fiscal-v2:onboarding:certificate:write',
+  'fiscal-v2:onboarding:credentials:write',
+  'fiscal-v2:onboarding:recovery:write',
+  'fiscal-v2:onboarding:issuance-point:write',
+  'fiscal-v2:onboarding:connection:test',
+  'fiscal-v2:onboarding:audit:read',
+  'fiscal-v2:onboarding:request',
+] as const;
+export const AFFILIATIONS_ENROLLMENT_V2_SCOPES = [
+  'fiscal-v2:onboarding:request',
   'fiscal-v2:onboarding:read',
   'fiscal-v2:onboarding:issuer:write',
   'fiscal-v2:onboarding:association:write',
@@ -112,13 +127,26 @@ export function authorizeConsumerV2(input: {
   requiredScope: ConsumerV2Scope;
   now: Date;
   tenantActive?: boolean;
+  grantCompanyIds?: readonly string[];
 }): ConsumerV2Authorization {
   const { key, binding, association, consumer, requestedCompany } = input;
   if (!key || key.status !== 'ACTIVE' || !key.expiresAt || key.expiresAt <= input.now) {
     return deny(401, 'CONSUMER_KEY_UNAUTHORIZED');
   }
   if (input.tenantActive === false) return deny(403, 'CONSUMER_TENANT_INACTIVE');
-  if (key.integrationProfile !== BILLING_CONSUMER_V2_PROFILE) {
+  if (
+    key.integrationProfile !== BILLING_CONSUMER_V2_PROFILE &&
+    key.integrationProfile !== AFFILIATIONS_ENROLLMENT_V2_PROFILE
+  ) {
+    return deny(403, 'INTEGRATION_PROFILE_NOT_AUTHORIZED');
+  }
+  if (
+    key.integrationProfile === AFFILIATIONS_ENROLLMENT_V2_PROFILE &&
+    (key.scopes.length !== AFFILIATIONS_ENROLLMENT_V2_SCOPES.length ||
+      !AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => key.scopes.includes(scope)) ||
+      input.grantCompanyIds?.length !== 1 ||
+      input.grantCompanyIds[0] !== input.requestedCompanyId)
+  ) {
     return deny(403, 'INTEGRATION_PROFILE_NOT_AUTHORIZED');
   }
   if (!binding || binding.apiKeyId !== key.id) return deny(403, 'CONSUMER_BINDING_REQUIRED');

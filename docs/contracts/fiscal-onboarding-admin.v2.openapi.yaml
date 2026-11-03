@@ -3,7 +3,7 @@ info:
   title: Billing administrative fiscal onboarding M2M v2 laboratory
   version: 2.0.0-lab
   description: Isolated test module only. AppModule does not register these routes. No Hacienda call or document issuance is made by connection-test.
-x-initial-binding: A local disposable-lab command verifies an active Billing TENANT_ADMIN password and creates the initial SANDBOX association. M2M keys cannot self-grant.
+x-initial-binding: A Billing administrator pre-issues a one-company SANDBOX enrollment key locally. Afiliaciones then requests automatic technical association with matching PKCS#12/PIN and fiscal credentials. No production authorization is granted.
 servers:
   - url: http://127.0.0.1:3000
 security:
@@ -56,6 +56,19 @@ components:
       required: [code]
       properties:
         code: { type: string }
+    EnrollmentResponse:
+      type: object
+      required: [requestId, associationId, companyId, environment, status, certificateId, haciendaStatus, productionAuthorized]
+      additionalProperties: false
+      properties:
+        requestId: { type: string, format: uuid }
+        associationId: { type: string, format: uuid }
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX] }
+        status: { type: string, enum: [APPROVED] }
+        certificateId: { type: string, format: uuid }
+        haciendaStatus: { type: string, enum: [PENDING_VALIDATION] }
+        productionAuthorized: { type: boolean, enum: [false] }
     ConfigurationResponse:
       type: object
       required: [contractVersion, companyId, environment, associationId, issuer, hacienda, certificate, productionAuthorized]
@@ -168,6 +181,48 @@ components:
       description: Company or association not visible to this key.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
 paths:
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/requests:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: requestFiscalEnrollmentV2
+      x-required-scope: fiscal-v2:onboarding:request
+      description: SANDBOX only. Requires a Billing-issued key pre-authorized for exactly one Billing company and one Afiliaciones company. Verifies issuer identity, PKCS#12 and PIN; Hacienda credentials are stored as PENDING_VALIDATION without contacting Hacienda.
+      parameters: [{ $ref: '#/components/parameters/idempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [externalCompanyKey, certificate, pin, username, password]
+              properties:
+                externalCompanyKey: { type: string, pattern: '^affiliations:[0-9a-fA-F-]{36}$' }
+                certificate: { type: string, format: binary, description: PKCS#12, maximum 1 MiB }
+                pin: { type: string, format: password, writeOnly: true }
+                username: { type: string, writeOnly: true }
+                password: { type: string, format: password, writeOnly: true }
+      responses:
+        '200': { description: Technical association approved; Hacienda remains pending., content: { application/json: { schema: { $ref: '#/components/schemas/EnrollmentResponse' } } } }
+        '400': { description: Invalid request or company key. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Duplicate, changed idempotency payload, or recovery required. }
+        '422': { description: Invalid PIN, certificate or issuer mismatch. }
+        '503': { description: Durable secret store or transaction unavailable. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/requests/{requestId}/recover:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: recoverFiscalEnrollmentV2
+      x-required-scope: fiscal-v2:onboarding:request
+      description: Compensates a staged request after interruption; replay the same idempotency key and payload after COMPENSATED.
+      parameters:
+        - in: path
+          name: requestId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Safe request state only. }
+        '409': { description: Request is still within its active lease. }
   /api/v2/companies/{companyId}/fiscal-onboarding/{environment}:
     parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
     get:

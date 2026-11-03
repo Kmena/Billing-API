@@ -47,7 +47,7 @@ export class ConsumerV2Guard implements CanActivate {
 
     const key = await this.prisma.apiKey.findUnique({
       where: { keyPrefix: match[2] },
-      include: { tenant: true },
+      include: { tenant: true, companies: true },
     });
     let validSecret = false;
     try {
@@ -130,6 +130,7 @@ export class ConsumerV2Guard implements CanActivate {
       requiredScope,
       now: new Date(),
       tenantActive: key.tenant.status === 'ACTIVE',
+      grantCompanyIds: key.companies.map((company) => company.companyId),
     });
     if (!decision.allowed) throw new HttpException({ code: decision.code }, decision.status);
     request.consumerV2 = decision.principal;

@@ -16,6 +16,7 @@ import {
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
 import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/application/consumer-v2-lab.service';
 import { OnboardingV2MutationService } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/onboarding-v2-mutation.service';
+import { EnrollmentV2Service } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/enrollment-v2.service';
 import { CONSUMER_V2_LAB_SCOPES } from '../../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import { FiscalOnboardingAdminV2LabModule } from '../../../src/modules/fiscal-consumers/fiscal-onboarding-admin-v2-lab.module';
 import { createTestSigningMaterialWithFiscalId } from '../../../src/modules/fiscal-documents/domain/fiscal-xml/__tests__/fiscal-xml-test-fixtures';
@@ -248,6 +249,277 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
         where: { tenantId, consumerCompany: { externalCompanyKey: 'spec09-local-company' } },
       }),
     ).toBe(1);
+  });
+
+  it('auto-approves a pre-authorized Afiliaciones request only after certificate validation', async () => {
+    const enrolled = await createFiscalTenantFixture(context);
+    const billingCompanyId = enrolled.companyId;
+    const affiliationsCompanyId = randomUUID();
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { id: enrolled.userId },
+      select: { email: true },
+    });
+    const command = [
+      'node_modules/ts-node/dist/bin.js',
+      '-r',
+      'tsconfig-paths/register',
+      join('scripts', 'spec09-issue-enrollment-key-lab.ts'),
+      enrolled.tenantId,
+      billingCompanyId,
+      affiliationsCompanyId,
+      admin.email,
+    ];
+    const invoke = (password: string) =>
+      spawnSync(process.execPath, command, {
+        cwd: process.cwd(),
+        env: process.env,
+        input: `${password}\n`,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+    expect(invoke('invalid-synthetic-password').status).toBe(1);
+    const provisioned = invoke('SecurePass123!');
+    expect(provisioned.status).toBe(0);
+    const key = (JSON.parse(provisioned.stdout) as { key: string }).key;
+    expect(invoke('SecurePass123!').status).toBe(1);
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: billingCompanyId } });
+    const signing = createTestSigningMaterialWithFiscalId(
+      `CPJ-${company.identificationNumber}`,
+      'enrollment-synthetic-pin',
+    );
+    const endpoint = `/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX/requests`;
+    const submit = (
+      pin: string,
+      idempotencyKey: string,
+      externalCompanyKey = `affiliations:${affiliationsCompanyId}`,
+    ) =>
+      request(app.getHttpServer())
+        .post(endpoint)
+        .set('X-API-Key', key)
+        .set('Idempotency-Key', idempotencyKey)
+        .field('externalCompanyKey', externalCompanyKey)
+        .field('pin', pin)
+        .field('username', 'synthetic-hacienda-user')
+        .field('password', 'synthetic-hacienda-password')
+        .attach('certificate', signing.pkcs12Bytes, {
+          filename: 'synthetic.p12',
+          contentType: 'application/x-pkcs12',
+        });
+    const isolatedSecrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    Object.defineProperty(isolatedSecrets, 'isDurable', { value: true });
+    await submit('wrong-pin', 'enroll-wrong-pin-001').expect(422);
+    await submit(
+      signing.passphrase,
+      'enroll-wrong-company-001',
+      `affiliations:${randomUUID()}`,
+    ).expect(400);
+    await request(app.getHttpServer())
+      .post(endpoint)
+      .set('X-API-Key', secret)
+      .set('Idempotency-Key', 'enroll-self-grant-001')
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(endpoint)
+      .set('X-API-Key', key)
+      .set('Origin', 'https://synthetic.example')
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/v2/companies/${randomUUID()}/fiscal-onboarding/SANDBOX/requests`)
+      .set('X-API-Key', key)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/PRODUCTION/requests`)
+      .set('X-API-Key', key)
+      .expect(403);
+    expect(
+      await prisma.fiscalSigningCertificate.count({
+        where: { companyId: billingCompanyId, status: 'ACTIVE' },
+      }),
+    ).toBe(0);
+    const approved = await submit(signing.passphrase, 'enroll-approved-001').expect(200);
+    expect(approved.body).toMatchObject({
+      companyId: billingCompanyId,
+      environment: 'SANDBOX',
+      status: 'APPROVED',
+      haciendaStatus: 'PENDING_VALIDATION',
+      productionAuthorized: false,
+    });
+    const replay = await submit(signing.passphrase, 'enroll-approved-001').expect(200);
+    expect(replay.body).toEqual(approved.body);
+    await submit(signing.passphrase, 'enroll-duplicate-001').expect(409);
+    const rendered = JSON.stringify(approved.body);
+    expect(rendered).not.toContain(signing.passphrase);
+    expect(rendered).not.toContain('synthetic-hacienda-password');
+    expect(rendered).not.toContain('SecretReference');
+    const cert = await prisma.fiscalSigningCertificate.findFirstOrThrow({
+      where: { companyId: billingCompanyId, status: 'ACTIVE' },
+    });
+    const conn = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { companyId: billingCompanyId, environment: 'SANDBOX' },
+    });
+    expect(conn.status).toBe('PENDING_VALIDATION');
+    expect(await isolatedSecrets.getSecret(cert.passwordSecretReference)).toBe(signing.passphrase);
+    expect(await isolatedSecrets.getSecret(conn.secretReference)).toContain(
+      'synthetic-hacienda-user',
+    );
+    const auditActions = (
+      await prisma.auditLog.findMany({
+        where: { tenantId: enrolled.tenantId },
+        select: { action: true },
+      })
+    ).map((row) => row.action);
+    expect(auditActions).toContain('onboarding-v2.enrollment.approved');
+    const keyId = (
+      await prisma.apiKey.findFirstOrThrow({
+        where: { keyPrefix: key.split('_')[2] },
+        select: { id: true },
+      })
+    ).id;
+    await prisma.apiKey.update({ where: { id: keyId }, data: { status: 'REVOKED' } });
+    await submit(signing.passphrase, 'enroll-revoked-001').expect(401);
+    const renewed = invoke('SecurePass123!');
+    expect(renewed.status).toBe(0);
+    const newKey = (JSON.parse(renewed.stdout) as { key: string }).key;
+    expect(newKey).not.toBe(key);
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', newKey)
+      .expect(200);
+    const rotated = spawnSync(process.execPath, [...command, '--rotate'], {
+      cwd: process.cwd(),
+      env: process.env,
+      input: 'SecurePass123!\n',
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    expect(rotated.status).toBe(0);
+    const rotatedKey = (JSON.parse(rotated.stdout) as { key: string }).key;
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', newKey)
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', rotatedKey)
+      .expect(200);
+  });
+
+  it('compensates initial enrollment storage and audit failures, then recovers and retries', async () => {
+    const enrolled = await createFiscalTenantFixture(context);
+    const externalCompanyId = randomUUID();
+    const admin = await prisma.user.findUniqueOrThrow({
+      where: { id: enrolled.userId },
+      select: { email: true },
+    });
+    const issued = spawnSync(
+      process.execPath,
+      [
+        'node_modules/ts-node/dist/bin.js',
+        '-r',
+        'tsconfig-paths/register',
+        join('scripts', 'spec09-issue-enrollment-key-lab.ts'),
+        enrolled.tenantId,
+        enrolled.companyId,
+        externalCompanyId,
+        admin.email,
+      ],
+      {
+        cwd: process.cwd(),
+        env: process.env,
+        input: 'SecurePass123!\n',
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    expect(issued.status).toBe(0);
+    const key = (JSON.parse(issued.stdout) as { key: string }).key;
+    const company = await prisma.company.findUniqueOrThrow({ where: { id: enrolled.companyId } });
+    const signing = createTestSigningMaterialWithFiscalId(
+      `CPJ-${company.identificationNumber}`,
+      'failure-synthetic-pin',
+    );
+    const endpoint = `/api/v2/companies/${enrolled.companyId}/fiscal-onboarding/SANDBOX/requests`;
+    const submit = () =>
+      request(app.getHttpServer())
+        .post(endpoint)
+        .set('X-API-Key', key)
+        .set('Idempotency-Key', 'enroll-failure-retry-001')
+        .field('externalCompanyKey', `affiliations:${externalCompanyId}`)
+        .field('pin', signing.passphrase)
+        .field('username', 'failure-user')
+        .field('password', 'failure-password')
+        .attach('certificate', signing.pkcs12Bytes, {
+          filename: 'synthetic.p12',
+          contentType: 'application/x-pkcs12',
+        });
+    const secrets = app.get<SecretProvider>(SECRET_PROVIDER);
+    Object.defineProperty(secrets, 'isDurable', { value: true });
+    const originalStore = secrets.storeSecret.bind(secrets);
+    const storeSpy = jest.spyOn(secrets, 'storeSecret').mockImplementation(async (ref, value) => {
+      await originalStore(ref, value);
+      throw new Error('synthetic enrollment storage failure');
+    });
+    try {
+      await submit().expect(503);
+    } finally {
+      storeSpy.mockRestore();
+    }
+    const where = {
+      companyId: enrolled.companyId,
+      operation: 'INITIAL_ENROLLMENT',
+      idempotencyKey: 'enroll-failure-retry-001',
+    };
+    const failedStore = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({ where });
+    expect(failedStore.state).toBe('COMPENSATED');
+    for (const ref of failedStore.newSecretReferences as string[])
+      await expect(secrets.getSecret(ref)).rejects.toBeDefined();
+    expect(
+      await prisma.fiscalSigningCertificate.count({
+        where: { companyId: enrolled.companyId, status: 'ACTIVE' },
+      }),
+    ).toBe(0);
+    const service = app.get(EnrollmentV2Service);
+    const originalAudit = Reflect.get(service, 'audit') as (...args: unknown[]) => Promise<void>;
+    let auditCalls = 0;
+    Reflect.set(service, 'audit', async (...args: unknown[]) => {
+      if (++auditCalls === 2) throw new Error('synthetic enrollment audit failure');
+      return originalAudit.apply(service, args);
+    });
+    try {
+      await submit().expect(503);
+    } finally {
+      Reflect.set(service, 'audit', originalAudit);
+    }
+    const failedAudit = await prisma.fiscalOnboardingMutationV2.findFirstOrThrow({ where });
+    expect(failedAudit.state).toBe('COMPENSATED');
+    for (const ref of failedAudit.newSecretReferences as string[])
+      await expect(secrets.getSecret(ref)).rejects.toBeDefined();
+    const orphan = `spec09-enrollment-interrupted/${randomUUID()}`;
+    await secrets.storeSecret(orphan, 'synthetic-orphan');
+    await prisma.fiscalOnboardingMutationV2.update({
+      where: { id: failedAudit.id },
+      data: { state: 'RECOVERY_REQUIRED', newSecretReferences: [orphan] },
+    });
+    const recoveries = await Promise.all(
+      [0, 1].map(() =>
+        request(app.getHttpServer())
+          .post(`${endpoint}/${failedAudit.id}/recover`)
+          .set('X-API-Key', key),
+      ),
+    );
+    expect(
+      recoveries.every((result) => result.status === 200 && result.body.state === 'COMPENSATED'),
+    ).toBe(true);
+    await expect(secrets.getSecret(orphan)).rejects.toBeDefined();
+    const approved = await submit().expect(200);
+    expect(approved.body.status).toBe('APPROVED');
+    expect(
+      JSON.stringify(
+        await prisma.auditLog.findMany({
+          where: { tenantId: enrolled.tenantId },
+        }),
+      ),
+    ).not.toContain('failure-password');
   });
 
   it('reuses Billing stores, handles synthetic PKCS#12 and hides credentials', async () => {

@@ -761,7 +761,7 @@ export class PrismaConsumerV2Repository {
     const binding = await tx.fiscalConsumerKeyBinding.findUnique({
       where: { apiKeyId: p.apiKeyId },
       include: {
-        apiKey: { include: { tenant: true } },
+        apiKey: { include: { tenant: true, companies: true } },
         association: {
           include: { consumerCompany: { include: { consumer: true, company: true } } },
         },
@@ -820,6 +820,7 @@ export class PrismaConsumerV2Repository {
       requiredScope: scope,
       now: new Date(),
       tenantActive: key?.tenant.status === 'ACTIVE',
+      grantCompanyIds: key?.companies.map((company) => company.companyId),
     });
     if (
       !decision.allowed ||

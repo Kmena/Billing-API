@@ -35,6 +35,7 @@ if (suite === 'safety-db') {
     '--runInBand',
   ];
   if (process.argv[3]) e2eArgs.push('--testPathPattern', process.argv[3]);
+  if (process.argv[4]) e2eArgs.push('--testNamePattern', process.argv[4]);
   run(e2eArgs);
 } else {
   run([
