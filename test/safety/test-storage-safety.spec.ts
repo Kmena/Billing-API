@@ -6,6 +6,7 @@ import {
   assertRealHaciendaDisabledInTests,
   assertSafeTestLocalStorage,
   assertSafeTestS3Storage,
+  assertSafeSpec09SandboxStorage,
   provisionDisposableTestStorage,
 } from '../../src/infrastructure/storage/test-storage-safety';
 
@@ -92,5 +93,40 @@ describe('test storage safety', () => {
         marked,
       ),
     ).toThrow('local host only');
+  });
+
+  it('keeps persistent SPEC-09 storage closed for production, Hacienda and other databases', () => {
+    const env: NodeJS.ProcessEnv = {
+      NODE_ENV: 'test',
+      BILLING_SPEC09_PERSISTENT_SANDBOX: 'true',
+      SPEC09_SANDBOX_MARKER: 'billing-spec09-synthetic-v1',
+      USE_REAL_HACIENDA: 'false',
+      FISCAL_WORKER_ENABLE_IN_TESTS: 'false',
+      SECRET_PROVIDER: 'local-encrypted',
+      LOCAL_STORAGE_REQUIRED_MARKER: '.billing-spec09-sandbox-root',
+      DATABASE_URL: 'postgresql://billing_sandbox:x@billing-spec09-db:5432/billing_sandbox',
+    };
+    const path = '/run/spec09-fiscal-storage/data';
+    expect(() => assertSafeSpec09SandboxStorage(path, { ...env, NODE_ENV: 'production' })).toThrow(
+      'SPEC09_SANDBOX_STORAGE_GUARD',
+    );
+    expect(() =>
+      assertSafeSpec09SandboxStorage(path, { ...env, USE_REAL_HACIENDA: 'true' }),
+    ).toThrow('SPEC09_SANDBOX_STORAGE_GUARD');
+    expect(() =>
+      assertSafeSpec09SandboxStorage(path, {
+        ...env,
+        DATABASE_URL: 'postgresql://billing_sandbox:x@billing-spec09-db:5432/billing_prod',
+      }),
+    ).toThrow('SPEC09_SANDBOX_STORAGE_GUARD');
+    expect(() =>
+      assertSafeSpec09SandboxStorage(path, {
+        ...env,
+        DATABASE_URL: 'postgresql://billing_sandbox:x@postgres:5432/billing_sandbox',
+      }),
+    ).toThrow('SPEC09_SANDBOX_STORAGE_GUARD');
+    expect(() => assertSafeSpec09SandboxStorage('/app/storage', env)).toThrow(
+      'SPEC09_SANDBOX_STORAGE_GUARD',
+    );
   });
 });

@@ -100,6 +100,50 @@ export function assertSafeTestLocalStorage(
   return rootPath;
 }
 
+/** Explicit persistent, synthetic SPEC-09 sandbox. Never accepts a shared DB or normal storage path. */
+export function assertSafeSpec09SandboxStorage(
+  storagePath: string,
+  env: TestStorageEnvironment = process.env,
+): string {
+  const rootPath = resolve(storagePath);
+  let database: URL;
+  try {
+    database = new URL(env.DATABASE_URL ?? '');
+  } catch {
+    throw new Error('SPEC09_SANDBOX_DATABASE_GUARD');
+  }
+  if (
+    env.NODE_ENV !== 'test' ||
+    env.BILLING_SPEC09_PERSISTENT_SANDBOX !== 'true' ||
+    env.SPEC09_SANDBOX_MARKER !== 'billing-spec09-synthetic-v1' ||
+    env.USE_REAL_HACIENDA !== 'false' ||
+    env.FISCAL_WORKER_ENABLE_IN_TESTS !== 'false' ||
+    env.SECRET_PROVIDER !== 'local-encrypted' ||
+    env.LOCAL_STORAGE_REQUIRED_MARKER !== '.billing-spec09-sandbox-root' ||
+    rootPath !== '/run/spec09-fiscal-storage/data' ||
+    database.protocol !== 'postgresql:' ||
+    database.hostname !== 'billing-spec09-db' ||
+    database.port !== '5432' ||
+    database.pathname !== '/billing_sandbox' ||
+    database.username !== 'billing_sandbox'
+  )
+    throw new Error('SPEC09_SANDBOX_STORAGE_GUARD');
+  let marker: unknown;
+  try {
+    marker = JSON.parse(readFileSync(join(rootPath, '.billing-spec09-sandbox-root'), 'utf8'));
+  } catch {
+    throw new Error('SPEC09_SANDBOX_STORAGE_MARKER_MISSING');
+  }
+  if (
+    !marker ||
+    typeof marker !== 'object' ||
+    (marker as { kind?: unknown }).kind !== 'billing-spec09-synthetic-v1'
+  ) {
+    throw new Error('SPEC09_SANDBOX_STORAGE_MARKER_INVALID');
+  }
+  return rootPath;
+}
+
 export function assertSafeTestS3Storage(
   endpoint: string | undefined,
   bucket: string,

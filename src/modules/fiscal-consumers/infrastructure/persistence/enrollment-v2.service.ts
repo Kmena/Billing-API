@@ -9,6 +9,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { createHmac, randomUUID } from 'crypto';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
+import { assertSafeSpec09SandboxStorage } from '../../../../infrastructure/storage/test-storage-safety';
 import {
   SECRET_PROVIDER,
   SecretProvider,
@@ -69,7 +70,12 @@ export class EnrollmentV2Service {
     }
     const company = await tx.company.findFirst({
       where: { id: p.companyId, tenantId: p.tenantId, status: 'ACTIVE' },
-      select: { identificationNumber: true, identificationType: true },
+      select: {
+        identificationNumber: true,
+        identificationType: true,
+        legalName: true,
+        tenant: { select: { slug: true } },
+      },
     });
     if (!company) throw new ForbiddenException({ code: 'ENROLLMENT_COMPANY_INACTIVE' });
     return company;
@@ -177,7 +183,13 @@ export class EnrollmentV2Service {
 
   async request(
     p: EnrollmentV2Principal,
-    input: { externalCompanyKey: string; pin: string; username: string; password: string },
+    input: {
+      externalCompanyKey: string;
+      issuerIdentificationNumber?: string;
+      pin: string;
+      username: string;
+      password: string;
+    },
     bytes: Buffer,
     idempotencyKey: string,
   ) {
@@ -187,6 +199,8 @@ export class EnrollmentV2Service {
       throw new BadRequestException({ code: 'ONBOARDING_IDEMPOTENCY_KEY_INVALID' });
     if (
       input.externalCompanyKey !== p.externalCompanyKey ||
+      (input.issuerIdentificationNumber !== undefined &&
+        !/^\d{9,12}$/.test(input.issuerIdentificationNumber)) ||
       !input.pin?.trim() ||
       input.pin.length > 256 ||
       !input.username?.trim() ||
@@ -202,9 +216,15 @@ export class EnrollmentV2Service {
     const now = new Date();
     if (extracted.validFrom > now || extracted.validTo <= now)
       throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_DATE_INVALID' });
+    if (
+      input.issuerIdentificationNumber !== undefined &&
+      input.issuerIdentificationNumber !== extracted.extractedIdentityNumber
+    )
+      throw new BadRequestException({ code: 'ENROLLMENT_CERTIFICATE_IDENTITY_INPUT_MISMATCH' });
     const digest = this.digest([
       OPERATION,
       p.externalCompanyKey,
+      input.issuerIdentificationNumber ?? '',
       bytes,
       input.pin,
       input.username,
@@ -222,10 +242,30 @@ export class EnrollmentV2Service {
         const expectedType = { FISICA: '01', JURIDICA: '02', DIMEX: '03', NITE: '04' }[
           company.identificationType
         ];
-        if (
-          extracted.extractedIdentityNumber !== company.identificationNumber ||
-          extracted.extractedIdentityType !== expectedType
-        )
+        const needsIdentityAdoption =
+          extracted.extractedIdentityNumber !== company.identificationNumber;
+        if (needsIdentityAdoption) {
+          // Only the explicitly guarded, empty synthetic Docker sandbox may adopt
+          // the identity from a test certificate during its first enrollment.
+          try {
+            assertSafeSpec09SandboxStorage(process.env.LOCAL_STORAGE_PATH ?? '');
+          } catch {
+            throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_EMITTER_MISMATCH' });
+          }
+          if (
+            !input.issuerIdentificationNumber ||
+            company.tenant.slug !== 'spec09-sandbox-synthetic' ||
+            company.legalName !== 'SPEC-09 EMISOR DEMO' ||
+            extracted.issuerName !== 'CN=CR Test Hacienda CA' ||
+            !extracted.subjectName.startsWith('CN=CR Fiscal Test Certificate, ') ||
+            !['01', '02', '03'].includes(extracted.extractedIdentityType ?? '') ||
+            (await tx.fiscalDocument.count({ where: { companyId: p.companyId } })) ||
+            (await tx.fiscalSigningCertificate.count({ where: { companyId: p.companyId } })) ||
+            (await tx.haciendaConnection.count({ where: { companyId: p.companyId } })) ||
+            (await tx.fiscalIntegrationAssociation.count({ where: { companyId: p.companyId } }))
+          )
+            throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_EMITTER_MISMATCH' });
+        } else if (extracted.extractedIdentityType !== expectedType)
           throw new BadRequestException({ code: 'FISCAL_CERTIFICATE_EMITTER_MISMATCH' });
         const consumer = await tx.fiscalConsumer.upsert({
           where: {
@@ -309,9 +349,21 @@ export class EnrollmentV2Service {
               data: { state: 'STAGED', newSecretReferences: refs, response: Prisma.JsonNull },
             });
             await this.audit(tx, p, 'onboarding-v2.enrollment.restaged', reset.id);
-            return { row: reset, created: true, associationId: association.id };
+            return {
+              row: reset,
+              created: true,
+              associationId: association.id,
+              originalIdentificationNumber: company.identificationNumber,
+              needsIdentityAdoption,
+            };
           }
-          return { row: existing, created: false, associationId: association.id };
+          return {
+            row: existing,
+            created: false,
+            associationId: association.id,
+            originalIdentificationNumber: company.identificationNumber,
+            needsIdentityAdoption,
+          };
         }
         if (
           association.status !== 'SUSPENDED' ||
@@ -354,7 +406,13 @@ export class EnrollmentV2Service {
           },
         });
         await this.audit(tx, p, 'onboarding-v2.enrollment.staged', row.id);
-        return { row, created: true, associationId: association.id };
+        return {
+          row,
+          created: true,
+          associationId: association.id,
+          originalIdentificationNumber: company.identificationNumber,
+          needsIdentityAdoption,
+        };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -385,6 +443,40 @@ export class EnrollmentV2Service {
           });
           if (row.state !== 'STAGED')
             throw new ConflictException({ code: 'ENROLLMENT_REQUEST_STATE_CONFLICT' });
+          if (staged.needsIdentityAdoption) {
+            if (await tx.fiscalDocument.count({ where: { companyId: p.companyId } }))
+              throw new ConflictException({ code: 'ENROLLMENT_ISSUER_HISTORY_CHANGED' });
+            const changed = await tx.company.updateMany({
+              where: {
+                id: p.companyId,
+                tenantId: p.tenantId,
+                identificationNumber: staged.originalIdentificationNumber,
+              },
+              data: {
+                identificationNumber: extracted.extractedIdentityNumber,
+                identificationType: extracted.canonicalIdentity.identityType!,
+              },
+            });
+            if (changed.count !== 1)
+              throw new ConflictException({ code: 'ENROLLMENT_ISSUER_IDENTITY_CHANGED' });
+            await tx.auditLog.create({
+              data: {
+                id: randomUUID(),
+                tenantId: p.tenantId,
+                companyId: p.companyId,
+                apiKeyId: p.apiKeyId,
+                actor: `apikey:${p.apiKeyId}`,
+                action: 'onboarding-v2.synthetic-issuer.identity-adopted',
+                eventClass: 'SECURITY',
+                resource: `Company:${p.companyId}`,
+                metadata: {
+                  environment: 'SANDBOX',
+                  previousIdentificationNumber: staged.originalIdentificationNumber,
+                  identificationNumber: extracted.extractedIdentityNumber,
+                },
+              },
+            });
+          }
           const cert = await tx.fiscalSigningCertificate.create({
             data: {
               id: randomUUID(),

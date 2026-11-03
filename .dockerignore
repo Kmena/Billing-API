@@ -7,7 +7,8 @@ dist/
 *.pem
 *.crt
 .git/
-test/
+# Build-time administration scripts import test/helpers/test-database-safety.ts.
+# Tests are not copied into the final runner image.
 coverage/
 *.log
 .DS_Store

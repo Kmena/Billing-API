@@ -29,7 +29,7 @@ export class EnrollmentV2Controller {
   @UseInterceptors(
     FileInterceptor('certificate', {
       storage: multer.memoryStorage(),
-      limits: { fileSize: 1_048_576, files: 1, fields: 4, parts: 5 },
+      limits: { fileSize: 1_048_576, files: 1, fields: 5, parts: 6 },
     }),
   )
   request(
@@ -40,6 +40,7 @@ export class EnrollmentV2Controller {
     },
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body('externalCompanyKey') externalCompanyKey: string,
+    @Body('issuerIdentificationNumber') issuerIdentificationNumber: string | undefined,
     @Body('pin') pin: string,
     @Body('username') username: string,
     @Body('password') password: string,
@@ -52,6 +53,7 @@ export class EnrollmentV2Controller {
       req.enrollmentV2,
       {
         externalCompanyKey,
+        issuerIdentificationNumber,
         pin,
         username,
         password,

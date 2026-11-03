@@ -6,6 +6,7 @@ import { StoragePort, StorageUploadRequest } from '../ports/storage.port';
 import {
   assertRealHaciendaDisabledInTests,
   assertSafeTestLocalStorage,
+  assertSafeSpec09SandboxStorage,
 } from '../test-storage-safety';
 
 /**
@@ -22,7 +23,11 @@ export class LocalStorageAdapter implements StoragePort {
     const configuredPath = storagePath ?? './storage';
     assertRealHaciendaDisabledInTests();
     this.storagePath =
-      process.env.NODE_ENV === 'test' ? assertSafeTestLocalStorage(configuredPath) : configuredPath;
+      process.env.NODE_ENV === 'test'
+        ? process.env.BILLING_SPEC09_PERSISTENT_SANDBOX === 'true'
+          ? assertSafeSpec09SandboxStorage(configuredPath)
+          : assertSafeTestLocalStorage(configuredPath)
+        : configuredPath;
     this.signingSecret = signingSecret ?? 'local-signing-secret-dev-only';
     this.requiredMarker = requiredMarker;
   }
