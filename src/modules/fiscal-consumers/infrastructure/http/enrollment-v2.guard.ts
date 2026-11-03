@@ -3,7 +3,7 @@ import * as argon2 from 'argon2';
 import { PrismaService } from '../../../../infrastructure/database/prisma.service';
 import {
   AFFILIATIONS_ENROLLMENT_V2_PROFILE,
-  AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+  hasEnrollmentV2Scopes,
 } from '../../domain/consumer-v2.policy';
 
 export interface EnrollmentV2Principal {
@@ -56,8 +56,7 @@ export class EnrollmentV2Guard implements CanActivate {
       key.companies[0].companyId !== request.params.companyId ||
       request.params.environment !== 'SANDBOX' ||
       !external ||
-      key.scopes.length !== AFFILIATIONS_ENROLLMENT_V2_SCOPES.length ||
-      !AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => key.scopes.includes(scope))
+      !hasEnrollmentV2Scopes(key.scopes)
     ) {
       throw new HttpException({ code: 'ENROLLMENT_NOT_AUTHORIZED' }, 403);
     }

@@ -62,6 +62,17 @@ export class OnboardingV2LabService {
       this.onboarding.getDefaultIssuancePoint(p.tenantId, p.companyId, p.environment),
     ]);
     if (!issuer) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND' });
+    const savedNames = point
+      ? await this.prisma.fiscalIssuancePoint.findFirst({
+          where: {
+            id: point.id,
+            tenantId: p.tenantId,
+            companyId: p.companyId,
+            environment: p.environment,
+          },
+          select: { branch: { select: { name: true } }, terminal: { select: { name: true } } },
+        })
+      : null;
     return {
       contractVersion: '2.0-lab',
       companyId: p.companyId,
@@ -73,7 +84,13 @@ export class OnboardingV2LabService {
         lastValidatedAt: connection?.lastValidatedAt ?? null,
       },
       certificate: certificate ?? { status: 'MISSING' },
-      issuancePoint: point,
+      issuancePoint: point
+        ? {
+            ...point,
+            branchName: savedNames?.branch?.name ?? null,
+            terminalName: savedNames?.terminal?.name ?? null,
+          }
+        : null,
       productionAuthorized: false,
     };
   }

@@ -6,6 +6,7 @@ import {
   Headers,
   HttpCode,
   Post,
+  Patch,
   Param,
   ParseUUIDPipe,
   Put,
@@ -17,6 +18,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import multer = require('multer');
 import { OnboardingV2LabService } from '../../application/onboarding-v2-lab.service';
+import { OnboardingV2FiscalDetailsService } from '../persistence/onboarding-v2-fiscal-details.service';
 import { ConsumerV2Guard, ConsumerV2Principal } from './consumer-v2.guard';
 import { ConsumerV2RequiredScope } from './consumer-v2-scope.decorator';
 import { OnboardingV2OriginGuard } from './onboarding-v2-origin.guard';
@@ -38,6 +40,8 @@ import {
   ConfigureBranchV2Dto,
   ConfigureCredentialsV2Dto,
   ConfigureIssuerV2Dto,
+  PatchFiscalProfileV2Dto,
+  SelectDefaultActivityV2Dto,
 } from './onboarding-v2.dto';
 
 /** Registered only in FiscalOnboardingAdminV2LabModule. No production route is enabled. */
@@ -45,7 +49,36 @@ import {
 @UseInterceptors(NoStoreInterceptor)
 @Controller('api/v2/companies/:companyId/fiscal-onboarding/:environment')
 export class OnboardingV2LabController {
-  constructor(private readonly service: OnboardingV2LabService) {}
+  constructor(
+    private readonly service: OnboardingV2LabService,
+    private readonly fiscalDetails: OnboardingV2FiscalDetailsService,
+  ) {}
+
+  @Get('fiscal-details')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:read')
+  details(@Req() req: { consumerV2: ConsumerV2Principal }) {
+    return this.fiscalDetails.read(req.consumerV2);
+  }
+
+  @Patch('fiscal-profile')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:profile:write')
+  patchProfile(
+    @Req() req: { consumerV2: ConsumerV2Principal },
+    @Body() dto: PatchFiscalProfileV2Dto,
+    @Headers('if-match') ifMatch: string | undefined,
+  ) {
+    return this.fiscalDetails.patchProfile(req.consumerV2, dto, ifMatch);
+  }
+
+  @Put('default-activity')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:activity:write')
+  defaultActivity(
+    @Req() req: { consumerV2: ConsumerV2Principal },
+    @Body() dto: SelectDefaultActivityV2Dto,
+    @Headers('if-match') ifMatch: string | undefined,
+  ) {
+    return this.fiscalDetails.selectDefaultActivity(req.consumerV2, dto.code, ifMatch);
+  }
 
   @Get()
   @ConsumerV2RequiredScope('fiscal-v2:onboarding:read')

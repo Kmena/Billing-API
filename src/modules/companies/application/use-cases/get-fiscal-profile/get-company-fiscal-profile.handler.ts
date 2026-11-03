@@ -20,7 +20,10 @@ export class GetCompanyFiscalProfileHandler {
     const profile = await this.prisma.companyFiscalProfile.findFirst({
       where: { tenantId: command.tenantId, companyId: command.companyId },
     });
-    if (!profile) throw new NotFoundException({ code: 'COMPANY_FISCAL_PROFILE_NOT_FOUND' });
-    return profile;
+    // A v2 draft has no verified activity yet. Keep the v1 response contract
+    // complete for Inventori instead of exposing a new nullable field.
+    if (!profile || !profile.economicActivityCode)
+      throw new NotFoundException({ code: 'COMPANY_FISCAL_PROFILE_NOT_FOUND' });
+    return { ...profile, economicActivityCode: profile.economicActivityCode };
   }
 }

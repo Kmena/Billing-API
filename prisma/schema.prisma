@@ -273,7 +273,7 @@ model CompanyFiscalProfile {
   companyId                 String                   @unique @map("company_id") @db.Uuid
   // DEC-006: legacy compatibility field — NOT the new source of truth after P0 verification.
   // Synced from defaultEconomicActivity.code when a verified default is set.
-  economicActivityCode      String                   @map("economic_activity_code") @db.VarChar(20)
+  economicActivityCode      String?                  @map("economic_activity_code") @db.VarChar(20)
   proveedorSistemas         String?                  @map("proveedor_sistemas") @db.VarChar(20)
   province                  String                   @db.Char(1)
   canton                    String                   @db.Char(2)

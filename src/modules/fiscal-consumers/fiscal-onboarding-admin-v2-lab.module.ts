@@ -4,6 +4,7 @@ import { HaciendaConnectionModule } from '../hacienda-connection/hacienda-connec
 import { FiscalDocumentsModule } from '../fiscal-documents/fiscal-documents.module';
 import { FiscalConsumersLabModule } from './fiscal-consumers-lab.module';
 import { OnboardingV2LabService } from './application/onboarding-v2-lab.service';
+import { OnboardingV2FiscalDetailsService } from './infrastructure/persistence/onboarding-v2-fiscal-details.service';
 import { OnboardingV2MutationService } from './infrastructure/persistence/onboarding-v2-mutation.service';
 import { OnboardingV2LabController } from './infrastructure/http/onboarding-v2-lab.controller';
 import { OnboardingV2OriginGuard } from './infrastructure/http/onboarding-v2-origin.guard';
@@ -22,6 +23,7 @@ import { EnrollmentV2Service } from './infrastructure/persistence/enrollment-v2.
   controllers: [OnboardingV2LabController, EnrollmentV2Controller],
   providers: [
     OnboardingV2LabService,
+    OnboardingV2FiscalDetailsService,
     OnboardingV2MutationService,
     OnboardingV2OriginGuard,
     EnrollmentV2Guard,

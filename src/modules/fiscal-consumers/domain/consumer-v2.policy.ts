@@ -15,6 +15,8 @@ export const CONSUMER_V2_LAB_SCOPES = [
   'fiscal-v2:debit-notes:create',
   'fiscal-v2:onboarding:read',
   'fiscal-v2:onboarding:issuer:write',
+  'fiscal-v2:onboarding:profile:write',
+  'fiscal-v2:onboarding:activity:write',
   'fiscal-v2:onboarding:association:write',
   'fiscal-v2:onboarding:certificate:write',
   'fiscal-v2:onboarding:credentials:write',
@@ -36,6 +38,27 @@ export const AFFILIATIONS_ENROLLMENT_V2_SCOPES = [
   'fiscal-v2:onboarding:connection:test',
   'fiscal-v2:onboarding:audit:read',
 ] as const;
+export const AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES = [
+  'fiscal-v2:onboarding:profile:write',
+  'fiscal-v2:onboarding:activity:write',
+] as const;
+
+/** Preserve existing enrollment keys while permitting only these two audited additions. */
+export function hasEnrollmentV2Scopes(scopes: readonly string[]): boolean {
+  return (
+    new Set(scopes).size === scopes.length &&
+    AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => scopes.includes(scope)) &&
+    scopes.every(
+      (scope) =>
+        AFFILIATIONS_ENROLLMENT_V2_SCOPES.includes(
+          scope as (typeof AFFILIATIONS_ENROLLMENT_V2_SCOPES)[number],
+        ) ||
+        AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES.includes(
+          scope as (typeof AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES)[number],
+        ),
+    )
+  );
+}
 export type ConsumerV2Scope = (typeof CONSUMER_V2_LAB_SCOPES)[number];
 export type FiscalEnvironmentV2 = 'SANDBOX' | 'PRODUCTION';
 
@@ -142,8 +165,7 @@ export function authorizeConsumerV2(input: {
   }
   if (
     key.integrationProfile === AFFILIATIONS_ENROLLMENT_V2_PROFILE &&
-    (key.scopes.length !== AFFILIATIONS_ENROLLMENT_V2_SCOPES.length ||
-      !AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => key.scopes.includes(scope)) ||
+    (!hasEnrollmentV2Scopes(key.scopes) ||
       input.grantCompanyIds?.length !== 1 ||
       input.grantCompanyIds[0] !== input.requestedCompanyId)
   ) {

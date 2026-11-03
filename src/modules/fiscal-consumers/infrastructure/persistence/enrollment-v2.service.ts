@@ -17,7 +17,7 @@ import {
 import { CrCertificateIdentityExtractorService } from '../../../fiscal-documents/application/fiscal-xml/cr-certificate-identity-extractor.service';
 import {
   AFFILIATIONS_ENROLLMENT_V2_PROFILE,
-  AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+  hasEnrollmentV2Scopes,
 } from '../../domain/consumer-v2.policy';
 import { EnrollmentV2Principal } from '../http/enrollment-v2.guard';
 
@@ -63,8 +63,7 @@ export class EnrollmentV2Service {
       key.name !== `affiliations-enrollment:${p.externalCompanyKey}` ||
       key.companies.length !== 1 ||
       key.companies[0].companyId !== p.companyId ||
-      key.scopes.length !== AFFILIATIONS_ENROLLMENT_V2_SCOPES.length ||
-      !AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => key.scopes.includes(scope))
+      !hasEnrollmentV2Scopes(key.scopes)
     ) {
       throw new ForbiddenException({ code: 'ENROLLMENT_GRANT_REVOKED' });
     }

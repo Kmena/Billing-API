@@ -118,5 +118,13 @@
   {
     "name": "20261119000000_spec09_secure_onboarding",
     "sha256": "c79d1c7928fcd076db82769111e8c81cb84fc767b87c76932bb838d19b361c5c"
+  },
+  {
+    "name": "20261120000000_spec09_fiscal_profile_draft",
+    "sha256": "283ea68edfe6864e8a92ccbee4632d50d5f3adfcf55c583dddfce2bf8f9adb40"
+  },
+  {
+    "name": "20261120000000_spec09_self_service_lab",
+    "sha256": "7fdf2f59c2ed0981766fd260fc803b0a52dee335b54b21b485da30ff60c63204"
   }
 ]

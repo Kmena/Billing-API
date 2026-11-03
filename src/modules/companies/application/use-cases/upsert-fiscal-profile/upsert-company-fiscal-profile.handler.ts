@@ -132,7 +132,9 @@ export class UpsertCompanyFiscalProfileHandler {
       },
     });
 
-    return profile;
+    // This v1 write always supplies an activity code, even though the shared
+    // column now permits a draft profile created through the v2 lab flow.
+    return { ...profile, economicActivityCode: profile.economicActivityCode! };
   }
 
   private toApplicationError<T>(factory: () => T): T {

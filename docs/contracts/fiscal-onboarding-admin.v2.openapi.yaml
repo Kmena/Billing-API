@@ -35,6 +35,12 @@ components:
       required: true
       schema: { type: string, pattern: '^[A-Za-z0-9:_-]{8,128}$' }
       description: Unique per association and operation. Reuse with a different payload returns 409.
+    profileVersion:
+      in: header
+      name: If-Match
+      required: true
+      schema: { type: string, maxLength: 40 }
+      description: Opaque fiscal-details.profile.version, or absent when creating a profile. Stale writes return 409.
     operationId:
       in: path
       name: operationId
@@ -95,6 +101,31 @@ components:
         validFrom: { type: string, format: date-time, nullable: true }
         validTo: { type: string, format: date-time, nullable: true }
       description: Contains metadata only, never the PKCS#12, PIN, password or secret references.
+    FiscalProfilePatch:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: Partial update. Omitted fields retain their stored values; null and empty replacements are rejected. Creation requires all non-optional address and contact fields.
+      properties:
+        province: { type: string, pattern: '^[1-9]$' }
+        canton: { type: string, pattern: '^(0[1-9]|[1-9][0-9])$' }
+        district: { type: string, pattern: '^(0[1-9]|[1-9][0-9])$' }
+        barrio: { type: string, minLength: 5, maxLength: 50 }
+        otrasSenas: { type: string, minLength: 5, maxLength: 250 }
+        email: { type: string, format: email, maxLength: 160 }
+        phoneCountryCode: { type: string, pattern: '^\d{1,3}$' }
+        phoneNumber: { type: string, pattern: '^\d{3,20}$' }
+        proveedorSistemas: { type: string, minLength: 1, maxLength: 20 }
+    FiscalDetails:
+      type: object
+      required: [companyId, environment, profile, activities, taxpayerVerification, externalCall]
+      properties:
+        companyId: { type: string, format: uuid }
+        environment: { type: string, enum: [SANDBOX] }
+        profile: { type: object, nullable: true, description: Existing address/contact with an opaque version; no secrets. }
+        activities: { type: array, items: { type: object, description: Verified Billing activity metadata and selected flag. } }
+        taxpayerVerification: { type: object, description: Status read only. This operation never contacts Hacienda. }
+        externalCall: { type: boolean, enum: [false] }
     ReadinessResponse:
       type: object
       required: [companyId, environment, status, readyToIssue, blockers, dimensions]
@@ -140,7 +171,7 @@ components:
       additionalProperties: false
       properties:
         username: { type: string, minLength: 1, maxLength: 100, example: 'synthetic-user' }
-        password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 200, example: 'synthetic-secret' }
+        password: { type: string, format: password, writeOnly: true, minLength: 1, maxLength: 200 }
     IssuancePoint:
       type: object
       required: [branchCode, branchName, terminalCode, terminalName]
@@ -241,6 +272,37 @@ paths:
       x-required-scope: fiscal-v2:onboarding:read
       responses:
         '200': { description: Billing readiness dimensions and blockers, content: { application/json: { schema: { $ref: '#/components/schemas/ReadinessResponse' } } } }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/fiscal-details:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    get:
+      operationId: getFiscalDetailsV2
+      x-required-scope: fiscal-v2:onboarding:read
+      description: Reads existing profile, verified activities and taxpayer status. No external call or secret value.
+      responses:
+        '200': { description: Safe current fiscal details, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalDetails' } } } }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/fiscal-profile:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    patch:
+      operationId: patchFiscalProfileV2
+      x-required-scope: fiscal-v2:onboarding:profile:write
+      parameters: [{ $ref: '#/components/parameters/profileVersion' }]
+      description: Transactional partial update with current M2M authorization, issuer lock and audit. Does not change legal identity or activity selection.
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalProfilePatch' } } } }
+      responses:
+        '200': { description: Persisted safe profile and new opaque version. }
+        '409': { description: Version conflict; reload before editing. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/default-activity:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    put:
+      operationId: selectVerifiedDefaultActivityV2
+      x-required-scope: fiscal-v2:onboarding:activity:write
+      parameters: [{ $ref: '#/components/parameters/profileVersion' }]
+      description: Selects only an active, enabled activity already verified by Billing from Hacienda /fe/ae. Does not import or fabricate activities.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, additionalProperties: false, required: [code], properties: { code: { type: string, maxLength: 20 } } } } } }
+      responses:
+        '200': { description: Selected code and new profile version; no secrets. }
+        '404': { description: Activity is absent or ineligible. }
+        '409': { description: Profile missing or stale. }
   /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/issuer:
     parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
     put:

@@ -5,6 +5,7 @@ import { PrismaService } from '../src/infrastructure/database/prisma.service';
 import {
   AFFILIATIONS_ENROLLMENT_V2_PROFILE,
   AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+  AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
 } from '../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import {
   assertDisposableDatabaseMarker,
@@ -99,7 +100,10 @@ async function main() {
             environment: 'TEST',
             keyPrefix: prefix,
             keyHash: hash,
-            scopes: [...AFFILIATIONS_ENROLLMENT_V2_SCOPES],
+            scopes: [
+              ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+              ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+            ],
             integrationProfile: AFFILIATIONS_ENROLLMENT_V2_PROFILE,
             status: 'ACTIVE',
             expiresAt: new Date(Date.now() + 7 * 86_400_000),

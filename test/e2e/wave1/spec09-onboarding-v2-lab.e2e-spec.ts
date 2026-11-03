@@ -135,6 +135,147 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     });
   });
 
+  it('saves a fiscal profile draft, rejects stale writes and selects only a verified activity', async () => {
+    const endpoint = base();
+    const read = await request(app.getHttpServer())
+      .get(`${endpoint}/fiscal-details`)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(read.body).toMatchObject({ profile: null, activities: [], externalCall: false });
+    const input = {
+      province: '1',
+      canton: '01',
+      district: '01',
+      otrasSenas: 'Dirección sintética',
+      email: 'emisor@example.invalid',
+    };
+    await request(app.getHttpServer())
+      .patch(`${endpoint}/fiscal-profile`)
+      .set('X-API-Key', secret)
+      .set('If-Match', 'absent')
+      .send({ ...input, economicActivityCode: 'invented' })
+      .expect(400);
+    const first = await request(app.getHttpServer())
+      .patch(`${endpoint}/fiscal-profile`)
+      .set('X-API-Key', secret)
+      .set('If-Match', 'absent')
+      .send(input)
+      .expect(200);
+    expect(first.body.profile).toMatchObject({
+      email: input.email,
+      defaultEconomicActivityId: null,
+    });
+    expect(first.body.profile.version).toMatch(/^\d+$/);
+    expect(JSON.stringify(first.body)).not.toContain('economicActivityCode');
+    const replay = await request(app.getHttpServer())
+      .patch(`${endpoint}/fiscal-profile`)
+      .set('X-API-Key', secret)
+      .set('If-Match', 'absent')
+      .send(input)
+      .expect(200);
+    expect(replay.body.profile.version).toBe(first.body.profile.version);
+    await request(app.getHttpServer())
+      .patch(`${endpoint}/fiscal-profile`)
+      .set('X-API-Key', secret)
+      .set('If-Match', 'absent')
+      .send({ email: 'stale@example.invalid' })
+      .expect(409);
+    const second = await request(app.getHttpServer())
+      .patch(`${endpoint}/fiscal-profile`)
+      .set('X-API-Key', secret)
+      .set('If-Match', first.body.profile.version)
+      .send({ email: 'updated@example.invalid' })
+      .expect(200);
+    expect(second.body.profile).toMatchObject({
+      province: input.province,
+      email: 'updated@example.invalid',
+    });
+    expect(second.body.profile.version).not.toBe(first.body.profile.version);
+    await request(app.getHttpServer())
+      .put(`${endpoint}/default-activity`)
+      .set('X-API-Key', secret)
+      .set('If-Match', second.body.profile.version)
+      .send({ code: '9999.0' })
+      .expect(404);
+    const activityId = randomUUID();
+    await prisma.companyEconomicActivity.create({
+      data: {
+        id: activityId,
+        tenantId,
+        companyId,
+        code: '9609.0',
+        description: 'Actividad sintética verificada en fixture descartable',
+        haciendaStatus: 'A',
+        billingEnabled: true,
+        verifiedAt: new Date(),
+        lastSeenAt: new Date(),
+        verificationSource: 'HACIENDA_FE_AE',
+      },
+    });
+    const selected = await request(app.getHttpServer())
+      .put(`${endpoint}/default-activity`)
+      .set('X-API-Key', secret)
+      .set('If-Match', second.body.profile.version)
+      .send({ code: '9609.0' })
+      .expect(200);
+    expect(selected.body.code).toBe('9609.0');
+    const persisted = await request(app.getHttpServer())
+      .get(`${endpoint}/fiscal-details`)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(persisted.body.profile).toMatchObject({
+      email: 'updated@example.invalid',
+      defaultEconomicActivityId: activityId,
+      version: selected.body.version,
+    });
+    expect(persisted.body.activities).toEqual([
+      expect.objectContaining({ code: '9609.0', selected: true }),
+    ]);
+    expect(JSON.stringify(persisted.body)).not.toMatch(/password|pin|secret|certificate/i);
+    const audit = await prisma.auditLog.findMany({
+      where: {
+        companyId,
+        action: { in: ['onboarding-v2.profile.updated', 'onboarding-v2.activity.selected'] },
+      },
+    });
+    expect(audit).toHaveLength(3);
+    const concurrent = await Promise.all([
+      request(app.getHttpServer())
+        .patch(`${endpoint}/fiscal-profile`)
+        .set('X-API-Key', secret)
+        .set('If-Match', selected.body.version)
+        .send({ email: 'concurrent-a@example.invalid' }),
+      request(app.getHttpServer())
+        .patch(`${endpoint}/fiscal-profile`)
+        .set('X-API-Key', secret)
+        .set('If-Match', selected.body.version)
+        .send({ email: 'concurrent-b@example.invalid' }),
+    ]);
+    expect(concurrent.map((result) => result.status).sort()).toEqual([200, 409]);
+    expect(
+      await prisma.auditLog.count({
+        where: { companyId, action: 'onboarding-v2.profile.updated' },
+      }),
+    ).toBe(3);
+    await prisma.apiKey.update({
+      where: { id: keyId },
+      data: { scopes: ['fiscal-v2:onboarding:read'] },
+    });
+    try {
+      await request(app.getHttpServer())
+        .patch(`${endpoint}/fiscal-profile`)
+        .set('X-API-Key', secret)
+        .set('If-Match', selected.body.version)
+        .send({ email: 'denied@example.invalid' })
+        .expect(403);
+    } finally {
+      await prisma.apiKey.update({
+        where: { id: keyId },
+        data: { scopes: [...CONSUMER_V2_LAB_SCOPES] },
+      });
+    }
+  });
+
   it('requires a current Billing administrator for the first association and rejects M2M self-grant', async () => {
     const body = {
       companyId,
