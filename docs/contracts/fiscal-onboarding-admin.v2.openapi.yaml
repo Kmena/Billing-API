@@ -186,7 +186,7 @@ paths:
     post:
       operationId: requestFiscalEnrollmentV2
       x-required-scope: fiscal-v2:onboarding:request
-      description: SANDBOX only. Requires a Billing-issued key pre-authorized for exactly one Billing company and one Afiliaciones company. Verifies issuer identity, PKCS#12 and PIN; Hacienda credentials are stored as PENDING_VALIDATION without contacting Hacienda. The dedicated empty synthetic Docker sandbox may atomically adopt the fiscal identity from a test certificate during first enrollment; existing and production issuers cannot use this path.
+      description: SANDBOX only. Requires a Billing-issued key pre-authorized for exactly one Billing company and one Afiliaciones company. Verifies issuer identity, PKCS#12 and PIN with Billing's existing extractor; Hacienda credentials are stored as PENDING_VALIDATION without contacting Hacienda. The dedicated empty Docker sandbox may atomically adopt the fiscal identity from a validated certificate during first enrollment; existing and production issuers cannot use this path.
       parameters: [{ $ref: '#/components/parameters/idempotencyKey' }]
       requestBody:
         required: true
@@ -197,7 +197,7 @@ paths:
               required: [externalCompanyKey, certificate, pin, username, password]
               properties:
                 externalCompanyKey: { type: string, pattern: '^affiliations:[0-9a-fA-F-]{36}$' }
-                issuerIdentificationNumber: { type: string, pattern: '^\d{9,12}$', description: Optional in general; required to adopt the identity of a test certificate in the dedicated empty synthetic Docker sandbox. Must equal the identity extracted from the certificate. }
+                issuerIdentificationNumber: { type: string, pattern: '^\d{9,12}$', description: Optional in general; required to adopt the identity of a validated certificate in the dedicated empty Docker sandbox. Must equal the identity extracted from the certificate. }
                 certificate: { type: string, format: binary, description: PKCS#12, maximum 1 MiB }
                 pin: { type: string, format: password, writeOnly: true }
                 username: { type: string, writeOnly: true }

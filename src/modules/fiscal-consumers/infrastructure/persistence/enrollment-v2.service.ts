@@ -256,8 +256,6 @@ export class EnrollmentV2Service {
             !input.issuerIdentificationNumber ||
             company.tenant.slug !== 'spec09-sandbox-synthetic' ||
             company.legalName !== 'SPEC-09 EMISOR DEMO' ||
-            extracted.issuerName !== 'CN=CR Test Hacienda CA' ||
-            !extracted.subjectName.startsWith('CN=CR Fiscal Test Certificate, ') ||
             !['01', '02', '03'].includes(extracted.extractedIdentityType ?? '') ||
             (await tx.fiscalDocument.count({ where: { companyId: p.companyId } })) ||
             (await tx.fiscalSigningCertificate.count({ where: { companyId: p.companyId } })) ||
