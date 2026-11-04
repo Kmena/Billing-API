@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { isAbsolute, join, relative, resolve } from 'path';
+import { isSafeSpec09ExternalMode } from './spec09-stag-safety';
 
 export const TEST_STORAGE_MARKER_FILE = '.billing-test-storage-marker.json';
 
@@ -116,8 +117,7 @@ export function assertSafeSpec09SandboxStorage(
     env.NODE_ENV !== 'test' ||
     env.BILLING_SPEC09_PERSISTENT_SANDBOX !== 'true' ||
     env.SPEC09_SANDBOX_MARKER !== 'billing-spec09-synthetic-v1' ||
-    env.USE_REAL_HACIENDA !== 'false' ||
-    env.FISCAL_WORKER_ENABLE_IN_TESTS !== 'false' ||
+    !isSafeSpec09ExternalMode(env) ||
     env.SECRET_PROVIDER !== 'local-encrypted' ||
     env.LOCAL_STORAGE_REQUIRED_MARKER !== '.billing-spec09-sandbox-root' ||
     rootPath !== '/run/spec09-fiscal-storage/data' ||

@@ -9,6 +9,11 @@ const names = [
   'BILLING_SPEC09_PERSISTENT_SANDBOX',
   'SPEC09_SANDBOX_MARKER',
   'USE_REAL_HACIENDA',
+  'FISCAL_WORKER_ENABLE_IN_TESTS',
+  'BILLING_SPEC09_STAG_INVOICING',
+  'HACIENDA_RECEPCION_SANDBOX_BASE_URL',
+  'HACIENDA_RECEPCION_PRODUCTION_BASE_URL',
+  'HACIENDA_IDP_PRODUCTION_URL',
   'HACIENDA_IDP_SANDBOX_URL',
   'HACIENDA_IDP_CLIENT_ID_SANDBOX',
 ] as const;
@@ -49,6 +54,8 @@ it('permits only the official staging IDP with the issuance adapter disabled', (
   process.env.BILLING_SPEC09_PERSISTENT_SANDBOX = 'true';
   process.env.SPEC09_SANDBOX_MARKER = 'billing-spec09-synthetic-v1';
   process.env.USE_REAL_HACIENDA = 'false';
+  process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'false';
+  delete process.env.BILLING_SPEC09_STAG_INVOICING;
   delete process.env.HACIENDA_IDP_SANDBOX_URL;
   delete process.env.HACIENDA_IDP_CLIENT_ID_SANDBOX;
   expect(selectSpec09CredentialVerifier(config, http)).toBeInstanceOf(HaciendaOidcAuthAdapter);
@@ -58,6 +65,28 @@ it('permits only the official staging IDP with the issuance adapter disabled', (
   );
   process.env.USE_REAL_HACIENDA = 'false';
   process.env.HACIENDA_IDP_SANDBOX_URL = 'https://example.test/token';
+  expect(() => selectSpec09CredentialVerifier(config, http)).toThrow(
+    'SPEC09_CREDENTIAL_SANDBOX_GUARD',
+  );
+});
+
+it('keeps the staging credential verifier available only in the pinned STAG mode', () => {
+  process.env.SPEC09_CREDENTIAL_VALIDATION_MODE = 'sandbox';
+  process.env.NODE_ENV = 'test';
+  process.env.BILLING_SPEC09_PERSISTENT_SANDBOX = 'true';
+  process.env.SPEC09_SANDBOX_MARKER = 'billing-spec09-synthetic-v1';
+  process.env.BILLING_SPEC09_STAG_INVOICING = 'true';
+  process.env.USE_REAL_HACIENDA = 'true';
+  process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'true';
+  process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL =
+    'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/';
+  process.env.HACIENDA_IDP_SANDBOX_URL =
+    'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token';
+  process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL = 'https://127.0.0.1:9/';
+  process.env.HACIENDA_IDP_PRODUCTION_URL = 'https://127.0.0.1:9/';
+  expect(selectSpec09CredentialVerifier(config, http)).toBeInstanceOf(HaciendaOidcAuthAdapter);
+  process.env.HACIENDA_IDP_PRODUCTION_URL =
+    'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token';
   expect(() => selectSpec09CredentialVerifier(config, http)).toThrow(
     'SPEC09_CREDENTIAL_SANDBOX_GUARD',
   );
