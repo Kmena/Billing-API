@@ -36,6 +36,19 @@ try {
   $phrase = $null
   try {
     & (Join-Path $PSScriptRoot 'spec09-seal-master-independent.ps1') -Mode Backup -Directory $independentDir -DpapiDirectory $dpapiDir -Passphrase $securePhrase -ConfirmPassphrase $securePhrase
+    $negativeScript = Join-Path $temporaryRoot 'wrong-phrase-check.ps1'
+    [System.IO.File]::WriteAllText($negativeScript, @'
+param([string] $SealScript, [string] $EnvelopeDirectory)
+$wrong = ConvertTo-SecureString ([Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))) -AsPlainText -Force
+& $SealScript -Mode Verify -Directory $EnvelopeDirectory -Passphrase $wrong
+'@, [System.Text.Encoding]::UTF8)
+    $negativeOutput = & pwsh -NoProfile -File $negativeScript -SealScript (Join-Path $PSScriptRoot 'spec09-seal-master-independent.ps1') -EnvelopeDirectory $independentDir 2>&1
+    $negativeText = $negativeOutput -join ' '
+    if ($negativeText -notmatch 'SPEC09_INDEPENDENT_MASTER_FAILED' -or
+        $negativeText -match 'SPEC09_INDEPENDENT_MASTER_RECOVERY_VERIFIED') {
+      throw 'WRONG_PASSPHRASE_ACCEPTED_OR_UNSAFE_ERROR'
+    }
+    Write-Output 'SPEC09_WRONG_PASSPHRASE_REJECTED'
     Rename-Item -LiteralPath $dpapiDir -NewName 'dpapi-unavailable'
     & (Join-Path $PSScriptRoot 'spec09-seal-master-independent.ps1') -Mode Verify -Directory $independentDir -Passphrase $securePhrase
 
