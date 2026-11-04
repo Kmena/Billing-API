@@ -10,6 +10,7 @@ export const CONSUMER_V2_W1_SCOPES = [
 export const CONSUMER_V2_LAB_SCOPES = [
   ...CONSUMER_V2_W1_SCOPES,
   'fiscal-v2:invoices:create',
+  'fiscal-v2:invoices:submit',
   'fiscal-v2:tickets:create',
   'fiscal-v2:credit-notes:create',
   'fiscal-v2:debit-notes:create',
@@ -42,12 +43,20 @@ export const AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES = [
   'fiscal-v2:onboarding:profile:write',
   'fiscal-v2:onboarding:activity:write',
 ] as const;
+/** Explicit rotation option for synthetic membership invoices in SANDBOX only. */
+export const AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES = [
+  'fiscal-v2:operations:read',
+  'fiscal-v2:invoices:create',
+  'fiscal-v2:invoices:submit',
+] as const;
 
 /** Preserve existing enrollment keys while permitting only these two audited additions. */
 export function hasEnrollmentV2Scopes(scopes: readonly string[]): boolean {
   return (
     new Set(scopes).size === scopes.length &&
     AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => scopes.includes(scope)) &&
+    (AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES.every((scope) => scopes.includes(scope)) ||
+      AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES.every((scope) => !scopes.includes(scope))) &&
     scopes.every(
       (scope) =>
         AFFILIATIONS_ENROLLMENT_V2_SCOPES.includes(
@@ -55,6 +64,9 @@ export function hasEnrollmentV2Scopes(scopes: readonly string[]): boolean {
         ) ||
         AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES.includes(
           scope as (typeof AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES)[number],
+        ) ||
+        AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES.includes(
+          scope as (typeof AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES)[number],
         ),
     )
   );

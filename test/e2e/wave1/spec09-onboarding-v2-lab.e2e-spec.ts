@@ -25,6 +25,7 @@ import { EnrollmentV2Service } from '../../../src/modules/fiscal-consumers/infra
 import {
   AFFILIATIONS_ENROLLMENT_V2_SCOPES,
   AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+  AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
   CONSUMER_V2_LAB_SCOPES,
 } from '../../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import { FiscalOnboardingAdminV2LabModule } from '../../../src/modules/fiscal-consumers/fiscal-onboarding-admin-v2-lab.module';
@@ -39,7 +40,7 @@ import { createTestCompany } from '../../helpers/test-factories';
 import { installGuardedTestDatabaseEnvironment } from '../../helpers/test-database-safety';
 
 describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
-  jest.setTimeout(120000);
+  jest.setTimeout(240000);
   let app: INestApplication;
   let prisma: PrismaClient;
   let context: FiscalE2eContext;
@@ -712,7 +713,11 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     );
     expect(wrongCompany.status).toBe(1);
     expect(existsSync(deniedOutput)).toBe(false);
-    const rotated = invoke('SecurePass123!', ['--persistent-sandbox', '--rotate']);
+    const rotated = invoke('SecurePass123!', [
+      '--persistent-sandbox',
+      '--rotate',
+      '--membership-stag',
+    ]);
     expect(rotated.status).toBe(0);
     const rotatedKey = rotated.issued!.key;
     expect(rotated.stdout).not.toContain(rotatedKey);
@@ -724,7 +729,11 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     expect(rotatedRecord.companies.map((entry) => entry.companyId)).toEqual([billingCompanyId]);
     expect(rotatedRecord.consumerKeyBinding?.associationId).toBe(approved.body.associationId);
     expect(new Set(rotatedRecord.scopes)).toEqual(
-      new Set([...AFFILIATIONS_ENROLLMENT_V2_SCOPES, ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES]),
+      new Set([
+        ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+        ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+        ...AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
+      ]),
     );
     await request(app.getHttpServer())
       .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)

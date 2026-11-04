@@ -22,12 +22,16 @@ import { ConsumerV2RequiredScope } from '../fiscal-consumers/infrastructure/http
 import { W2AStructuralValidationError } from './w2-a-structural-intent';
 import { W2BLabProjectionError } from './w2-b-lab-projection';
 import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
+import { W2B2LabSubmissionService } from './w2-b2-lab-submission.service';
 
 /** Registered only by W2B2FiscalLabModule in disposable test applications. */
 @UseGuards(ConsumerV2Guard)
 @Controller('api/v2/lab/companies/:companyId/fiscal-documents/:environment/invoices')
 export class W2B2LabInvoiceController {
-  constructor(private readonly invoices: W2B2LabInvoiceService) {}
+  constructor(
+    private readonly invoices: W2B2LabInvoiceService,
+    private readonly submissions: W2B2LabSubmissionService,
+  ) {}
 
   @Post()
   @ConsumerV2RequiredScope('fiscal-v2:invoices:create')
@@ -95,5 +99,28 @@ export class W2B2LabInvoiceController {
       .setHeader('Content-Type', artifact.contentType)
       .setHeader('X-Content-SHA256', artifact.sha256)
       .send(artifact.bytes);
+  }
+
+  @Post(':documentId/submit')
+  @ConsumerV2RequiredScope('fiscal-v2:invoices:submit')
+  async submit(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.submissions.submit(request.consumerV2, documentId, randomUUID());
+    response.status(202).setHeader('Cache-Control', 'no-store');
+    return result;
+  }
+
+  @Get(':documentId/submission')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  async submission(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    response.setHeader('Cache-Control', 'no-store');
+    return this.submissions.status(request.consumerV2, documentId);
   }
 }

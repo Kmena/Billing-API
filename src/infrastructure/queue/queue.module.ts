@@ -10,15 +10,19 @@ import { InMemoryJobQueue } from './adapters/in-memory-job-queue.adapter';
       provide: JOB_QUEUE,
       useFactory: (configService: ConfigService) => {
         const isTest = configService.get<string>('app.nodeEnv') === 'test';
-        if (isTest) {
+        if (
+          isTest &&
+          !(
+            process.env.BILLING_SPEC09_PERSISTENT_SANDBOX === 'true' &&
+            process.env.BILLING_SPEC09_STAG_INVOICING === 'true'
+          )
+        ) {
           return new InMemoryJobQueue();
         }
         return new PgBossJobQueue(configService);
       },
       inject: [ConfigService],
     },
-    PgBossJobQueue,
-    InMemoryJobQueue,
   ],
   exports: [JOB_QUEUE],
 })

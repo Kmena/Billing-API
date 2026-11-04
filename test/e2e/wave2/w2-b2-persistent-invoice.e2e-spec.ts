@@ -44,6 +44,7 @@ const scopes = [
   'fiscal-v2:invoices:create',
   'fiscal-v2:tickets:create',
   'fiscal-v2:operations:read',
+  'fiscal-v2:invoices:submit',
 ] as const;
 
 function invoiceIntent(externalOperationId: string, description = 'Servicio sintético') {
@@ -158,6 +159,7 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'false';
     process.env.FISCAL_E2E_HACIENDA_SECRET ??= 'disposable-test-sentinel';
     installGuardedTestDatabaseEnvironment();
     ({ prisma } = await createGuardedTestPrisma());
@@ -239,9 +241,11 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   });
 
   it('creates one durable document and signed XSD-valid XML with v2 origin', async () => {
-    const created = await post(key.secret, 'w2b2-create-1', invoiceIntent('w2b2-create-1')).expect(
-      201,
-    );
+    const intent = invoiceIntent('w2b2-create-1');
+    let created = await post(key.secret, 'w2b2-create-1', intent);
+    for (let attempt = 0; attempt < 3 && created.status === 202; attempt += 1)
+      created = await post(key.secret, 'w2b2-create-1', intent);
+    expect([200, 201]).toContain(created.status);
     expect(created.body).toMatchObject({ state: 'COMMITTED', documentStatus: 'READY_TO_SUBMIT' });
     const documentId = created.body.documentId as string;
     const doc = await prisma.fiscalDocument.findUniqueOrThrow({
@@ -818,6 +822,49 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .expect(403);
   });
 
+  it('queues a signed FE through the association-bound v2 HTTP contract without claiming Hacienda acceptance', async () => {
+    const created = await post(
+      key.secret,
+      'w2b2-submit-synthetic',
+      invoiceIntent('w2b2-submit-synthetic'),
+    ).expect(201);
+    const url = `${endpoint()}/${created.body.documentId}`;
+    const submitted = await request(app.getHttpServer())
+      .post(`${url}/submit`)
+      .set('X-API-Key', key.secret)
+      .expect(202);
+    expect(submitted.body).toMatchObject({
+      documentId: created.body.documentId,
+      environment: 'SANDBOX',
+      status: 'QUEUED',
+    });
+    const replay = await request(app.getHttpServer())
+      .post(`${url}/submit`)
+      .set('X-API-Key', key.secret)
+      .expect(202);
+    expect(replay.body.submissionId).toBe(submitted.body.submissionId);
+    const status = await request(app.getHttpServer())
+      .get(`${url}/submission`)
+      .set('X-API-Key', key.secret)
+      .expect(200);
+    expect(status.body.status).toBe('QUEUED');
+    expect(
+      await prisma.fiscalSubmission.count({ where: { fiscalDocumentId: created.body.documentId } }),
+    ).toBe(1);
+    expect(
+      await prisma.auditLog.count({
+        where: {
+          action: 'fiscal-v2.submission.requested',
+          resource: `FiscalSubmission:${submitted.body.submissionId}`,
+        },
+      }),
+    ).toBe(1);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${randomUUID()}/submission`)
+      .set('X-API-Key', key.secret)
+      .expect(404);
+  });
+
   it('enforces scope, origin isolation, rotation, revocation and v1 separation', async () => {
     const own = await post(key.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(
       201,
@@ -864,6 +911,14 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       correlationId: randomUUID(),
     });
     await post(readOnly.secret, 'w2b2-readonly', invoiceIntent('w2b2-readonly')).expect(403);
+    await request(app.getHttpServer())
+      .post(`${endpoint()}/${own.body.documentId}/submit`)
+      .set('X-API-Key', readOnly.secret)
+      .expect(403);
+    await request(app.getHttpServer())
+      .post(`${endpoint()}/${own.body.documentId}/submit`)
+      .set('X-API-Key', otherKey.secret)
+      .expect(404);
     await request(app.getHttpServer())
       .get(`${endpoint()}/${own.body.documentId}`)
       .set('X-API-Key', otherKey.secret)

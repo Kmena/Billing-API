@@ -9,6 +9,7 @@ import {
   AFFILIATIONS_ENROLLMENT_V2_PROFILE,
   AFFILIATIONS_ENROLLMENT_V2_SCOPES,
   AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+  AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
 } from '../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import {
   assertDisposableDatabaseMarker,
@@ -32,7 +33,10 @@ async function assertPersistentSandboxTarget(
       where: { id: companyId },
       select: { tenantId: true, legalName: true, status: true },
     }),
-    prisma.fiscalDocument.count({ where: { tenantId, companyId } }),
+    prisma.fiscalDocument.findMany({
+      where: { tenantId, companyId },
+      select: { companyId: true, environment: true, type: true, originAssociationId: true },
+    }),
     prisma.fiscalConsumerCompany.findFirst({
       where: {
         tenantId,
@@ -64,6 +68,7 @@ async function assertPersistentSandboxTarget(
   const allowedScopes = new Set<string>([
     ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
     ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+    ...AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
   ]);
   if (
     tenant?.slug !== 'spec09-sandbox-synthetic' ||
@@ -71,7 +76,13 @@ async function assertPersistentSandboxTarget(
     company?.tenantId !== tenantId ||
     company.legalName !== 'SPEC-09 EMISOR DEMO' ||
     company.status !== 'ACTIVE' ||
-    documents !== 0 ||
+    documents.some(
+      (document) =>
+        document.companyId !== companyId ||
+        document.environment !== 'SANDBOX' ||
+        document.type !== 'INVOICE' ||
+        document.originAssociationId !== association?.[0]?.id,
+    ) ||
     association?.length !== 1 ||
     mapped?.associations.length !== 1 ||
     activeKeys.length < 1 ||
@@ -99,6 +110,7 @@ async function main() {
   const persistentSandbox = rawOptions[0] === '--persistent-sandbox';
   const options = persistentSandbox ? rawOptions.slice(1) : rawOptions;
   const rotate = options.includes('--rotate');
+  const membershipStag = options.includes('--membership-stag');
   const revokeAt = options.indexOf('--revoke-key');
   const abortAt = options.indexOf('--abort-rotation');
   const outputAt = options.indexOf('--output-file');
@@ -108,7 +120,14 @@ async function main() {
   const outputPath = outputAt >= 0 ? options[outputAt + 1] : undefined;
   const recipientPath = recipientAt >= 0 ? options[recipientAt + 1] : undefined;
   const expectedOptions = rotate
-    ? ['--rotate', '--output-file', outputPath, '--recipient-public-key', recipientPath]
+    ? [
+        '--rotate',
+        ...(membershipStag ? ['--membership-stag'] : []),
+        '--output-file',
+        outputPath,
+        '--recipient-public-key',
+        recipientPath,
+      ]
     : revokeAt >= 0
       ? ['--revoke-key', revokeKeyId]
       : abortAt >= 0
@@ -118,6 +137,7 @@ async function main() {
   if (
     ![tenantId, companyId, affiliationsCompanyId].every((value) => uuid.test(value ?? '')) ||
     !adminEmail ||
+    (membershipStag && !rotate) ||
     options.length !== expectedOptions.length ||
     options.some((value, index) => value !== expectedOptions[index]) ||
     (revokeAt >= 0 || abortAt >= 0
@@ -128,7 +148,7 @@ async function main() {
         !path.isAbsolute(recipientPath))
   )
     throw new Error(
-      'Usage: spec09-issue-enrollment-key-lab <tenantId> <billingCompanyId> <affiliationsCompanyId> <billingAdminEmail> [--persistent-sandbox] [--rotate] --output-file <absolute-encrypted-new-file> --recipient-public-key <absolute-public-key-file> | --revoke-key <oldKeyId> | --abort-rotation <newKeyId> (password on hidden TTY or stdin)',
+      'Usage: spec09-issue-enrollment-key-lab <tenantId> <billingCompanyId> <affiliationsCompanyId> <billingAdminEmail> [--persistent-sandbox] [--rotate [--membership-stag]] --output-file <absolute-encrypted-new-file> --recipient-public-key <absolute-public-key-file> | --revoke-key <oldKeyId> | --abort-rotation <newKeyId> (password on hidden TTY or stdin)',
     );
   let disposableTarget = !persistentSandbox;
   let databaseUrl: string;
@@ -368,6 +388,7 @@ async function main() {
               scopes: [
                 ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
                 ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+                ...(membershipStag ? AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES : []),
               ],
               integrationProfile: AFFILIATIONS_ENROLLMENT_V2_PROFILE,
               status: 'ACTIVE',
@@ -424,10 +445,12 @@ async function main() {
 void main().catch((error) => {
   const message = error instanceof Error ? error.message : '';
   process.stderr.write(
-    `${/^(?:SPEC09_|BILLING_ADMIN_|ENROLLMENT_)[A-Z0-9_]+$/.test(message) ||
+    `${
+      /^(?:SPEC09_|BILLING_ADMIN_|ENROLLMENT_)[A-Z0-9_]+$/.test(message) ||
       message.startsWith('Usage: spec09-issue-enrollment-key-lab ')
-      ? message
-      : 'ENROLLMENT_GRANT_FAILED'}\n`,
+        ? message
+        : 'ENROLLMENT_GRANT_FAILED'
+    }\n`,
   );
   process.exitCode = 1;
 });

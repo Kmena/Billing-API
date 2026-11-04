@@ -5,6 +5,9 @@ import {
   evaluateConsumerKeyIssue,
   evaluateConsumerKeyRevocation,
   hasOnlyW1ConsumerScopes,
+  hasEnrollmentV2Scopes,
+  AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+  AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
   nextConsumerRotationDueAt,
 } from '../consumer-v2.policy';
 
@@ -185,6 +188,28 @@ describe('W1-D1 isolated M2M authorization', () => {
       hasOnlyW1ConsumerScopes(['fiscal-v2:operations:read', 'fiscal-v2:operations:read']),
     ).toBe(false);
     expect(hasOnlyW1ConsumerScopes(['invoices:write'])).toBe(false);
+  });
+});
+
+describe('SPEC-09 membership SANDBOX scopes', () => {
+  it('keeps enrollment keys valid and requires the complete create/read/submit set', () => {
+    expect(hasEnrollmentV2Scopes([...AFFILIATIONS_ENROLLMENT_V2_SCOPES])).toBe(true);
+    expect(
+      hasEnrollmentV2Scopes([
+        ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+        ...AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
+      ]),
+    ).toBe(true);
+    for (const partial of AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES) {
+      expect(hasEnrollmentV2Scopes([...AFFILIATIONS_ENROLLMENT_V2_SCOPES, partial])).toBe(false);
+    }
+    expect(
+      hasEnrollmentV2Scopes([
+        ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+        ...AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
+        'invoices:write',
+      ]),
+    ).toBe(false);
   });
 });
 
