@@ -42,6 +42,6 @@ import { HaciendaCircuitBreaker } from './hacienda-circuit-breaker.service';
       inject: [ConfigService, HttpService, CACHE_MANAGER, HaciendaCircuitBreaker],
     },
   ],
-  exports: [HACIENDA_PORT, HaciendaCircuitBreaker],
+  exports: [HACIENDA_PORT, HaciendaCircuitBreaker, MockHaciendaAdapter, HaciendaApiAdapter],
 })
 export class HaciendaModule {}

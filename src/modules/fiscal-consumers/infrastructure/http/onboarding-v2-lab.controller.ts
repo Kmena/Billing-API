@@ -60,6 +60,13 @@ export class OnboardingV2LabController {
     return this.fiscalDetails.read(req.consumerV2);
   }
 
+  @Post('taxpayer-verification')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:activity:write')
+  @HttpCode(200)
+  verifyTaxpayer(@Req() req: { consumerV2: ConsumerV2Principal }) {
+    return this.fiscalDetails.verifyTaxpayer(req.consumerV2);
+  }
+
   @Patch('fiscal-profile')
   @ConsumerV2RequiredScope('fiscal-v2:onboarding:profile:write')
   patchProfile(

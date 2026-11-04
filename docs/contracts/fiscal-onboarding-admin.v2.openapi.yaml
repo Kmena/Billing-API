@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Billing administrative fiscal onboarding M2M v2 laboratory
   version: 2.0.0-lab
-  description: Isolated test module only. AppModule does not register these routes. No Hacienda call or document issuance is made by connection-test.
+  description: Isolated test module only. AppModule does not register these routes. Connection-test never contacts Hacienda or issues documents. The separately guarded SANDBOX taxpayer-verification operation may query the public /fe/ae registry when explicitly enabled.
 x-initial-binding: A Billing administrator pre-issues a one-company SANDBOX enrollment key locally. Afiliaciones then requests automatic technical association with matching PKCS#12/PIN and fiscal credentials. No production authorization is granted.
 servers:
   - url: http://127.0.0.1:3000
@@ -280,6 +280,18 @@ paths:
       description: Reads existing profile, verified activities and taxpayer status. No external call or secret value.
       responses:
         '200': { description: Safe current fiscal details, content: { application/json: { schema: { $ref: '#/components/schemas/FiscalDetails' } } } }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/taxpayer-verification:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: verifyTaxpayerAndImportActivitiesV2
+      x-required-scope: fiscal-v2:onboarding:activity:write
+      description: SANDBOX only. Uses the existing Billing issuer identification, queries only public Hacienda /fe/ae when SPEC09_TAXPAYER_LOOKUP_MODE=public under the persistent SANDBOX guard, and atomically records the returned taxpayer status, activities and audit. This does not validate Hacienda login credentials, enable issuance or authorize production. Disabled by default; fixture mode is limited to disposable tests.
+      responses:
+        '200': { description: Verification timestamp and activity count only; no fiscal identity or secrets. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Issuer or taxpayer absent. }
+        '409': { description: Lookup disabled or issuer identity changed during lookup. }
+        '503': { description: Public registry unavailable or invalid response; existing fiscal configuration is unchanged. }
   /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/fiscal-profile:
     parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
     patch:

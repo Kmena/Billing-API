@@ -8,6 +8,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import * as request from 'supertest';
 import { AppModule } from '../../../src/app.module';
+import { MockHaciendaAdapter } from '../../../src/infrastructure/integrations/hacienda/adapters/mock-hacienda.adapter';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
 import { configureApiPrefixes } from '../../../src/bootstrap/api-prefix';
 import { CorrelationIdInterceptor } from '../../../src/api/interceptors/correlation-id.interceptor';
@@ -55,6 +56,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.env.USE_REAL_HACIENDA = 'false';
+    process.env.SPEC09_TAXPAYER_LOOKUP_MODE = 'fixture';
     process.env.FISCAL_ONBOARDING_V2_HMAC_KEY =
       'synthetic-spec09-hmac-key-for-disposable-tests-only';
     installGuardedTestDatabaseEnvironment();
@@ -277,6 +279,97 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
         .send({ email: 'denied@example.invalid' })
         .expect(403);
     } finally {
+      await prisma.apiKey.update({
+        where: { id: keyId },
+        data: { scopes: [...CONSUMER_V2_LAB_SCOPES] },
+      });
+    }
+  });
+
+  it('imports activities for the bound issuer with M2M authorization and audit', async () => {
+    const lookup = jest.spyOn(app.get(MockHaciendaAdapter), 'getTaxpayer');
+    const company = await prisma.company.findUniqueOrThrow({
+      where: { id: companyId },
+      select: { identificationNumber: true, identificationType: true },
+    });
+    lookup.mockResolvedValue({
+      identification: company.identificationNumber,
+      identificationType: company.identificationType === 'FISICA' ? '01' : '02',
+      name: 'Emisor de prueba',
+      found: true,
+      taxSituation: 'Inscrito',
+      moroso: false,
+      omiso: false,
+      economicActivities: [
+        { code: '9609.0', description: 'Actividad sintética', status: 'A', type: 'P' },
+      ],
+    });
+    try {
+      const endpoint = `${base()}/taxpayer-verification`;
+      await request(app.getHttpServer()).post(endpoint).expect(401);
+      await request(app.getHttpServer())
+        .post(endpoint)
+        .set('X-API-Key', secret)
+        .set('Origin', 'https://synthetic.example')
+        .expect(403);
+      await request(app.getHttpServer())
+        .post(`/api/v2/companies/${randomUUID()}/fiscal-onboarding/SANDBOX/taxpayer-verification`)
+        .set('X-API-Key', secret)
+        .expect(404);
+      await request(app.getHttpServer())
+        .post(`/api/v2/companies/${companyId}/fiscal-onboarding/PRODUCTION/taxpayer-verification`)
+        .set('X-API-Key', secret)
+        .expect(403);
+      await prisma.apiKey.update({
+        where: { id: keyId },
+        data: { scopes: ['fiscal-v2:onboarding:read'] },
+      });
+      await request(app.getHttpServer()).post(endpoint).set('X-API-Key', secret).expect(403);
+      expect(lookup).not.toHaveBeenCalled();
+      await prisma.apiKey.update({
+        where: { id: keyId },
+        data: { scopes: [...CONSUMER_V2_LAB_SCOPES] },
+      });
+      const response = await request(app.getHttpServer())
+        .post(endpoint)
+        .set('X-API-Key', secret)
+        .expect(200);
+      expect(response.body).toMatchObject({ status: 'VERIFIED', activitiesCount: 1 });
+      expect(JSON.stringify(response.body)).not.toContain(company.identificationNumber);
+      expect(lookup).toHaveBeenCalledWith(company.identificationNumber);
+      expect(
+        await prisma.auditLog.count({
+          where: { companyId, action: 'onboarding-v2.taxpayer.verified' },
+        }),
+      ).toBe(1);
+      const details = await request(app.getHttpServer())
+        .get(`${base()}/fiscal-details`)
+        .set('X-API-Key', secret)
+        .expect(200);
+      expect(details.body.activities).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: '9609.0' })]),
+      );
+      lookup.mockResolvedValueOnce({
+        identification: company.identificationNumber,
+        identificationType: company.identificationType === 'FISICA' ? '02' : '01',
+        name: 'Otro emisor',
+        found: true,
+        taxSituation: 'Inscrito',
+        moroso: false,
+        omiso: false,
+        economicActivities: [{ code: '9999.0', description: 'Actividad ajena', status: 'A' }],
+      });
+      await request(app.getHttpServer()).post(endpoint).set('X-API-Key', secret).expect(409);
+      expect(
+        await prisma.companyEconomicActivity.count({ where: { companyId, code: '9999.0' } }),
+      ).toBe(0);
+      expect(
+        await prisma.auditLog.count({
+          where: { companyId, action: 'onboarding-v2.taxpayer.verified' },
+        }),
+      ).toBe(1);
+    } finally {
+      lookup.mockRestore();
       await prisma.apiKey.update({
         where: { id: keyId },
         data: { scopes: [...CONSUMER_V2_LAB_SCOPES] },

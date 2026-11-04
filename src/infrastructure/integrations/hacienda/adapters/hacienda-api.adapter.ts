@@ -149,10 +149,7 @@ export class HaciendaApiAdapter implements HaciendaPort {
       return result;
     } catch (err) {
       if (err instanceof HaciendaUnavailableException) throw err;
-      this.logger.warn(
-        { identification, error: err instanceof Error ? err.message : String(err) },
-        'Hacienda getTaxpayer failed',
-      );
+      this.logger.warn('Hacienda getTaxpayer failed');
       throw new HaciendaUnavailableException('getTaxpayer');
     }
   }

@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { CompanyFiscalProfile, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
@@ -12,6 +14,8 @@ import { FiscalContact } from '../../../companies/domain/value-objects/fiscal-co
 import { ConsumerV2Principal } from '../http/consumer-v2.guard';
 import { PatchFiscalProfileV2Dto } from '../http/onboarding-v2.dto';
 import { PrismaConsumerV2Repository } from './prisma-consumer-v2.repository';
+import { SPEC09_TAXPAYER_LOOKUP, Spec09TaxpayerLookup } from './spec09-taxpayer-lookup';
+import { HaciendaUnavailableException } from '../../../../infrastructure/integrations/hacienda/exceptions/hacienda-unavailable.exception';
 
 function profileResponse(p: ConsumerV2Principal, saved: CompanyFiscalProfile, version: string) {
   return {
@@ -47,6 +51,7 @@ export class OnboardingV2FiscalDetailsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: PrismaConsumerV2Repository,
+    @Inject(SPEC09_TAXPAYER_LOOKUP) private readonly taxpayerLookup: Spec09TaxpayerLookup,
   ) {}
 
   async read(p: ConsumerV2Principal) {
@@ -130,6 +135,151 @@ export class OnboardingV2FiscalDetailsService {
     const rows = await tx.$queryRaw<{ version: string }[]>`SELECT xmin::text AS version
       FROM company_fiscal_profiles WHERE company_id = ${p.companyId}::uuid AND tenant_id = ${p.tenantId}::uuid`;
     return rows[0]?.version ?? 'absent';
+  }
+
+  /** Import only the activities returned for Billing's existing legal identity. */
+  async verifyTaxpayer(p: ConsumerV2Principal) {
+    if (!this.taxpayerLookup) throw new ConflictException({ code: 'TAXPAYER_LOOKUP_DISABLED' });
+    const identity = await this.prisma.$transaction(async (tx) => {
+      await this.repository.assertPrincipalForScope(tx, p, 'fiscal-v2:onboarding:activity:write');
+      const company = await tx.company.findFirst({
+        where: { id: p.companyId, tenantId: p.tenantId, status: 'ACTIVE' },
+        select: { identificationNumber: true, identificationType: true },
+      });
+      if (!company) throw new NotFoundException({ code: 'COMPANY_NOT_FOUND' });
+      return company;
+    });
+    let taxpayer;
+    try {
+      taxpayer = await this.taxpayerLookup.getTaxpayer(identity.identificationNumber);
+    } catch (error) {
+      if (error instanceof HaciendaUnavailableException)
+        throw new ServiceUnavailableException({ code: 'TAXPAYER_LOOKUP_UNAVAILABLE' });
+      throw error;
+    }
+    if (!taxpayer.found) throw new NotFoundException({ code: 'TAXPAYER_NOT_FOUND' });
+    const returnedType = (
+      { '01': 'FISICA', '02': 'JURIDICA', '03': 'DIMEX', '04': 'NITE' } as Record<string, string>
+    )[taxpayer.identificationType ?? ''];
+    if (
+      taxpayer.identification !== identity.identificationNumber ||
+      returnedType !== identity.identificationType
+    )
+      throw new ConflictException({ code: 'TAXPAYER_IDENTITY_MISMATCH' });
+    const activities = taxpayer.economicActivities ?? [];
+    if (
+      !taxpayer.name?.trim() ||
+      taxpayer.name.length > 255 ||
+      !taxpayer.taxSituation?.trim() ||
+      taxpayer.taxSituation.length > 100 ||
+      typeof taxpayer.moroso !== 'boolean' ||
+      typeof taxpayer.omiso !== 'boolean' ||
+      activities.length > 100 ||
+      activities.some(
+        (activity) =>
+          !activity.code?.trim() ||
+          activity.code.length > 20 ||
+          !activity.description?.trim() ||
+          activity.description.length > 255 ||
+          !['A', 'I'].includes(activity.status),
+      ) ||
+      new Set(activities.map((activity) => activity.code)).size !== activities.length
+    )
+      throw new ServiceUnavailableException({ code: 'TAXPAYER_LOOKUP_INVALID_RESPONSE' });
+    const now = new Date();
+    await this.prisma
+      .$transaction(
+        async (tx) => {
+          await this.repository.assertPrincipalForScope(
+            tx,
+            p,
+            'fiscal-v2:onboarding:activity:write',
+          );
+          await tx.$queryRaw`SELECT id FROM companies
+        WHERE id = ${p.companyId}::uuid AND tenant_id = ${p.tenantId}::uuid FOR UPDATE`;
+          const current = await tx.company.findFirst({
+            where: { id: p.companyId, tenantId: p.tenantId, status: 'ACTIVE' },
+            select: { identificationNumber: true, identificationType: true },
+          });
+          if (
+            !current ||
+            current.identificationNumber !== identity.identificationNumber ||
+            current.identificationType !== identity.identificationType
+          )
+            throw new ConflictException({ code: 'TAXPAYER_IDENTITY_CHANGED' });
+          await tx.company.update({
+            where: { id: p.companyId },
+            data: {
+              haciendaName: taxpayer.name,
+              haciendaVerifiedAt: now,
+              haciendaVerificationStatus: 'VERIFIED',
+              haciendaTaxSituation: taxpayer.taxSituation,
+              haciendaMoroso: taxpayer.moroso,
+              haciendaOmiso: taxpayer.omiso,
+            },
+          });
+          for (const activity of activities) {
+            await tx.companyEconomicActivity.upsert({
+              where: { companyId_code: { companyId: p.companyId, code: activity.code } },
+              create: {
+                id: randomUUID(),
+                tenantId: p.tenantId,
+                companyId: p.companyId,
+                code: activity.code,
+                description: activity.description,
+                haciendaStatus: activity.status,
+                haciendaKind: activity.type ?? null,
+                billingEnabled: true,
+                verifiedAt: now,
+                lastSeenAt: now,
+                verificationSource: 'HACIENDA_FE_AE',
+              },
+              update: {
+                description: activity.description,
+                haciendaStatus: activity.status,
+                haciendaKind: activity.type ?? null,
+                verifiedAt: now,
+                lastSeenAt: now,
+                verificationSource: 'HACIENDA_FE_AE',
+              },
+            });
+          }
+          await tx.companyEconomicActivity.updateMany({
+            where: {
+              tenantId: p.tenantId,
+              companyId: p.companyId,
+              verificationSource: 'HACIENDA_FE_AE',
+              code: { notIn: activities.map((activity) => activity.code) },
+              haciendaStatus: 'A',
+            },
+            data: { haciendaStatus: 'I', lastSeenAt: now },
+          });
+          await tx.auditLog.create({
+            data: {
+              id: randomUUID(),
+              tenantId: p.tenantId,
+              companyId: p.companyId,
+              apiKeyId: p.apiKeyId,
+              actor: `apikey:${p.apiKeyId}`,
+              action: 'onboarding-v2.taxpayer.verified',
+              eventClass: 'FISCAL_AUDIT',
+              metadata: {
+                environment: p.environment,
+                associationId: p.associationId,
+                source: 'HACIENDA_FE_AE',
+                activitiesCount: activities.length,
+              },
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch(conflictOnSerialization);
+    return {
+      status: 'VERIFIED',
+      activitiesCount: activities.length,
+      verifiedAt: now.toISOString(),
+    };
   }
 
   async patchProfile(
