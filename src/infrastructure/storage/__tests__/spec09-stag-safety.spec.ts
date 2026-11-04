@@ -1,4 +1,5 @@
 import { isSafeSpec09ExternalMode } from '../spec09-stag-safety';
+import { assertRealHaciendaDisabledInTests } from '../test-storage-safety';
 
 const safe: NodeJS.ProcessEnv = {
   BILLING_SPEC09_STAG_INVOICING: 'true',
@@ -42,4 +43,31 @@ it('permits only the exact STAG mode and keeps production endpoints unreachable'
       FISCAL_WORKER_ENABLE_IN_TESTS: 'false',
     }),
   ).toBe(true);
+});
+
+it('keeps disposable tests offline and permits only the guarded persistent STAG sandbox', () => {
+  expect(() =>
+    assertRealHaciendaDisabledInTests({
+      ...safe,
+      NODE_ENV: 'test',
+    }),
+  ).toThrow();
+  expect(() =>
+    assertRealHaciendaDisabledInTests({
+      ...safe,
+      NODE_ENV: 'test',
+      BILLING_SPEC09_PERSISTENT_SANDBOX: 'true',
+      SPEC09_SANDBOX_MARKER: 'billing-spec09-synthetic-v1',
+    }),
+  ).not.toThrow();
+  expect(() =>
+    assertRealHaciendaDisabledInTests({
+      ...safe,
+      NODE_ENV: 'test',
+      BILLING_SPEC09_PERSISTENT_SANDBOX: 'true',
+      SPEC09_SANDBOX_MARKER: 'billing-spec09-synthetic-v1',
+      HACIENDA_RECEPCION_PRODUCTION_BASE_URL:
+        'https://api.comprobanteselectronicos.go.cr/recepcion/v1/',
+    }),
+  ).toThrow();
 });

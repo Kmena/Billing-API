@@ -54,7 +54,15 @@ function requireTestRun(env: TestStorageEnvironment): { runId: string; runToken:
 }
 
 export function assertRealHaciendaDisabledInTests(env: TestStorageEnvironment = process.env): void {
-  if (env.NODE_ENV === 'test' && env.USE_REAL_HACIENDA === 'true') {
+  if (
+    env.NODE_ENV === 'test' &&
+    env.USE_REAL_HACIENDA === 'true' &&
+    !(
+      env.BILLING_SPEC09_PERSISTENT_SANDBOX === 'true' &&
+      env.SPEC09_SANDBOX_MARKER === 'billing-spec09-synthetic-v1' &&
+      isSafeSpec09ExternalMode(env)
+    )
+  ) {
     throw new Error('USE_REAL_HACIENDA=true is forbidden in automated tests.');
   }
 }
