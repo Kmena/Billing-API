@@ -19,6 +19,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import multer = require('multer');
 import { OnboardingV2LabService } from '../../application/onboarding-v2-lab.service';
 import { OnboardingV2FiscalDetailsService } from '../persistence/onboarding-v2-fiscal-details.service';
+import { OnboardingV2CredentialValidationService } from '../persistence/onboarding-v2-credential-validation.service';
 import { ConsumerV2Guard, ConsumerV2Principal } from './consumer-v2.guard';
 import { ConsumerV2RequiredScope } from './consumer-v2-scope.decorator';
 import { OnboardingV2OriginGuard } from './onboarding-v2-origin.guard';
@@ -52,6 +53,7 @@ export class OnboardingV2LabController {
   constructor(
     private readonly service: OnboardingV2LabService,
     private readonly fiscalDetails: OnboardingV2FiscalDetailsService,
+    private readonly credentialValidation: OnboardingV2CredentialValidationService,
   ) {}
 
   @Get('fiscal-details')
@@ -130,6 +132,13 @@ export class OnboardingV2LabController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ) {
     return this.service.credentials(req.consumerV2, dto, true, idempotencyKey ?? '');
+  }
+
+  @Post('credentials/validate')
+  @ConsumerV2RequiredScope('fiscal-v2:onboarding:credentials:write')
+  @HttpCode(200)
+  validateCredentials(@Req() req: { consumerV2: ConsumerV2Principal }) {
+    return this.credentialValidation.validate(req.consumerV2);
   }
 
   @Get('certificate')

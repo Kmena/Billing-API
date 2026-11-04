@@ -19,6 +19,8 @@ import {
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
 import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/application/consumer-v2-lab.service';
 import { OnboardingV2MutationService } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/onboarding-v2-mutation.service';
+import { SPEC09_CREDENTIAL_VERIFIER } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/spec09-credential-verifier';
+import { MockHaciendaAuthAdapter } from '../../../src/modules/hacienda-connection/infrastructure/auth/mock-hacienda-auth.adapter';
 import { EnrollmentV2Service } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/enrollment-v2.service';
 import {
   AFFILIATIONS_ENROLLMENT_V2_SCOPES,
@@ -57,6 +59,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     process.env.NODE_ENV = 'test';
     process.env.USE_REAL_HACIENDA = 'false';
     process.env.SPEC09_TAXPAYER_LOOKUP_MODE = 'fixture';
+    process.env.SPEC09_CREDENTIAL_VALIDATION_MODE = 'fixture';
     process.env.FISCAL_ONBOARDING_V2_HMAC_KEY =
       'synthetic-spec09-hmac-key-for-disposable-tests-only';
     installGuardedTestDatabaseEnvironment();
@@ -991,6 +994,65 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     expect(
       audit.body.some((e: { action: string }) => e.action === 'onboarding-v2.credentials.rotated'),
     ).toBe(true);
+  });
+
+  it('validates stored credentials at the isolated IDP fixture with audit and no secret exposure', async () => {
+    const verifier = app.get<MockHaciendaAuthAdapter>(SPEC09_CREDENTIAL_VERIFIER);
+    const endpoint = `${base()}/credentials/validate`;
+    await prisma.apiKey.update({
+      where: { id: keyId },
+      data: { scopes: ['fiscal-v2:onboarding:read'] },
+    });
+    await request(app.getHttpServer()).post(endpoint).set('X-API-Key', secret).expect(403);
+    await prisma.apiKey.update({
+      where: { id: keyId },
+      data: { scopes: [...CONSUMER_V2_LAB_SCOPES] },
+    });
+    await request(app.getHttpServer())
+      .post(`/api/v2/companies/${randomUUID()}/fiscal-onboarding/SANDBOX/credentials/validate`)
+      .set('X-API-Key', secret)
+      .expect(404);
+    verifier.behavior = 'INVALID_CREDENTIALS';
+    const invalid = await request(app.getHttpServer())
+      .post(endpoint)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(invalid.body).toMatchObject({
+      status: 'INVALID_CREDENTIALS',
+      externalCall: true,
+      issuedDocument: false,
+      productionAuthorized: false,
+    });
+    verifier.behavior = 'UNAVAILABLE';
+    const unavailable = await request(app.getHttpServer())
+      .post(endpoint)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(unavailable.body.status).toBe('UNAVAILABLE');
+    verifier.behavior = 'SUCCESS';
+    const valid = await request(app.getHttpServer())
+      .post(endpoint)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(valid.body.status).toBe('CONNECTED');
+    expect(JSON.stringify([invalid.body, unavailable.body, valid.body])).not.toContain(
+      'synthetic-password-2',
+    );
+    const persisted = await prisma.haciendaConnection.findFirstOrThrow({
+      where: { tenantId, companyId, environment: 'SANDBOX' },
+    });
+    expect(persisted.status).toBe('CONNECTED');
+    expect(persisted.secretReference).toBeTruthy();
+    const entries = await request(app.getHttpServer())
+      .get(`${base()}/audit`)
+      .set('X-API-Key', secret)
+      .expect(200);
+    expect(
+      entries.body.some(
+        (entry: { action: string }) => entry.action === 'onboarding-v2.credentials.validated',
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(entries.body)).not.toContain('synthetic-password-2');
   });
 
   it('associates idempotently and rejects in-place legal issuer changes', async () => {

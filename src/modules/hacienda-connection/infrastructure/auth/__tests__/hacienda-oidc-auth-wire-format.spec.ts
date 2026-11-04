@@ -20,7 +20,7 @@
  * No real Hacienda credentials are used. Mocks intercept the HTTP call.
  */
 
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { HaciendaOidcAuthAdapter } from '../hacienda-oidc-auth.adapter';
 import type { HttpService } from '@nestjs/axios';
 import type { ConfigService } from '@nestjs/config';
@@ -94,6 +94,10 @@ describe('HaciendaOidcAuthAdapter — OAuth token request wire format (F4-S TASK
     it('sends application/x-www-form-urlencoded Content-Type', () => {
       const headers = (captured.config as { headers?: Record<string, string> }).headers ?? {};
       expect(headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    });
+
+    it('does not follow a redirect carrying credentials', () => {
+      expect(captured.config.maxRedirects).toBe(0);
     });
 
     it('sends grant_type=password', () => {
@@ -177,5 +181,30 @@ describe('HaciendaOidcAuthAdapter — OAuth token request wire format (F4-S TASK
       const result = await adapter.authenticate({ username: 'u', password: 'p' }, 'SANDBOX');
       expect(result.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 300 * 1000 - 100);
     });
+  });
+
+  it('classifies an invalid_grant response without exposing credentials', async () => {
+    const adapter = new HaciendaOidcAuthAdapter(makeConfigService(), {
+      post: () =>
+        throwError(() => ({ response: { status: 400, data: { error: 'invalid_grant' } } })),
+    } as unknown as HttpService);
+    expect(
+      await adapter.validateConnection(
+        { username: 'synthetic-user', password: 'synthetic-secret' },
+        'SANDBOX',
+      ),
+    ).toEqual({ isValid: false, errorCode: 'INVALID_CREDENTIALS' });
+  });
+
+  it('rejects a malformed success response instead of marking it connected', async () => {
+    const adapter = new HaciendaOidcAuthAdapter(makeConfigService(), {
+      post: () => of({ data: { expires_in: 300 } }),
+    } as unknown as HttpService);
+    expect(
+      await adapter.validateConnection(
+        { username: 'synthetic-user', password: 'synthetic-secret' },
+        'SANDBOX',
+      ),
+    ).toEqual({ isValid: false, errorCode: 'IDP_UNAVAILABLE' });
   });
 });

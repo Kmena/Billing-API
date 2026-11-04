@@ -368,6 +368,17 @@ paths:
         '200': { description: New secret reference committed; old reference deleted; validation state reset. }
         '404': { description: No connection to rotate. }
         '409': { description: Concurrent rotation conflict. }
+  /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/credentials/validate:
+    parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
+    post:
+      operationId: validateStoredHaciendaCredentialsV2
+      x-required-scope: fiscal-v2:onboarding:credentials:write
+      description: Explicit SANDBOX-only token request to Hacienda's rut-stag IDP using credentials already encrypted in Billing. Enabled only by SPEC09_CREDENTIAL_VALIDATION_MODE=sandbox under the persistent laboratory guard. Does not send a fiscal document, expose a token, or authorize production. A disabled or absent connection is rejected; rotation during validation returns a conflict.
+      responses:
+        '200': { description: 'Safe status CONNECTED, INVALID_CREDENTIALS or UNAVAILABLE; lastValidatedAt, externalCall=true, issuedDocument=false, productionAuthorized=false. No credentials or token.' }
+        '403': { description: Missing M2M scope or inactive association. }
+        '404': { description: No stored credentials or wrong company. }
+        '409': { description: Validation disabled, connection disabled or concurrent credential change. }
   /api/v2/companies/{companyId}/fiscal-onboarding/{environment}/certificate:
     parameters: [{ $ref: '#/components/parameters/companyId' }, { $ref: '#/components/parameters/environment' }]
     get:

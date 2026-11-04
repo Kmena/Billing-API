@@ -40,9 +40,19 @@ export class HaciendaOidcAuthAdapter implements HaciendaAuthPort {
     const response = await firstValueFrom(
       this.http.post<KeycloakTokenResponse>(this.url(environment), body.toString(), {
         timeout: this.config.authTimeoutMs,
+        maxRedirects: 0,
+        maxContentLength: 16384,
+        maxBodyLength: 4096,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       }),
     );
+    if (
+      typeof response.data?.access_token !== 'string' ||
+      !response.data.access_token ||
+      !Number.isFinite(response.data.expires_in) ||
+      response.data.expires_in <= 0
+    )
+      throw new Error('HACIENDA_AUTH_INVALID_RESPONSE');
     return {
       accessToken: response.data.access_token,
       refreshToken: response.data.refresh_token,
@@ -65,11 +75,12 @@ export class HaciendaOidcAuthAdapter implements HaciendaAuthPort {
   }
 
   private isUnauthorized(error: unknown): boolean {
+    if (typeof error !== 'object' || error === null || !('response' in error)) return false;
+    const response = (error as { response?: { status?: number; data?: { error?: unknown } } })
+      .response;
     return (
-      typeof error === 'object' &&
-      error !== null &&
-      'response' in error &&
-      (error as { response?: { status?: number } }).response?.status === 401
+      response?.status === 401 ||
+      (response?.status === 400 && response.data?.error === 'invalid_grant')
     );
   }
 
