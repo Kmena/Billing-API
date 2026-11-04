@@ -36,13 +36,7 @@ try {
   $phrase = $null
   try {
     & (Join-Path $PSScriptRoot 'spec09-seal-master-independent.ps1') -Mode Backup -Directory $independentDir -DpapiDirectory $dpapiDir -Passphrase $securePhrase -ConfirmPassphrase $securePhrase
-    $negativeScript = Join-Path $temporaryRoot 'wrong-phrase-check.ps1'
-    [System.IO.File]::WriteAllText($negativeScript, @'
-param([string] $SealScript, [string] $EnvelopeDirectory)
-$wrong = ConvertTo-SecureString ([Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(48))) -AsPlainText -Force
-& $SealScript -Mode Verify -Directory $EnvelopeDirectory -Passphrase $wrong
-'@, [System.Text.Encoding]::UTF8)
-    $negativeOutput = & pwsh -NoProfile -File $negativeScript -SealScript (Join-Path $PSScriptRoot 'spec09-seal-master-independent.ps1') -EnvelopeDirectory $independentDir 2>&1
+    $negativeOutput = & pwsh -NoProfile -File (Join-Path $PSScriptRoot 'spec09-create-independent-master-interactive.ps1') -Mode NegativeProbe -Directory $independentDir 2>&1
     $negativeText = $negativeOutput -join ' '
     if ($negativeText -notmatch 'SPEC09_INDEPENDENT_MASTER_FAILED' -or
         $negativeText -match 'SPEC09_INDEPENDENT_MASTER_RECOVERY_VERIFIED') {

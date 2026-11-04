@@ -1,6 +1,6 @@
 # SPEC-09: recuperación local de la clave maestra del SANDBOX persistente
 
-Estado al 4 de noviembre de 2026: **parcial; no autoriza instalar en 3081**. Este procedimiento solo aplica al SANDBOX Docker local. No modifica la clave maestra instalada, no rota M2M, no conecta con Hacienda y no activa emisión. La copia DPAPI instalada existe; la segunda copia independiente de la clave instalada aún no existe.
+Estado al 4 de noviembre de 2026: **parcial; no autoriza instalar en 3081**. Este procedimiento solo aplica al SANDBOX Docker local. No modifica la clave maestra instalada, no rota M2M, no conecta con Hacienda y no activa emisión. La copia DPAPI instalada existe; la segunda copia independiente de la clave instalada está en preparación.
 
 ## Custodia y dependencia
 
@@ -8,7 +8,7 @@ Estado al 4 de noviembre de 2026: **parcial; no autoriza instalar en 3081**. Est
 - Copia DPAPI v2: `D:\SPEC09-Billing-Master-DPAPI-v2-20261104\master-key.dpapi`, creada bajo `DESKTOP-L6T0PKM\kmena` con `ProtectedData` **CurrentUser**. D: es un disco físico distinto de C:, donde reside Docker. El directorio y sus archivos solo heredan acceso de esa cuenta y `SYSTEM`. `manifest.json` contiene formato, huellas SHA-256 y SID, sin la clave. El marcador de origen (`installed` o `synthetic`) forma parte del contenido DPAPI y no se puede cambiar solo editando el manifiesto. El sobre tiene 262 bytes. SHA-256 del sobre: `92aa6d4e8680d80b46eb7aa8e485b99759b777bd527e309c4730e6e892d7364f`.
 - Una primera copia cifrada de formato v1 permanece en `D:\SPEC09-Billing-Master-DPAPI-20261104`. El procedimiento actual exige v2 y no utiliza esa copia. No se borró material de recuperación durante esta preparación.
 - La cuenta Windows debe poder iniciar sesión con su **mismo perfil DPAPI**. Conservar el archivo cifrado por sí solo no basta: pérdida del perfil, reinstalación de Windows o traslado a otra computadora pueden impedir el descifrado. No se verificó la recuperación del perfil Windows ni existe una bóveda configurada en Inventori para este fin.
-- La segunda vía usa un sobre AES-256-GCM con PBKDF2-HMAC-SHA512 de 1 000 000 iteraciones y una frase aleatoria de al menos 32 caracteres. El marcador de origen va en los datos autenticados de GCM. El sobre se puede verificar sin DPAPI ni el perfil original. El custodio eligió Bitwarden, pero **aún no confirmó que haya creado y probado el acceso al registro**; no se ha generado el sobre real. No guardar la frase en Git, Docker, archivos de respaldo, argumentos, variables de entorno, transcripciones o reportes.
+- La segunda vía usa un sobre AES-256-GCM con PBKDF2-HMAC-SHA512 de 1 000 000 iteraciones y una frase aleatoria de al menos 32 caracteres. El marcador de origen va en los datos autenticados de GCM. El sobre se puede verificar sin DPAPI ni el perfil original. El custodio confirmó que creó el registro personal en Bitwarden con 48 caracteres alfanuméricos y volvió a acceder a él. La contraseña se introducirá solo en una terminal local interactiva. No guardarla en Git, Docker, archivos de respaldo, argumentos, variables de entorno, transcripciones o reportes.
 
 ## Comandos seguros
 
@@ -29,11 +29,12 @@ Antes de crear la segunda copia, el custodio debe crear en su bóveda personal d
 Solo tras esa confirmación, crear la **segunda** copia en otro destino protegido. El script solicita dos veces la frase mediante prompt oculto y comprueba coincidencia; `Verify` la solicita una vez. Pegarla directamente desde Bitwarden en esos prompts locales, sin pasarla como argumento ni variable de entorno.
 
 ```powershell
-& .\scripts\spec09-seal-master-independent.ps1 -Mode Backup -DpapiDirectory $dpapiDir -Directory '<directorio-nuevo-independiente-fuera-de-Git>'
-& .\scripts\spec09-seal-master-independent.ps1 -Mode Verify -Directory '<directorio-nuevo-independiente-fuera-de-Git>'
+& .\scripts\spec09-create-independent-master-interactive.ps1 -Mode Backup -DpapiDirectory $dpapiDir -Directory 'D:\SPEC09-Billing-Master-Independent-20261104'
+# Si la consola se interrumpe después de crear el sobre pero antes de verificarlo:
+& .\scripts\spec09-create-independent-master-interactive.ps1 -Mode Verify -Directory 'D:\SPEC09-Billing-Master-Independent-20261104'
 ```
 
-Guardar una copia adicional del **sobre cifrado** en otro disco o medio protegido y verificar su SHA-256. No guardar la frase junto a ningún sobre. Registrar únicamente custodio, medio, fecha, SHA-256 del archivo cifrado y resultado de verificación. Ensayar la lectura desde una copia transportada sin depender del perfil DPAPI antes de declarar suficiente el respaldo.
+El ejecutor comprueba que la frase nueva abre el sobre sin DPAPI, rechaza una frase aleatoria incorrecta, exige ACL restringida y guarda `verification.json` sin secretos. El custodio autorizó `D:` como destino local provisional. **No dispone todavía de la unidad USB externa**: guardar una copia adicional del sobre cifrado fuera del equipo y verificar su SHA-256 sigue pendiente. No guardar la frase junto a ningún sobre. Registrar únicamente custodio, medio, fecha, SHA-256 del archivo cifrado y resultado de verificación. Ensayar la lectura desde una copia transportada sin depender del perfil DPAPI antes de declarar suficiente el respaldo.
 
 ## Conjunto consistente y recuperación
 
