@@ -95,9 +95,13 @@ describe('SPEC-09 paired synthetic PostgreSQL and encrypted-store recovery', () 
     const backupStore = path.join(parent, 'backup-store');
     const restoredStore = path.join(parent, 'restored-store');
     const keyPath = path.join(parent, 'master.key');
+    const recoveredKeyPath = path.join(parent, 'recovered-master.key');
+    const dpapiBackupPath = path.join(parent, 'dpapi-master-backup');
     const wrongKeyPath = path.join(parent, 'wrong.key');
     const restoredContainer = `billing-spec09-restore-${randomBytes(5).toString('hex')}`;
+    const keyContainer = `billing-spec09-key-restore-${randomBytes(5).toString('hex')}`;
     let containerCreated = false;
+    let keyContainerCreated = false;
     try {
       await initializeEncryptedFileSecretStore({ rootPath: sourceStore, masterKeyPath: keyPath });
       const provider = new EncryptedFileSecretProvider({
@@ -203,6 +207,88 @@ describe('SPEC-09 paired synthetic PostgreSQL and encrypted-store recovery', () 
         destinationPath: backupStore,
       });
       expect(secretBackup.files).toBeGreaterThan(3);
+
+      if (process.platform === 'win32') {
+        const dpapiScript = path.join(process.cwd(), 'scripts', 'spec09-backup-master-dpapi.ps1');
+        const backupResult = spawnSync(
+          'pwsh',
+          [
+            '-NoProfile',
+            '-File',
+            dpapiScript,
+            '-Mode',
+            'Backup',
+            '-Directory',
+            dpapiBackupPath,
+            '-Source',
+            'Synthetic',
+            '-SyntheticKeyFile',
+            keyPath,
+          ],
+          { windowsHide: true, encoding: 'utf8' },
+        );
+        expect(backupResult.status).toBe(0);
+        expect(backupResult.stdout.trim()).toBe('SPEC09_MASTER_DPAPI_BACKUP_CREATED');
+        const encryptedKeyBytes = await fs.readFile(path.join(dpapiBackupPath, 'master-key.dpapi'));
+        expect(encryptedKeyBytes.includes(await fs.readFile(keyPath))).toBe(false);
+        for (const value of values) {
+          expect(encryptedKeyBytes.includes(Buffer.from(value))).toBe(false);
+          expect(backupResult.stdout.includes(value)).toBe(false);
+          expect(backupResult.stderr.includes(value)).toBe(false);
+        }
+        docker([
+          'run',
+          '--detach',
+          '--name',
+          keyContainer,
+          '--label',
+          'spec09-disposable-recovery=true',
+          '--network',
+          'none',
+          '--tmpfs',
+          '/run/spec09-key:rw,noexec,nosuid,size=1m',
+          'alpine:3.20',
+          'sleep',
+          '300',
+        ]);
+        keyContainerCreated = true;
+        const restoreKey = () =>
+          spawnSync(
+            'pwsh',
+            [
+              '-NoProfile',
+              '-File',
+              dpapiScript,
+              '-Mode',
+              'RestoreToDisposable',
+              '-Directory',
+              dpapiBackupPath,
+              '-DisposableContainer',
+              keyContainer,
+            ],
+            { windowsHide: true, encoding: 'utf8' },
+          );
+        expect(restoreKey().status).toBe(0);
+        docker(['restart', keyContainer]);
+        expect(
+          docker(['exec', keyContainer, 'sh', '-c', 'test ! -e /run/spec09-key/master.key']).length,
+        ).toBe(0);
+        expect(restoreKey().status).toBe(0);
+        await fs.writeFile(
+          recoveredKeyPath,
+          docker(['exec', keyContainer, 'cat', '/run/spec09-key/master.key']),
+          { mode: 0o600 },
+        );
+        expect(
+          createHash('sha256')
+            .update(await fs.readFile(recoveredKeyPath))
+            .digest('hex'),
+        ).toBe(
+          createHash('sha256')
+            .update(await fs.readFile(keyPath))
+            .digest('hex'),
+        );
+      }
 
       docker([
         'run',
@@ -344,12 +430,12 @@ describe('SPEC-09 paired synthetic PostgreSQL and encrypted-store recovery', () 
       const restoration = await restoreEncryptedSecretStore({
         backupPath: backupStore,
         destinationPath: restoredStore,
-        masterKeyPath: keyPath,
+        masterKeyPath: process.platform === 'win32' ? recoveredKeyPath : keyPath,
       });
       expect(restoration.activeSecrets).toBe(3);
       const restoredProvider = new EncryptedFileSecretProvider({
         rootPath: restoredStore,
-        masterKeyPath: keyPath,
+        masterKeyPath: process.platform === 'win32' ? recoveredKeyPath : keyPath,
       });
       for (const [index, reference] of [certRef, pinRef, credentialRef].entries())
         expect(await restoredProvider.getSecret(reference)).toBe(values[index]);
@@ -372,6 +458,18 @@ describe('SPEC-09 paired synthetic PostgreSQL and encrypted-store recovery', () 
       for (const value of values) expect(restoreLogs.includes(Buffer.from(value))).toBe(false);
     } finally {
       await prisma.$disconnect();
+      if (keyContainerCreated) {
+        const label = docker([
+          'inspect',
+          '--format',
+          '{{ index .Config.Labels "spec09-disposable-recovery" }}',
+          keyContainer,
+        ])
+          .toString()
+          .trim();
+        if (label !== 'true') throw new Error('Refusing to remove unlabelled key container');
+        docker(['rm', '--force', keyContainer]);
+      }
       if (containerCreated) {
         const label = docker([
           'inspect',
