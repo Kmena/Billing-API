@@ -452,7 +452,12 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       const encryptedFile = existsSync(outputFile) ? readFileSync(outputFile, 'utf8') : null;
       const issued = encryptedFile
         ? (() => {
-            const envelope = JSON.parse(encryptedFile) as { ciphertext: string; keyId: string };
+            const envelope = JSON.parse(encryptedFile) as {
+              ciphertext: string;
+              keyId: string;
+              companyId: string;
+            };
+            expect(envelope.companyId).toBe(affiliationsCompanyId);
             const key = privateDecrypt(
               { key: recipient.privateKey, oaepHash: 'sha256' },
               Buffer.from(envelope.ciphertext, 'base64'),
@@ -718,7 +723,8 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     );
     expect(issued.status).toBe(0);
     const encryptedFile = readFileSync(keyOutputFile, 'utf8');
-    const envelope = JSON.parse(encryptedFile) as { ciphertext: string };
+    const envelope = JSON.parse(encryptedFile) as { ciphertext: string; companyId: string };
+    expect(envelope.companyId).toBe(externalCompanyId);
     const key = privateDecrypt(
       { key: recipient.privateKey, oaepHash: 'sha256' },
       Buffer.from(envelope.ciphertext, 'base64'),

@@ -304,7 +304,9 @@ async function main() {
         await output.writeFile(
           JSON.stringify({
             keyId,
-            companyId,
+            // The envelope is consumed by Afiliaciones and indexed by its own company ID.
+            // Billing's issuer company remains bound to the API key in the database.
+            companyId: affiliationsCompanyId,
             environment: 'SANDBOX',
             expiresAt: expiresAt.toISOString(),
             version: 1,
