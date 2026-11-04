@@ -1,9 +1,11 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
-import { randomUUID } from 'crypto';
+import { generateKeyPairSync, privateDecrypt, randomUUID } from 'crypto';
 import { spawnSync } from 'child_process';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import * as request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
@@ -17,7 +19,11 @@ import {
 import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/application/consumer-v2-lab.service';
 import { OnboardingV2MutationService } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/onboarding-v2-mutation.service';
 import { EnrollmentV2Service } from '../../../src/modules/fiscal-consumers/infrastructure/persistence/enrollment-v2.service';
-import { CONSUMER_V2_LAB_SCOPES } from '../../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
+import {
+  AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+  AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES,
+  CONSUMER_V2_LAB_SCOPES,
+} from '../../../src/modules/fiscal-consumers/domain/consumer-v2.policy';
 import { FiscalOnboardingAdminV2LabModule } from '../../../src/modules/fiscal-consumers/fiscal-onboarding-admin-v2-lab.module';
 import { createTestSigningMaterialWithFiscalId } from '../../../src/modules/fiscal-documents/domain/fiscal-xml/__tests__/fiscal-xml-test-fixtures';
 import {
@@ -43,6 +49,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
   let associationId: string;
   let keyId: string;
   let secret: string;
+  const recipientPublicFiles = new Set<string>();
   const base = () => `/api/v2/companies/${companyId}/fiscal-onboarding/SANDBOX`;
 
   beforeAll(async () => {
@@ -96,6 +103,7 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
   });
 
   afterAll(async () => {
+    for (const file of recipientPublicFiles) if (existsSync(file)) unlinkSync(file);
     if (context) await resetFiscalE2eData(context);
     await app?.close();
     await prisma?.$disconnect();
@@ -400,6 +408,10 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       where: { id: enrolled.userId },
       select: { email: true },
     });
+    const recipient = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const recipientPublicFile = join(tmpdir(), `billing-spec09-recipient-${randomUUID()}.pem`);
+    writeFileSync(recipientPublicFile, recipient.publicKey.export({ format: 'pem', type: 'spki' }));
+    recipientPublicFiles.add(recipientPublicFile);
     const command = [
       'node_modules/ts-node/dist/bin.js',
       '-r',
@@ -410,18 +422,53 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       affiliationsCompanyId,
       admin.email,
     ];
-    const invoke = (password: string) =>
-      spawnSync(process.execPath, command, {
-        cwd: process.cwd(),
-        env: process.env,
-        input: `${password}\n`,
-        encoding: 'utf8',
-        windowsHide: true,
-      });
+    const persistentEnvironment = {
+      ...process.env,
+      SPEC09_SANDBOX_MARKER: 'billing-spec09-synthetic-v1',
+      BILLING_SPEC09_PERSISTENT_SANDBOX: 'true',
+      FISCAL_WORKER_ENABLE_IN_TESTS: 'false',
+      SPEC09_ADMIN_ISOLATED_TEST: '1',
+    };
+    const invoke = (password: string, extra: string[] = []) => {
+      const outputFile = join(tmpdir(), `billing-spec09-key-${randomUUID()}.json`);
+      const result = spawnSync(
+        process.execPath,
+        [
+          ...command,
+          ...extra,
+          '--output-file',
+          outputFile,
+          '--recipient-public-key',
+          recipientPublicFile,
+        ],
+        {
+          cwd: process.cwd(),
+          env: extra[0] === '--persistent-sandbox' ? persistentEnvironment : process.env,
+          input: `${password}\n`,
+          encoding: 'utf8',
+          windowsHide: true,
+        },
+      );
+      const encryptedFile = existsSync(outputFile) ? readFileSync(outputFile, 'utf8') : null;
+      const issued = encryptedFile
+        ? (() => {
+            const envelope = JSON.parse(encryptedFile) as { ciphertext: string; keyId: string };
+            const key = privateDecrypt(
+              { key: recipient.privateKey, oaepHash: 'sha256' },
+              Buffer.from(envelope.ciphertext, 'base64'),
+            ).toString('utf8');
+            expect(encryptedFile).not.toContain(key);
+            return { key, keyId: envelope.keyId };
+          })()
+        : null;
+      if (existsSync(outputFile)) unlinkSync(outputFile);
+      return { ...result, issued };
+    };
     expect(invoke('invalid-synthetic-password').status).toBe(1);
     const provisioned = invoke('SecurePass123!');
     expect(provisioned.status).toBe(0);
-    const key = (JSON.parse(provisioned.stdout) as { key: string }).key;
+    const key = provisioned.issued!.key;
+    expect(provisioned.stdout).not.toContain(key);
     expect(invoke('SecurePass123!').status).toBe(1);
     const company = await prisma.company.findUniqueOrThrow({ where: { id: billingCompanyId } });
     const signing = createTestSigningMaterialWithFiscalId(
@@ -520,21 +567,87 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
     await submit(signing.passphrase, 'enroll-revoked-001').expect(401);
     const renewed = invoke('SecurePass123!');
     expect(renewed.status).toBe(0);
-    const newKey = (JSON.parse(renewed.stdout) as { key: string }).key;
+    const newKey = renewed.issued!.key;
     expect(newKey).not.toBe(key);
     await request(app.getHttpServer())
       .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
       .set('X-API-Key', newKey)
       .expect(200);
-    const rotated = spawnSync(process.execPath, [...command, '--rotate'], {
-      cwd: process.cwd(),
-      env: process.env,
-      input: 'SecurePass123!\n',
-      encoding: 'utf8',
-      windowsHide: true,
+    await prisma.tenant.update({
+      where: { id: enrolled.tenantId },
+      data: { slug: 'spec09-sandbox-synthetic' },
     });
+    await prisma.company.update({
+      where: { id: billingCompanyId },
+      data: { legalName: 'SPEC-09 EMISOR DEMO' },
+    });
+    const deniedPersistent = invoke('invalid-synthetic-password', [
+      '--persistent-sandbox',
+      '--rotate',
+    ]);
+    expect(deniedPersistent.status).toBe(1);
+    expect(deniedPersistent.issued).toBeNull();
+    const wrongCompanyCommand = [...command];
+    wrongCompanyCommand[5] = randomUUID();
+    const deniedOutput = join(tmpdir(), `billing-spec09-key-${randomUUID()}.json`);
+    const wrongCompany = spawnSync(
+      process.execPath,
+      [
+        ...wrongCompanyCommand,
+        '--persistent-sandbox',
+        '--rotate',
+        '--output-file',
+        deniedOutput,
+        '--recipient-public-key',
+        recipientPublicFile,
+      ],
+      {
+        cwd: process.cwd(),
+        env: persistentEnvironment,
+        input: 'SecurePass123!\n',
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    expect(wrongCompany.status).toBe(1);
+    expect(existsSync(deniedOutput)).toBe(false);
+    const rotated = invoke('SecurePass123!', ['--persistent-sandbox', '--rotate']);
     expect(rotated.status).toBe(0);
-    const rotatedKey = (JSON.parse(rotated.stdout) as { key: string }).key;
+    const rotatedKey = rotated.issued!.key;
+    expect(rotated.stdout).not.toContain(rotatedKey);
+    const rotatedRecord = await prisma.apiKey.findUniqueOrThrow({
+      where: { id: rotated.issued!.keyId },
+      include: { companies: true, consumerKeyBinding: true },
+    });
+    expect(rotatedRecord.environment).toBe('TEST');
+    expect(rotatedRecord.companies.map((entry) => entry.companyId)).toEqual([billingCompanyId]);
+    expect(rotatedRecord.consumerKeyBinding?.associationId).toBe(approved.body.associationId);
+    expect(new Set(rotatedRecord.scopes)).toEqual(
+      new Set([...AFFILIATIONS_ENROLLMENT_V2_SCOPES, ...AFFILIATIONS_FISCAL_DETAILS_V2_SCOPES]),
+    );
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', newKey)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', rotatedKey)
+      .expect(200);
+    const overlapRejected = invoke('SecurePass123!', ['--persistent-sandbox', '--rotate']);
+    expect(overlapRejected.status).toBe(1);
+    expect(overlapRejected.issued).toBeNull();
+    const cutover = spawnSync(
+      process.execPath,
+      [...command, '--persistent-sandbox', '--revoke-key', renewed.issued!.keyId],
+      {
+        cwd: process.cwd(),
+        env: persistentEnvironment,
+        input: 'SecurePass123!\n',
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    expect(cutover.status).toBe(0);
     await request(app.getHttpServer())
       .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
       .set('X-API-Key', newKey)
@@ -543,6 +656,28 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
       .set('X-API-Key', rotatedKey)
       .expect(200);
+    const abandoned = invoke('SecurePass123!', ['--persistent-sandbox', '--rotate']);
+    expect(abandoned.status).toBe(0);
+    const abort = spawnSync(
+      process.execPath,
+      [...command, '--persistent-sandbox', '--abort-rotation', abandoned.issued!.keyId],
+      {
+        cwd: process.cwd(),
+        env: persistentEnvironment,
+        input: 'SecurePass123!\n',
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    expect(abort.status).toBe(0);
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', rotatedKey)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get(`/api/v2/companies/${billingCompanyId}/fiscal-onboarding/SANDBOX`)
+      .set('X-API-Key', abandoned.issued!.key)
+      .expect(401);
   });
 
   it('compensates initial enrollment storage and audit failures, then recovers and retries', async () => {
@@ -552,6 +687,11 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       where: { id: enrolled.userId },
       select: { email: true },
     });
+    const recipient = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const recipientPublicFile = join(tmpdir(), `billing-spec09-recipient-${randomUUID()}.pem`);
+    writeFileSync(recipientPublicFile, recipient.publicKey.export({ format: 'pem', type: 'spki' }));
+    recipientPublicFiles.add(recipientPublicFile);
+    const keyOutputFile = join(tmpdir(), `billing-spec09-key-${randomUUID()}.json`);
     const issued = spawnSync(
       process.execPath,
       [
@@ -563,6 +703,10 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
         enrolled.companyId,
         externalCompanyId,
         admin.email,
+        '--output-file',
+        keyOutputFile,
+        '--recipient-public-key',
+        recipientPublicFile,
       ],
       {
         cwd: process.cwd(),
@@ -573,7 +717,15 @@ describe('SPEC-09 isolated administrative M2M v2 HTTP contract', () => {
       },
     );
     expect(issued.status).toBe(0);
-    const key = (JSON.parse(issued.stdout) as { key: string }).key;
+    const encryptedFile = readFileSync(keyOutputFile, 'utf8');
+    const envelope = JSON.parse(encryptedFile) as { ciphertext: string };
+    const key = privateDecrypt(
+      { key: recipient.privateKey, oaepHash: 'sha256' },
+      Buffer.from(envelope.ciphertext, 'base64'),
+    ).toString('utf8');
+    expect(encryptedFile).not.toContain(key);
+    unlinkSync(keyOutputFile);
+    expect(issued.stdout).not.toContain(key);
     const company = await prisma.company.findUniqueOrThrow({ where: { id: enrolled.companyId } });
     const signing = createTestSigningMaterialWithFiscalId(
       `CPJ-${company.identificationNumber}`,
