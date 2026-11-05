@@ -102,6 +102,17 @@ describe('W2-B synthetic FE projection (unregistered)', () => {
     expect(ticket.totals.totalAmount).toBe('1130.00000');
   });
 
+  it('accepts SINPE Móvil code 06 and validates the signed synthetic XML', async () => {
+    const sinpe = intent();
+    sinpe.paymentMethods[0].code = '06';
+    const result = projectW2BInvoiceLab(sinpe, origin);
+    expect(result.intent.paymentMethods[0].code).toBe('06');
+    const xml = serializer.serialize({ ...createFiscalXmlSnapshot(), paymentMethod: '06',
+      lines: result.lines, totals: result.totals });
+    const signed = await signer.sign(xml.xml, signingMaterial.certificate);
+    expect(validator.validate({ ...xml, xml: signed }).isValid).toBe(true);
+  });
+
   it.each([
     ['single taxed', [line()]],
     ['two taxed', [line(2), line(1)]],

@@ -298,7 +298,7 @@ components:
     LabPaymentMethod:
       allOf:
         - { $ref: 'billing-fiscal-intent.v2.proposed.openapi.yaml#/components/schemas/PaymentMethod' }
-        - { type: object, properties: { code: { type: string, enum: ['01', '02', '04'] } } }
+        - { type: object, properties: { code: { type: string, enum: ['01', '02', '04', '06'] } } }
     TicketIntent:
       type: object
       additionalProperties: false

@@ -84,7 +84,7 @@ function projectW2BDocumentLab(
   }
   if (
     intent.paymentMethods.length !== 1 ||
-    !['01', '02', '04'].includes(intent.paymentMethods[0].code)
+    !['01', '02', '04', '06'].includes(intent.paymentMethods[0].code)
   ) {
     throw new W2BLabProjectionError('W2B_ENGINE_COMBINATION_UNSUPPORTED', 'paymentMethods');
   }
