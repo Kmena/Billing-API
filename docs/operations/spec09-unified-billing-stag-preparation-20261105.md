@@ -6,7 +6,7 @@ Estado: **PREPARADO EN CÓDIGO; NO INSTALADO; SIN ENVÍO FISCAL**.
 
 - Billing SPEC-09 instalado: imagen `billing-spec09-sandbox:payment-evidence-612f654`, base `spec09-billing-postgres-1`, sano. La emisión STAG y el correo real están apagados.
 - Billing original de Inventori: `billing-api`, `billing-worker`, `billing-postgres`. Inventori usa ese Billing; `inventori-api` estaba `unhealthy` en el último inventario. Ningún contenedor original fue modificado.
-- El remitente indicado por el operador es `billing.factuascr@gmail.com`. El operador confirmó acceso a una contraseña de aplicación. El valor no se ha recibido ni cargado en Billing.
+- El remitente confirmado contra la configuración privada anterior es `billing.facturascr@gmail.com`. La contraseña de aplicación se migró mediante entrada local al almacén cifrado de Billing; su valor no se muestra en esta evidencia.
 - Gmail requiere TLS para SMTP y admite `smtp.gmail.com:587` con STARTTLS; la contraseña de aplicación se introduce directamente en una terminal interactiva.
 
 ## Cambio preparado
@@ -27,7 +27,7 @@ Antes de consolidar: comparar SQL y esquemas de las migraciones divergentes; res
 1. Confirmar que la obligación `4171d591-d0ae-4a0b-8c55-e2a36c8219de` aún no tiene pago ni intención fiscal y que la cuenta bancaria ficticia sigue activa.
 2. Crear y restaurar respaldos nuevos de Afiliaciones y Billing, incluidos almacén cifrado y claves de recuperación; registrar huellas fiscales sin exponer valores.
 3. Validar la candidata Billing en entorno descartable. Instalarla en la instancia SPEC-09 existente solo después de comprobar compatibilidad, salud y conservación; no tocar la instancia original.
-4. Cargar `SMTP_AUTH` con el comando interactivo dentro del contenedor actualizado y verificar autenticación SMTP sin enviar correo. Configurar `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`, `EMAIL_FROM_ADDRESS=billing.factuascr@gmail.com` y `EMAIL_USE_REAL=true` únicamente cuando corresponda habilitar la entrega. No usar SMTP de producción fiscal.
+4. Verificar `SMTP_AUTH` en el almacén cifrado y autenticar por SMTP sin enviar correo. Configurar `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`, `EMAIL_FROM_ADDRESS=billing.facturascr@gmail.com` y `EMAIL_USE_REAL=true` únicamente cuando corresponda habilitar la entrega. No usar SMTP de producción fiscal.
 5. Habilitar solo el destino Hacienda STAG y el cliente/obligación autorizados. Mantener producción bloqueada. Validar XML, firma, receptor y política fiscal del plan antes de aprobar.
 6. Registrar un único pago SINPE con referencia y evidencia sintéticos; verificar rechazo de autoaprobación y aprobarlo con el segundo usuario. Comprobar intención única e idempotencia.
 7. Seguir el documento por identificador: XML firmado, aceptación o rechazo explícito de Hacienda STAG, PDF y entregas a `kmena281@gmail.com`. Un fallo o resultado SMTP incierto requiere conciliación, no reenvío ciego.
