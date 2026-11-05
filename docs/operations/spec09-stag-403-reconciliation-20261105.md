@@ -1,6 +1,6 @@
 # SPEC-09 — Reconciliación del HTTP 403 de recepción STAG
 
-Fecha: 5 de noviembre de 2026. Alcance: inspección local de solo lectura del SANDBOX Docker persistente y documentación pública. No se creó una factura, no se repitió el POST y no se consultó ningún endpoint de Hacienda durante este diagnóstico.
+Fecha: 5 de noviembre de 2026. Alcance: inspección local de solo lectura del SANDBOX Docker persistente, documentación pública y una consulta externa de estado autorizada posteriormente. No se creó una factura ni se repitió el POST de recepción.
 
 ## Documento existente
 
@@ -31,15 +31,15 @@ En el almacén protegido, la conexión SANDBOX figura `CONNECTED` y registra aut
 
 **Inferencia:** alguna capa de acceso o enrutamiento aguas arriba interpretó el encabezado Bearer como si fuera SigV4. La causa concreta de ese enrutamiento no está probada. Puede involucrar configuración del gateway, ruta, DNS o una condición temporal. No hay variable de proxy en el contenedor. Tampoco está demostrado que al usuario fiscal le falten roles de recepción. Cambiar Billing a SigV4 contradice el contrato público consultado y no se justifica con esta evidencia.
 
-## Consulta externa pendiente de autorización
+## Consulta externa autorizada y ejecutada
 
-Antes de cualquier reintento, se propone **una sola consulta de estado** de la clave existente:
+El operador autorizó expresamente **una sola consulta de estado** de la clave existente:
 
-1. Obtener un token efímero de STAG con las credenciales SANDBOX ya custodiadas por Billing mediante `POST https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token`. Este POST autentica; no envía un comprobante.
-2. Ejecutar exactamente un `GET https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/50605112600020753025100100001010000000001110071882` con ese token.
-3. Registrar solo código HTTP, estado fiscal si existe y metadatos seguros. No imprimir token, XML, credenciales ni cuerpo íntegro de error. No efectuar POST a `/recepcion`.
+1. Se obtuvo un token efímero de STAG con las credenciales SANDBOX ya custodiadas por Billing mediante `POST https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token`: **HTTP 200**. Este POST autentica; no envía un comprobante. El token solo estuvo en memoria.
+2. Se ejecutó exactamente un `GET https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion/50605112600020753025100100001010000000001110071882` con ese token: **HTTP 403**, `Content-Type: application/json`, `x-amzn-errortype: IncompleteSignatureException`.
+3. El cuerpo volvió a indicar que el analizador de autorización esperaba pares `key=value` de SigV4. Solo se registró un indicador booleano de coincidencia; el valor derivado del encabezado y el cuerpo íntegro no se guardaron. No hubo POST a `/recepcion`, XML en la consulta ni creación de documentos.
 
-El [contrato de consulta de Hacienda](https://www.hacienda.go.cr/docs/ComprobantesElectronicosAPI.html) contempla `GET /recepcion/{clave}`. Un 200 permitiría reconciliar el estado. Un 404 aislado no bastaría para declarar seguro un reenvío. Un 401, 403 o el mismo error SigV4 detendría el diagnóstico remoto. **Esta consulta no se ejecutó**: requiere autorización específica del operador.
+El [contrato de consulta de Hacienda](https://www.hacienda.go.cr/docs/ComprobantesElectronicosAPI.html) contempla `GET /recepcion/{clave}`. El 403 del GET reproduce el bloqueo de la capa de autorización o enrutamiento. No demuestra si Hacienda recibió, aceptó o rechazó el documento. No se hará otro GET ni un reenvío sin una decisión posterior.
 
 ## Conservación y controles
 
@@ -50,8 +50,8 @@ El [contrato de consulta de Hacienda](https://www.hacienda.go.cr/docs/Comprobant
 
 ## Resultado
 
-- `STAG_403_ROOT_CAUSE = PARTIAL`: rechazo del encabezado Bearer por analizador SigV4 confirmado; motivo de enrutamiento y autorización fiscal pendientes.
+- `STAG_403_ROOT_CAUSE = PARTIAL`: el POST y el GET chocan con un analizador SigV4 pese a usar la ruta STAG y Bearer documentados; causa concreta de la capa de acceso pendiente.
 - `EXISTING_INVOICE_RECONCILED = LOCAL_ONLY`: documento, firma, huella, pago e intento identificados; estado externo desconocido.
-- `STAG_AUTHORIZATION_STATUS = UNVERIFIED`: OAuth previo exitoso; recepción no autorizada o mal enrutada.
+- `STAG_AUTHORIZATION_STATUS = BLOCKED_AT_GATEWAY`: token STAG obtenido con HTTP 200; la ruta de consulta devuelve 403 `IncompleteSignatureException`. Los permisos fiscales efectivos siguen sin verificarse.
 - `RETRY_SAFE = NO`: no repetir POST ni crear otra factura.
 - `FISCAL_CONFIGURATION_MATCH = MATCH`: 17 tablas de configuración y almacén cifrado sin cambios atribuibles a este diagnóstico.
