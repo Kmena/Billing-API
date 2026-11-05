@@ -1,4 +1,5 @@
 import { validationSchema } from '../config.validation-schema';
+import haciendaSubmissionConfig from '../hacienda-submission.config';
 
 describe('configuration validation schema', () => {
   it('rejects plaintext SMTP credentials in process configuration', () => {
@@ -10,6 +11,25 @@ describe('configuration validation schema', () => {
   });
   const validDatabaseUrl = 'postgresql://test';
   const validJwtSecret = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  it('defaults SANDBOX reception to the F4-S runtime endpoint', () => {
+    const result = validationSchema.validate({ NODE_ENV: 'test', DATABASE_URL: validDatabaseUrl });
+    expect(result.error).toBeUndefined();
+    expect(result.value.HACIENDA_RECEPCION_SANDBOX_BASE_URL).toBe(
+      'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
+    );
+  });
+  it('uses the same endpoint when no explicit runtime override exists', () => {
+    const previous = process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL;
+    delete process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL;
+    try {
+      expect(haciendaSubmissionConfig().sandboxBaseUrl).toBe(
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
+      );
+    } finally {
+      if (previous === undefined) delete process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL;
+      else process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL = previous;
+    }
+  });
   const validProductionConfig = {
     HACIENDA_IDP_PRODUCTION_URL:
       'https://idp.example.com/auth/realms/rut/protocol/openid-connect/token',

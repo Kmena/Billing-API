@@ -79,7 +79,7 @@ it('keeps the staging credential verifier available only in the pinned STAG mode
   process.env.USE_REAL_HACIENDA = 'true';
   process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'true';
   process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL =
-    'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/';
+    'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1';
   process.env.HACIENDA_IDP_SANDBOX_URL =
     'https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token';
   process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL = 'https://127.0.0.1:9/';

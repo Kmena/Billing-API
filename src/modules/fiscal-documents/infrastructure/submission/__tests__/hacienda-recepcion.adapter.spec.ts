@@ -9,7 +9,7 @@ function makeAdapter(http: Partial<HttpService>) {
   const configService = {
     get: jest.fn().mockReturnValue({
       productionBaseUrl: 'https://api.comprobanteselectronicos.go.cr/recepcion/v1/',
-      sandboxBaseUrl: 'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/',
+      sandboxBaseUrl: 'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
       timeoutMs: 15000,
       callbackUrl: 'https://billing.example.test/api/v1/hacienda/callback',
     }),
@@ -50,7 +50,7 @@ describe('HaciendaRecepcionAdapter', () => {
     });
 
     expect(post).toHaveBeenCalledWith(
-      'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/recepcion',
+      'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion',
       expect.objectContaining({
         clave,
         fecha: '2025-01-01T00:00:00.000Z',
@@ -84,6 +84,12 @@ describe('HaciendaRecepcionAdapter', () => {
     await expect(
       adapter.queryStatusByClave({ environment: 'SANDBOX', accessToken: 'token', clave }),
     ).resolves.toMatchObject({ kind, nextStatus, providerStatus });
+    expect(get).toHaveBeenCalledWith(
+      `https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/${clave}`,
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'bearer token' }),
+      }),
+    );
   });
 
   it('Base64-decodes respuesta-xml exact bytes', async () => {
@@ -162,8 +168,12 @@ describe('HaciendaRecepcionAdapter', () => {
         .fn()
         .mockReturnValue(throwError(() => ({ response: { status: 400, headers: {}, data: {} } })));
       await makeAdapter({ post }).submitSignedDocument(submitInput());
-      expect(post.mock.calls[0][0] as string).toContain('recepcion-sandbox');
-      expect(post.mock.calls[0][0] as string).not.toContain('/recepcion/v1');
+      expect(post.mock.calls[0][0] as string).toContain(
+        'api-sandbox.comprobanteselectronicos.go.cr',
+      );
+      expect(post.mock.calls[0][0] as string).not.toContain(
+        'https://api.comprobanteselectronicos.go.cr/',
+      );
     });
   });
 
@@ -1011,8 +1021,12 @@ describe('HaciendaRecepcionAdapter', () => {
         ...submitInput(),
         environment: 'SANDBOX' as const,
       });
-      expect(post.mock.calls[0][0] as string).toContain('recepcion-sandbox');
-      expect(post.mock.calls[0][0] as string).not.toContain('/recepcion/v1');
+      expect(post.mock.calls[0][0] as string).toBe(
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion',
+      );
+      expect(post.mock.calls[0][0] as string).not.toContain(
+        'https://api.comprobanteselectronicos.go.cr/',
+      );
     });
 
     // ── Security invariants ──────────────────────────────────────────────

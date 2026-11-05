@@ -186,7 +186,7 @@ export const validationSchema = Joi.object({
     .default('https://api.comprobanteselectronicos.go.cr/recepcion/v1/'),
   HACIENDA_RECEPCION_SANDBOX_BASE_URL: Joi.string()
     .uri({ scheme: ['https'] })
-    .default('https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/'),
+    .default('https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1'),
   HACIENDA_SUBMISSION_TIMEOUT_MS: Joi.number().integer().positive().default(15000),
   HACIENDA_SUBMISSION_CALLBACK_URL: Joi.string()
     .uri({ scheme: ['https'] })
