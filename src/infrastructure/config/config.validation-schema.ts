@@ -150,8 +150,9 @@ export const validationSchema = Joi.object({
   SMTP_HOST: Joi.string().optional(),
   SMTP_PORT: Joi.number().integer().positive().default(587),
   SMTP_SECURE: Joi.boolean().truthy('true').falsy('false').default(false),
-  SMTP_USER: Joi.string().optional(),
-  SMTP_PASSWORD: Joi.string().optional(),
+  // SMTP credentials live only in the durable SecretProvider, never process env.
+  SMTP_USER: Joi.any().forbidden(),
+  SMTP_PASSWORD: Joi.any().forbidden(),
   EMAIL_FROM_ADDRESS: Joi.string().email().optional(),
   EMAIL_FROM_NAME: Joi.string().default('Billing Electrónico'),
 

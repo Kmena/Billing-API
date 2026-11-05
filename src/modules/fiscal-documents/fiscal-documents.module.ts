@@ -75,7 +75,11 @@ import { MockPdfRendererAdapter } from './infrastructure/pdf/mock-pdf-renderer.a
 import { HaciendaQrContentBuilderAdapter } from './infrastructure/qr/hacienda-qr-content-builder.adapter';
 import { MockQrContentBuilderAdapter } from './infrastructure/qr/mock-qr-content-builder.adapter';
 import { MockEmailDeliveryAdapter } from './infrastructure/email/mock-email-delivery.adapter';
-import { NodemailerEmailDeliveryAdapter } from './infrastructure/email/nodemailer-email-delivery.adapter';
+import {
+  SECRET_PROVIDER,
+  SecretProvider,
+} from '../../infrastructure/secrets/ports/secret-provider.port';
+import { createSmtpEmailDeliveryAdapter } from './infrastructure/email/create-smtp-email-delivery.adapter';
 import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-pdf-verifier.adapter';
 
 @Module({
@@ -172,6 +176,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
         mock: MockEmailDeliveryAdapter,
         renderer: BillingDefaultV1PdfRendererAdapter | MockPdfRendererAdapter,
         atomicRuntimeActivated: boolean,
+        secrets: SecretProvider,
       ) => {
         const useReal = configService.get<boolean>('EMAIL_USE_REAL');
         const rendererKind = renderer instanceof MockPdfRendererAdapter ? 'MOCK_TEST_ONLY' : 'REAL';
@@ -183,25 +188,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
             rendererKind === 'MOCK_TEST_ONLY' && configService.get<string>('NODE_ENV') === 'test',
         });
         if (useReal) {
-          const smtpHost = configService.get<string>('SMTP_HOST');
-          const smtpUser = configService.get<string>('SMTP_USER');
-          const smtpPassword = configService.get<string>('SMTP_PASSWORD');
-          const fromAddress = configService.get<string>('EMAIL_FROM_ADDRESS');
-          const fromName = configService.get<string>('EMAIL_FROM_NAME') ?? 'Billing Electrónico';
-          if (!smtpHost || !smtpUser || !smtpPassword || !fromAddress) {
-            throw new Error(
-              'EMAIL_USE_REAL=true requires SMTP_HOST, SMTP_USER, SMTP_PASSWORD, EMAIL_FROM_ADDRESS',
-            );
-          }
-          return new NodemailerEmailDeliveryAdapter({
-            host: smtpHost,
-            port: configService.get<number>('SMTP_PORT') ?? 587,
-            secure: configService.get<boolean>('SMTP_SECURE') ?? false,
-            user: smtpUser,
-            password: smtpPassword,
-            fromAddress,
-            fromName,
-          });
+          return createSmtpEmailDeliveryAdapter(configService, secrets);
         }
         return mock;
       },
@@ -210,6 +197,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
         MockEmailDeliveryAdapter,
         FISCAL_REPRESENTATION_PDF_RENDERER,
         FISCAL_PDF_ATOMIC_RUNTIME_ACTIVATED,
+        SECRET_PROVIDER,
       ],
     },
     // F4: Application services

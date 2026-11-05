@@ -1,6 +1,13 @@
 import { validationSchema } from '../config.validation-schema';
 
 describe('configuration validation schema', () => {
+  it('rejects plaintext SMTP credentials in process configuration', () => {
+    const result = validationSchema.validate(
+      { NODE_ENV: 'test', SMTP_PASSWORD: 'synthetic-sensitive-sentinel' },
+      { abortEarly: false },
+    );
+    expect(result.error?.message).toContain('SMTP_PASSWORD');
+  });
   const validDatabaseUrl = 'postgresql://test';
   const validJwtSecret = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   const validProductionConfig = {

@@ -90,6 +90,7 @@ function adapter(port: number): NodemailerEmailDeliveryAdapter {
     host: '127.0.0.1',
     port,
     secure: false,
+    requireTls: false,
     user: 'synthetic-user',
     password: 'synthetic-password',
     fromAddress: 'billing@example.test',

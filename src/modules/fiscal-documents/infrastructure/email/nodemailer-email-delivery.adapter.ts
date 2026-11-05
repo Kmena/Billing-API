@@ -22,6 +22,8 @@ export interface SmtpConfig {
   readonly host: string;
   readonly port: number;
   readonly secure: boolean;
+  /** Synthetic local SMTP test servers cannot negotiate TLS. */
+  readonly requireTls?: boolean;
   readonly user: string;
   readonly password: string;
   readonly fromAddress: string;
@@ -40,6 +42,7 @@ export class NodemailerEmailDeliveryAdapter implements EmailDeliveryPort {
       host: config.host,
       port: config.port,
       secure: config.secure,
+      requireTLS: config.requireTls ?? !config.secure,
       auth: {
         user: config.user,
         pass: config.password,
