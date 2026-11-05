@@ -27,7 +27,7 @@ export const ALLOWED_SALE_CONDITIONS = [
   '12',
   '99',
 ] as const;
-export const ALLOWED_PAYMENT_METHODS = ['01', '02', '03', '04', '05', '99'] as const;
+export const ALLOWED_PAYMENT_METHODS = ['01', '02', '03', '04', '05', '06', '99'] as const;
 
 export type FiscalDocumentType = keyof typeof FISCAL_DOCUMENT_CODES;
 export type HaciendaEnvironment = 'PRODUCTION' | 'SANDBOX';

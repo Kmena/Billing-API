@@ -193,6 +193,11 @@ describe('Inventori P0 fiscal validation', () => {
     );
   });
 
+  it('accepts the Hacienda v4.4 SINPE Móvil payment code through document validation', () => {
+    expect(() => validate(command({ paymentMethod: '06' }))).not.toThrow();
+    expectCode(command({ paymentMethod: '08' }), 'INVALID_PAYMENT_METHOD');
+  });
+
   it('accepts canonical Hacienda unit measures and rejects commercial/free-text units', () => {
     for (const unitMeasure of ['Unid', 'Kg', 'G', 'L', 'mL', 'M', 'Sp']) {
       expect(() => validate(command({ lines: [line({ unitMeasure })] }))).not.toThrow();
