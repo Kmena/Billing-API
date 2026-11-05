@@ -14,6 +14,7 @@ La lista oficial de medios de pago v4.4 de Hacienda asigna `06` a SINPE Móvil: 
 - Autenticación Hacienda: conexión SANDBOX `CONNECTED`, autenticación previa registrada. La autorización para recepción no está demostrada; el HTTP 403 es el bloqueo.
 - El almacén cifrado y la configuración fiscal conservaron sus huellas. Seis de 23 tablas cambiaron por la factura, su secuencia, idempotencia, XML y solicitud. Las otras 17 permanecieron en `MATCH`.
 - Respaldos PostgreSQL y de volúmenes cifrados anteriores al documento se restauraron en tmpfs. Están fuera de Git en `D:\SPEC09-STAG-20261105-1520\post-approval-recovery-backup`. No restaurar sobre el intento actual sin reconciliación.
+- También se respaldó y restauró en tmpfs el estado posterior al intento en `D:\SPEC09-STAG-20261105-1520\post-stag-attempt-final`: Afiliaciones SHA-256 `9a4d585a9482f5f59a0f649171e28068bf130f234fa62dba1bd1a72489489e36`, Billing SHA-256 `975d9fb8faf32cf4a01872c5f4f7bd40b0148ae1825a54174b952ab52f0b4ada`; el manifiesto verifica el almacén cifrado y el volumen fiscal.
 - Después de la prueba, el bootstrap del SANDBOX permite apagar STAG cuando todos los documentos tienen solicitudes terminales y no hay entregas pendientes. La API arrancó sana con `BILLING_SPEC09_STAG_INVOICING=false`, `USE_REAL_HACIENDA=false`, `FISCAL_WORKER_ENABLE_IN_TESTS=false` y `EMAIL_USE_REAL=false`. La clave SMTP sigue cifrada y no se usó para enviar.
 
 ## Criterio para reabrir
