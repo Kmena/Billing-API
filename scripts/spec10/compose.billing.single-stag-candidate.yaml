@@ -1,0 +1,9 @@
+services:
+  billing-spec09-sandbox:
+    image: billing-spec10:single-stag-8a7a38a
+    environment:
+      USE_REAL_HACIENDA: "false"
+      FISCAL_WORKER_ENABLE_IN_TESTS: "false"
+      BILLING_SPEC09_STAG_INVOICING: "false"
+      SPEC10_SINGLE_STAG_POST: "true"
+      EMAIL_USE_REAL: "false"

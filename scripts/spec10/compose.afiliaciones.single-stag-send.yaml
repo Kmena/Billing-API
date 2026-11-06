@@ -1,0 +1,5 @@
+services:
+  api:
+    environment:
+      BILLING_ENABLED: "false"
+      BILLING_MEMBERSHIP_STAG_ENABLED: "true"

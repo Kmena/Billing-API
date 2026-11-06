@@ -200,6 +200,14 @@ describe('SPEC-09 membership SANDBOX scopes', () => {
         ...AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES,
       ]),
     ).toBe(true);
+    expect(
+      hasEnrollmentV2Scopes([
+        ...AFFILIATIONS_ENROLLMENT_V2_SCOPES,
+        'fiscal-v2:operations:read',
+        'fiscal-v2:invoices:create',
+        'fiscal-v2:invoices:submit',
+      ]),
+    ).toBe(true);
     for (const partial of AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES) {
       expect(hasEnrollmentV2Scopes([...AFFILIATIONS_ENROLLMENT_V2_SCOPES, partial])).toBe(false);
     }

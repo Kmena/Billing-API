@@ -52,12 +52,18 @@ export const AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES = [
   'fiscal-v2:deliveries:request',
 ] as const;
 
+const AFFILIATIONS_MEMBERSHIP_INSTALLED_V2_SCOPES = [
+  'fiscal-v2:operations:read',
+  'fiscal-v2:invoices:create',
+  'fiscal-v2:invoices:submit',
+] as const;
+
 /** Preserve existing enrollment keys while permitting only these two audited additions. */
 export function hasEnrollmentV2Scopes(scopes: readonly string[]): boolean {
   return (
     new Set(scopes).size === scopes.length &&
     AFFILIATIONS_ENROLLMENT_V2_SCOPES.every((scope) => scopes.includes(scope)) &&
-    (AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES.every((scope) => scopes.includes(scope)) ||
+    (AFFILIATIONS_MEMBERSHIP_INSTALLED_V2_SCOPES.every((scope) => scopes.includes(scope)) ||
       AFFILIATIONS_MEMBERSHIP_STAG_V2_SCOPES.every((scope) => !scopes.includes(scope))) &&
     scopes.every(
       (scope) =>
