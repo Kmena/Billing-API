@@ -13,7 +13,7 @@ Esta especificación es de lectura, pruebas sintéticas descartables y diseño. 
 - Commit F4-S: `04e7f1e40b86775aba88601a878ea5efe7b4b7c6`, 2026-09-22. Informe histórico `C:\Users\kmena\Documents\proyectos\Billing\specs\fase-4-s-hacienda-sandbox-validation\implementation-report.md` y evidencia sanitizada `C:\Users\kmena\Documents\proyectos\Billing\test-output\hacienda-sandbox\TASK-009-STATUS\task-009-status-1790122709729.json` (SHA-256 `b33ab0d6c257d53e6b1cd938ee28461645acf11fe5db2fc6e0c5574700c9dd13`).
 - Código actual Billing: adaptador Hacienda, OAuth, controladores v1/v2 y workers. Inventori: `billing-api-client.service.js`, `fiscal-billing-worker.service.js`, servicios de artefactos. Inventori fue consultado en solo lectura; su worktree contiene cambios ajenos.
 - Docker fue inventariado mediante `ps` e `inspect` sin leer valores secretos. Se inspeccionaron solo flags y URLs permitidos; ninguna base persistente fue escrita.
-- F4-S unitario con red simulada: 396/396. E2E en PostgreSQL `postgres:15-alpine` con datos/certificado sintéticos, 32 migraciones en contenedor etiquetado y descartado: 30/30, tres suites. Véase `test-plan.md` para límites.
+- F4-S unitario con red simulada: 396/396. Contratos del cliente Inventori: 37/37. E2E en PostgreSQL `postgres:15-alpine` con datos/certificado sintéticos, 32 migraciones en contenedor etiquetado y descartado: 30/30, tres suites. Véase `test-plan.md` para límites.
 
 ## Gates
 
