@@ -21,9 +21,22 @@ En la versión actual de Afiliaciones, crear un pago con evidencia sintética, r
 
 NC total, parcial y remanente: fuente ACCEPTED sintética, referencias y saldos por línea, XML/XSD/firma, un POST/GET simulados, idempotencia y entrega capturada. ND: probar **solo** subconjunto permitido por contratos W3 y conservar bloqueo `DF_06_REFERENCE_AND_TAX_TREATMENT_PENDING` para reversión de NC y secuencias mixtas. No presentar una ND bloqueada o una validación XSD como aceptación fiscal. Exoneración general queda fuera hasta contrato y tratamiento aprobados.
 
-## Evidencia local disponible y brecha
+## Evidencia local actual y brechas
 
-F4-S unitario 396/396; contratos de Inventori 37/37; Billing FE/firma/envío/entrega en tres suites PostgreSQL 30/30. La suite W3 NC/ND focal pasó **26/26** en PostgreSQL descartable. La suite W5 Afiliaciones se intentó, pero su único caso no empezó por falta de `AFILIACIONES_W5_ROOT` y segunda base descartable; no es evidencia de fracaso de facturación. Las pruebas anteriores son fragmentos, **no T1–T4 continuas**. Se observaron tareas PDF tardías tras un teardown en la corrida F3; cerrar handlers/colas forma parte del criterio de T1.
+Corridas del 2026-11-06, todas con PostgreSQL tmpfs, P12 sintético, `USE_REAL_HACIENDA=false` y correo simulado. Los comandos y resultados están en `spec10-authority-implementation-readiness.md`.
+
+| Recorrido | Resultado demostrado | Límite |
+| --- | --- | --- |
+| Inventori v1 → Billing SPEC-09 | Cliente HTTP real de Inventori, configuración sintética, FE única, XML firmado, POST **202 simulado**, GET aceptado simulado, PDF/XML y respuesta entregados al correo capturado. 1/1 prueba. | El adaptador Hacienda fue mock; no hay aceptación STAG actual. |
+| Afiliaciones actual → Billing SPEC-09 | Dos bases descartables; pago SINPE con captura; autoaprobación 403; segundo aprobador; outbox e idempotencia; FE firmada única; POST **202 simulado**, GET aceptado simulado; respuesta Hacienda entregada al correo capturado. 2/2 pruebas, backup/restore descartable y cero deriva. | La ruta v2 produjo solo XML firmado + respuesta y **no PDF ni paquete completo**; requiere wave de entrega. |
+| F3 continuidad fiscal | 15/15: aceptación, rechazo, POST ambiguo, recuperación, idempotencia, ambiente y aislamiento. | Casos individuales; no reemplazan los consumidores completos. |
+| NC/ND W3 | 26/26: NC total/parcial/remanente y ND permitidas, firma, límites, concurrencia y bloqueo DF-06. | Sin recepción ni aceptación externa de notas. |
+| Paquete aceptado | 12/12: scopes, integridad, idempotencia y publicación de entrega de paquete. | Suite separada de la FE v2 de Afiliaciones. |
+| F4-S | 396/396 pruebas unitarias de autenticación, POST, GET, guardas y preflight sin red. | No prueba STAG nueva. |
+
+El fixture legado `w5-cross-system.mjs` usa CASH, una sola identidad y ningún `accountId`; falló con HTTP 400 ante la API actual. Se ejecutó el fixture moderno `spec09-membership-cross.test.ts`, corregido en una rama aislada con cuenta BANK sintética y dos identidades, y el runner SPEC-10 lo selecciona explícitamente. El test moderno pasa; no se presenta el W5 antiguo como regresión aprobada. La restauración de Afiliaciones descartable tuvo 28 migraciones, una empresa y dos movimientos en origen/destino, sin deriva. Ninguna base instalada se modificó.
+
+T2 queda **parcial** respecto a la entrega completa PDF/XML/respuesta. T3/T4 están validados solo en su alcance de laboratorio, sin un recorrido POST/GET de cada nota. La prueba de un contador común bajo concurrencia v1/v2 y la preservación restaurable de los documentos históricos siguen pendientes. Por eso `SPEC10_READY_FOR_IMPLEMENTATION` no puede declararse.
 
 ## Fase real STAG, posterior y separada
 

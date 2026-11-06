@@ -25,6 +25,7 @@ interface ScenarioState {
   readonly scenario: MockHaciendaSubmissionScenario;
   readonly submitCount: number;
   readonly statusQueryCount: number;
+  readonly lastAcknowledgementHttpStatus?: 201 | 202;
 }
 
 export interface MockHaciendaCallCounts {
@@ -35,6 +36,11 @@ export interface MockHaciendaCallCounts {
 @Injectable()
 export class MockHaciendaSubmissionAdapter implements HaciendaSubmissionPort {
   private readonly scenariosByClave = new Map<string, ScenarioState>();
+  private acknowledgementHttpStatus: 201 | 202 = 201;
+
+  setAcknowledgementHttpStatus(status: 201 | 202): void {
+    this.acknowledgementHttpStatus = status;
+  }
 
   setScenario(clave: string, scenario: MockHaciendaSubmissionScenario): void {
     this.scenariosByClave.set(clave, { scenario, submitCount: 0, statusQueryCount: 0 });
@@ -45,8 +51,13 @@ export class MockHaciendaSubmissionAdapter implements HaciendaSubmissionPort {
     return { submitCount: state.submitCount, statusQueryCount: state.statusQueryCount };
   }
 
+  getLastAcknowledgementHttpStatus(clave: string): 201 | 202 | undefined {
+    return this.getScenario(clave).lastAcknowledgementHttpStatus;
+  }
+
   clearScenarios(): void {
     this.scenariosByClave.clear();
+    this.acknowledgementHttpStatus = 201;
   }
 
   async submitSignedDocument(
@@ -91,8 +102,7 @@ export class MockHaciendaSubmissionAdapter implements HaciendaSubmissionPort {
   async queryStatusByClave(input: HaciendaQueryStatusInput): Promise<HaciendaSubmissionResult> {
     const state = this.getScenario(input.clave);
     const nextState: ScenarioState = {
-      scenario: state.scenario,
-      submitCount: state.submitCount,
+      ...state,
       statusQueryCount: state.statusQueryCount + 1,
     };
     this.scenariosByClave.set(input.clave, nextState);
@@ -136,10 +146,15 @@ export class MockHaciendaSubmissionAdapter implements HaciendaSubmissionPort {
   }
 
   private acknowledged(clave: string): HaciendaSubmissionResult {
+    const state = this.getScenario(clave);
+    this.scenariosByClave.set(clave, {
+      ...state,
+      lastAcknowledgementHttpStatus: this.acknowledgementHttpStatus,
+    });
     return {
       kind: 'ACKNOWLEDGED',
       nextStatus: 'ACKNOWLEDGED',
-      httpStatus: 201,
+      httpStatus: this.acknowledgementHttpStatus,
       providerLocation: `mock://hacienda/recepcion/${clave}`,
       providerReference: clave,
     };

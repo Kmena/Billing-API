@@ -17,6 +17,8 @@ import {
   SECRET_PROVIDER,
   type SecretProvider,
 } from '../../../src/infrastructure/secrets/ports/secret-provider.port';
+import { MockHaciendaSubmissionAdapter } from '../../../src/modules/fiscal-documents/infrastructure/submission/mock-hacienda-submission.adapter';
+import { MockEmailDeliveryAdapter } from '../../../src/modules/fiscal-documents/infrastructure/email/mock-email-delivery.adapter';
 
 type Address = { port: number } | string | null;
 
@@ -56,6 +58,7 @@ describe('Wave 8 Inventori to Billing integrated onboarding — disposable Postg
     process.env.NODE_ENV = 'test';
     process.env.USE_REAL_HACIENDA = 'false';
     context = await createFiscalE2eApp();
+    context.app.get(MockHaciendaSubmissionAdapter).setAcknowledgementHttpStatus(202);
     await context.app.listen(0, '127.0.0.1');
     const address = context.app.getHttpServer().address() as Address;
     if (!address || typeof address === 'string')
@@ -345,6 +348,37 @@ describe('Wave 8 Inventori to Billing integrated onboarding — disposable Postg
       xmlProcessing: { generatedXmlAvailable: true, signedXmlAvailable: true },
     });
     expect(status.artifacts.length).toBeGreaterThan(0);
+    expect(
+      context.app.get(MockHaciendaSubmissionAdapter).getCallCounts(status.document.clave),
+    ).toEqual({ submitCount: 1, statusQueryCount: 1 });
+    expect(
+      context.app
+        .get(MockHaciendaSubmissionAdapter)
+        .getLastAcknowledgementHttpStatus(status.document.clave),
+    ).toBe(202);
+    const deliveries = await context.prisma.documentDelivery.findMany({
+      where: { tenantId: fixture.tenantId, fiscalDocumentId: initiated.executionId },
+      select: { kind: true, status: true },
+    });
+    expect(deliveries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'HACIENDA_RESPONSE', status: 'DELIVERED' }),
+      ]),
+    );
+    const sent = context.app.get(MockEmailDeliveryAdapter).sentEmails;
+    expect(sent.length).toBeGreaterThanOrEqual(1);
+    expect(
+      sent.some((email) =>
+        email.attachmentFilenames.some((name) => name.endsWith('_respuesta.xml')),
+      ),
+    ).toBe(true);
+    expect(
+      sent.some(
+        (email) =>
+          email.attachmentFilenames.some((name) => name.endsWith('.pdf')) &&
+          email.attachmentFilenames.some((name) => name.endsWith('.xml')),
+      ),
+    ).toBe(true);
     expect(
       await context.prisma.fiscalDocument.count({ where: { tenantId: fixture.tenantId } }),
     ).toBe(1);
