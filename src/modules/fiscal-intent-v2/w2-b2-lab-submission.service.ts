@@ -120,7 +120,12 @@ export class W2B2LabSubmissionService {
           SUBMIT_FISCAL_DOCUMENT_JOB,
           { submissionId: result.submissionId },
           {
-            retryLimit: 3,
+            retryLimit:
+              process.env.NODE_ENV === 'test' &&
+              process.env.BILLING_SPEC09_STAG_INVOICING === 'true' &&
+              process.env.SPEC10_SINGLE_STAG_POST === 'true'
+                ? 0
+                : 3,
             retryDelay: 60,
             singletonKey: `fiscal-submission:${SUBMIT_FISCAL_DOCUMENT_JOB}:${result.submissionId}`,
             singletonSeconds: 12 * 60 * 60,

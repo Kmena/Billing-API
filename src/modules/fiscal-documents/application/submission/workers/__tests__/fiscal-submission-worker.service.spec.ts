@@ -129,6 +129,73 @@ describe('FiscalSubmissionWorkerService', () => {
     expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(2);
   });
 
+  it('makes only one POST in the single STAG test, including token-expired responses', async () => {
+    const previous = {
+      nodeEnv: process.env.NODE_ENV,
+      invoicing: process.env.BILLING_SPEC09_STAG_INVOICING,
+      singlePost: process.env.SPEC10_SINGLE_STAG_POST,
+    };
+    process.env.NODE_ENV = 'test';
+    process.env.BILLING_SPEC09_STAG_INVOICING = 'true';
+    process.env.SPEC10_SINGLE_STAG_POST = 'true';
+    try {
+      const { worker, hacienda, state, queue } = makeWorker({
+        kind: 'RETRYABLE_FAILURE',
+        nextStatus: 'TECHNICAL_RETRY_PENDING',
+        normalizedErrorCode: 'HACIENDA_TOKEN_EXPIRED',
+        httpStatus: 401,
+      } as never);
+      await worker.handleSubmitJob({ submissionId: 'submission-id' });
+      expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(1);
+      expect(state.applyProviderResult).toHaveBeenCalledWith(
+        'submission-id',
+        expect.objectContaining({ nextStatus: 'MANUAL_REVIEW_REQUIRED', httpStatus: 401 }),
+      );
+      expect(queue.publish).not.toHaveBeenCalled();
+    } finally {
+      if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous.nodeEnv;
+      if (previous.invoicing === undefined) delete process.env.BILLING_SPEC09_STAG_INVOICING;
+      else process.env.BILLING_SPEC09_STAG_INVOICING = previous.invoicing;
+      if (previous.singlePost === undefined) delete process.env.SPEC10_SINGLE_STAG_POST;
+      else process.env.SPEC10_SINGLE_STAG_POST = previous.singlePost;
+    }
+  });
+
+  it('does not replay a stale submission after a crash in the single STAG test', async () => {
+    const previous = {
+      nodeEnv: process.env.NODE_ENV,
+      invoicing: process.env.BILLING_SPEC09_STAG_INVOICING,
+      singlePost: process.env.SPEC10_SINGLE_STAG_POST,
+    };
+    process.env.NODE_ENV = 'test';
+    process.env.BILLING_SPEC09_STAG_INVOICING = 'true';
+    process.env.SPEC10_SINGLE_STAG_POST = 'true';
+    try {
+      const { worker, prisma, hacienda, state, queue } = makeWorker();
+      prisma.fiscalSubmission.findMany
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ...submission, status: 'SUBMITTING' }]);
+      await worker.enqueueDueWork();
+      expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+      expect(state.applyProviderResult).toHaveBeenCalledWith(
+        'submission-id',
+        expect.objectContaining({
+          nextStatus: 'MANUAL_REVIEW_REQUIRED',
+          normalizedErrorCode: 'SPEC10_SINGLE_POST_OUTCOME_UNKNOWN',
+        }),
+      );
+      expect(queue.publish).not.toHaveBeenCalled();
+    } finally {
+      if (previous.nodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previous.nodeEnv;
+      if (previous.invoicing === undefined) delete process.env.BILLING_SPEC09_STAG_INVOICING;
+      else process.env.BILLING_SPEC09_STAG_INVOICING = previous.invoicing;
+      if (previous.singlePost === undefined) delete process.env.SPEC10_SINGLE_STAG_POST;
+      else process.env.SPEC10_SINGLE_STAG_POST = previous.singlePost;
+    }
+  });
+
   it('classifies local worker exceptions after claim instead of leaving submission stuck as SUBMITTING', async () => {
     const { worker, storage, state, queue } = makeWorker();
     storage.download.mockRejectedValueOnce(new Error('storage temporarily unavailable'));

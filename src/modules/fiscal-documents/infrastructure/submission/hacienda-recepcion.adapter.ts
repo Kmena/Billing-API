@@ -79,6 +79,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
       const response = await firstValueFrom(
         this.http.post(this.url(input.environment, 'recepcion'), body, {
           timeout: this.config.timeoutMs,
+          maxRedirects: 0,
           headers: {
             Authorization: `bearer ${input.accessToken}`,
             'Content-Type': 'application/json; charset=utf-8',
@@ -133,6 +134,7 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
           this.url(input.environment, `recepcion/${input.clave}`),
           {
             timeout: this.config.timeoutMs,
+            maxRedirects: 0,
             headers: { Authorization: `bearer ${input.accessToken}` },
           },
         ),

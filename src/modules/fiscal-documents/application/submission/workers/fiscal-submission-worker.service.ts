@@ -80,7 +80,30 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     return isTestRuntime && process.env.FISCAL_WORKER_ENABLE_IN_TESTS !== 'true';
   }
 
+  private singlePostStagTest(): boolean {
+    return (
+      process.env.NODE_ENV === 'test' &&
+      process.env.BILLING_SPEC09_STAG_INVOICING === 'true' &&
+      process.env.SPEC10_SINGLE_STAG_POST === 'true'
+    );
+  }
+
   async handleSubmitJob(payload: FiscalSubmissionJobPayload): Promise<void> {
+    if (this.singlePostStagTest()) {
+      const current = await this.prisma.fiscalSubmission.findUnique({
+        where: { id: payload.submissionId },
+        select: { status: true },
+      });
+      if (current?.status === 'TECHNICAL_RETRY_PENDING') {
+        await this.state.applyProviderResult(payload.submissionId, {
+          kind: 'NON_RETRYABLE_FAILURE',
+          nextStatus: 'MANUAL_REVIEW_REQUIRED',
+          normalizedErrorCode: 'SPEC10_SINGLE_POST_RETRY_BLOCKED',
+          sanitizedErrorMessage: 'A second STAG POST is prohibited for this test.',
+        });
+        return;
+      }
+    }
     const claimed = await this.claimSubmission(payload.submissionId, [
       'QUEUED',
       'TECHNICAL_RETRY_PENDING',
@@ -113,7 +136,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
         signedXml,
       });
 
-      if (result.normalizedErrorCode === 'HACIENDA_TOKEN_EXPIRED') {
+      if (result.normalizedErrorCode === 'HACIENDA_TOKEN_EXPIRED' && !this.singlePostStagTest()) {
         this.tokenCache.invalidate(context.connection.companyId, context.connection.environment);
         const refreshedToken = await this.accessToken(
           context.connection.companyId,
@@ -135,6 +158,16 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
           ),
           signedXml,
         });
+      }
+
+      if (this.singlePostStagTest() && result.nextStatus === 'TECHNICAL_RETRY_PENDING') {
+        result = {
+          ...result,
+          kind: 'NON_RETRYABLE_FAILURE',
+          nextStatus: 'MANUAL_REVIEW_REQUIRED',
+          sanitizedErrorMessage:
+            'The single authorized STAG POST ended without a conclusive fiscal state.',
+        };
       }
 
       await this.state.applyProviderResult(payload.submissionId, result);
@@ -185,12 +218,13 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   async enqueueDueWork(): Promise<void> {
+    const singlePost = this.singlePostStagTest();
     const due = await this.prisma.fiscalSubmission.findMany({
       where: {
         status: {
           in: [
             'QUEUED',
-            'TECHNICAL_RETRY_PENDING',
+            ...(singlePost ? [] : ['TECHNICAL_RETRY_PENDING' as const]),
             'ACKNOWLEDGED',
             'PROCESSING',
             'POST_OUTCOME_UNKNOWN',
@@ -212,18 +246,26 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     for (const submission of [...due, ...staleSubmitting]) {
       if (submission.status === 'SUBMITTING') {
         await this.state.applyProviderResult(submission.id, {
-          kind: 'RETRYABLE_FAILURE',
-          nextStatus: 'TECHNICAL_RETRY_PENDING',
-          normalizedErrorCode: 'FISCAL_SUBMISSION_STALE_SUBMITTING_RECOVERED',
-          sanitizedErrorMessage: 'Recovered stale in-flight submission after worker restart.',
+          kind: singlePost ? 'NON_RETRYABLE_FAILURE' : 'RETRYABLE_FAILURE',
+          nextStatus: singlePost ? 'MANUAL_REVIEW_REQUIRED' : 'TECHNICAL_RETRY_PENDING',
+          normalizedErrorCode: singlePost
+            ? 'SPEC10_SINGLE_POST_OUTCOME_UNKNOWN'
+            : 'FISCAL_SUBMISSION_STALE_SUBMITTING_RECOVERED',
+          sanitizedErrorMessage: singlePost
+            ? 'The single STAG POST outcome is unknown after worker restart.'
+            : 'Recovered stale in-flight submission after worker restart.',
         });
+        if (singlePost) continue;
       }
       const jobName = ['ACKNOWLEDGED', 'PROCESSING', 'POST_OUTCOME_UNKNOWN'].includes(
         submission.status,
       )
         ? RECONCILE_FISCAL_SUBMISSION_JOB
         : SUBMIT_FISCAL_DOCUMENT_JOB;
-      await this.publishSubmissionJob(jobName, submission.id, { retryLimit: 3, retryDelay: 60 });
+      await this.publishSubmissionJob(jobName, submission.id, {
+        retryLimit: singlePost ? 0 : 3,
+        retryDelay: 60,
+      });
     }
   }
 
@@ -233,11 +275,14 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
       'Fiscal submission submit job failed before a durable provider result was applied',
     );
     const result: HaciendaSubmissionResult = {
-      kind: 'RETRYABLE_FAILURE',
-      nextStatus: 'TECHNICAL_RETRY_PENDING',
-      normalizedErrorCode: 'FISCAL_SUBMISSION_WORKER_FAILURE',
-      sanitizedErrorMessage:
-        'Fiscal submission worker failed before provider outcome was confirmed.',
+      kind: this.singlePostStagTest() ? 'NON_RETRYABLE_FAILURE' : 'RETRYABLE_FAILURE',
+      nextStatus: this.singlePostStagTest() ? 'MANUAL_REVIEW_REQUIRED' : 'TECHNICAL_RETRY_PENDING',
+      normalizedErrorCode: this.singlePostStagTest()
+        ? 'SPEC10_SINGLE_POST_WORKER_FAILURE'
+        : 'FISCAL_SUBMISSION_WORKER_FAILURE',
+      sanitizedErrorMessage: this.singlePostStagTest()
+        ? 'The single STAG POST outcome could not be confirmed.'
+        : 'Fiscal submission worker failed before provider outcome was confirmed.',
     };
     await this.state.applyProviderResult(submissionId, result);
     await this.scheduleNext(submissionId, result);
@@ -367,6 +412,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     }
 
     if (result.nextStatus === 'TECHNICAL_RETRY_PENDING') {
+      if (this.singlePostStagTest()) return;
       await this.publishSubmissionJob(SUBMIT_FISCAL_DOCUMENT_JOB, submissionId, {
         retryLimit: 3,
         retryDelay: 60,
