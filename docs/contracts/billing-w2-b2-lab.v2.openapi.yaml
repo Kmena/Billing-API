@@ -24,7 +24,10 @@ paths:
       description: >-
         Only SANDBOX and the W2-B synthetic projection are accepted. The
         association, tenant and environment come from the M2M key. A successful
-        local document and signed XML do not imply Hacienda acceptance.
+        local document and signed XML do not imply Hacienda acceptance. For an
+        Afiliaciones FE, Idempotency-Key is stable for company, payment and FE
+        across retries; the timestamp-based internalOperationId is audit-only
+        and never determines the fiscal consecutive.
       parameters:
         - $ref: '#/components/parameters/CompanyId'
         - $ref: '#/components/parameters/Environment'
@@ -341,9 +344,13 @@ components:
     LabOperation:
       type: object
       additionalProperties: false
-      required: [operationId, documentId, documentStatus, state, clave, consecutive, correlationId]
+      required: [operationId, internalOperationId, documentId, documentStatus, state, clave, consecutive, correlationId]
       properties:
         operationId: { type: string, format: uuid }
+        internalOperationId:
+          type: string
+          maxLength: 255
+          description: Stable internal timestamp–M2M actor–reservation identifier; never a fiscal consecutive.
         documentId: { type: string, format: uuid }
         documentStatus: { type: string, enum: [READY_FOR_XML, READY_TO_SUBMIT] }
         state: { type: string, enum: [COMMITTED, RECOVERY_REQUIRED] }

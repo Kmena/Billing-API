@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -141,8 +142,33 @@ export class W2B2LabInvoiceService {
     ) {
       throw new BadRequestException({ code: 'FISCAL_OPERATION_IDENTITY_INVALID' });
     }
-    const p = input.principal;
     const reservation = await this.reserve(input, spec);
+    const attempt = await this.startAttempt(input, spec, reservation);
+    let result: Awaited<ReturnType<W2B2LabInvoiceService['continuePrepared']>>;
+    try {
+      this.assertSameReservation(reservation, input, spec);
+      result = await this.continuePrepared(input, spec, reservation);
+    } catch (error) {
+      await this.finishAttempt(attempt.id, attempt.metadata, error);
+      throw error;
+    }
+    await this.finishAttempt(
+      attempt.id,
+      attempt.metadata,
+      null,
+      result.httpStatus,
+      result.state,
+      result.documentStatus,
+    );
+    return { ...result, internalOperationId: attempt.internalOperationId };
+  }
+
+  private async continuePrepared(
+    input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
+    reservation: { id: string },
+  ) {
+    const p = input.principal;
     if (this.interruptAfterReserve) {
       this.interruptAfterReserve = false;
       throw new ServiceUnavailableException({ code: 'W2_B2_LAB_INTERRUPTED_AFTER_RESERVATION' });
@@ -186,7 +212,23 @@ export class W2B2LabInvoiceService {
               version: { increment: 1 },
             },
           });
-          await this.audit(tx, input, spec, current.id, 'fiscal-v2.document.created', document.id);
+          const assigned = await tx.fiscalDocument.findUniqueOrThrow({
+            where: { id: document.id },
+            select: {
+              branchCode: true,
+              terminalCode: true,
+              type: true,
+              sequenceValue: true,
+              consecutive: true,
+            },
+          });
+          await this.audit(tx, input, spec, current.id, 'fiscal-v2.document.created', document.id, {
+            branchCode: assigned.branchCode,
+            terminalCode: assigned.terminalCode,
+            documentType: assigned.type,
+            sequenceValue: assigned.sequenceValue.toString(),
+            consecutive: assigned.consecutive,
+          });
           return { documentId: document.id, created: true };
         },
         { maxWait: 30000, timeout: 30000 },
@@ -362,13 +404,97 @@ export class W2B2LabInvoiceService {
             key: input.idempotencyKey,
           },
         });
-        this.assertSameReservation(row, input, spec);
         if (inserted === 1)
           await this.audit(tx, input, spec, row.id, 'fiscal-v2.operation.reserved');
         return row;
       },
       { maxWait: 30000, timeout: 30000 },
     );
+  }
+
+  private async startAttempt(
+    input: W2B2CreateInput,
+    spec: LabFiscalOperationSpec,
+    reservation: { id: string; createdAt: Date; firstApiKeyId: string | null },
+  ) {
+    const p = input.principal;
+    return this.prisma.$transaction(async (tx) => {
+      await this.consumers.assertPrincipalForScope(tx, p, spec.scope);
+      await tx.$queryRaw`SELECT id FROM fiscal_idempotency_keys_v2 WHERE id = ${reservation.id}::uuid FOR UPDATE`;
+      const resource = `FiscalIdempotencyKeyV2:${reservation.id}`;
+      const attemptNumber =
+        (await tx.auditLog.count({
+          where: { resource, action: 'fiscal-v2.operation.attempt' },
+        })) + 1;
+      const startedAt = new Date();
+      const firstActor = reservation.firstApiKeyId ?? p.apiKeyId;
+      const internalOperationId = `${reservation.createdAt.toISOString()}-${firstActor}-${reservation.id}`;
+      const metadata = {
+        internalOperationId,
+        attemptNumber,
+        startedAt: startedAt.toISOString(),
+        associationId: p.associationId,
+        environment: p.environment,
+        operation: spec.operation,
+        result: 'STARTED',
+      };
+      const id = randomUUID();
+      await tx.auditLog.create({
+        data: {
+          id,
+          tenantId: p.tenantId,
+          companyId: p.companyId,
+          apiKeyId: p.apiKeyId,
+          actor: p.apiKeyId,
+          action: 'fiscal-v2.operation.attempt',
+          resource,
+          correlationId: input.correlationId,
+          eventClass: 'FISCAL_AUDIT',
+          metadata,
+        },
+      });
+      return { id, metadata, internalOperationId };
+    });
+  }
+
+  private async finishAttempt(
+    id: string,
+    metadata: {
+      internalOperationId: string;
+      attemptNumber: number;
+      startedAt: string;
+      associationId: string;
+      environment: string;
+      operation: string;
+      result: string;
+    },
+    error: unknown,
+    successStatus?: number,
+    state?: string,
+    documentStatus?: string,
+  ) {
+    const statusCode = error instanceof HttpException ? error.getStatus() : (successStatus ?? 500);
+    const response = error instanceof HttpException ? error.getResponse() : null;
+    const rawCode =
+      response && typeof response === 'object' && 'code' in response ? response.code : null;
+    const errorCode =
+      typeof rawCode === 'string' && /^[A-Z0-9_]{3,80}$/.test(rawCode)
+        ? rawCode
+        : 'FISCAL_OPERATION_UNEXPECTED_ERROR';
+    await this.prisma.auditLog.update({
+      where: { id },
+      data: {
+        statusCode,
+        metadata: {
+          ...metadata,
+          result: error ? 'FAILED' : 'COMPLETED',
+          ...(error ? { errorCode } : { state }),
+          documentStatus: documentStatus ?? null,
+          fiscalStatus: 'NOT_CHECKED_BY_CREATE_OPERATION',
+          completedAt: new Date().toISOString(),
+        },
+      },
+    });
   }
 
   private assertSameReservation(
@@ -583,6 +709,13 @@ export class W2B2LabInvoiceService {
     reservationId: string,
     action: string,
     documentId?: string,
+    sequenceAssignment?: {
+      branchCode: string;
+      terminalCode: string;
+      documentType: string;
+      sequenceValue: string;
+      consecutive: string;
+    },
   ) {
     const p = input.principal;
     return tx.auditLog.create({
@@ -602,6 +735,7 @@ export class W2B2LabInvoiceService {
           requestHashVersion: spec.hashVersion,
           operation: spec.operation,
           ...(documentId ? { documentId } : {}),
+          ...(sequenceAssignment ? { sequenceAssignment } : {}),
         },
       },
     });

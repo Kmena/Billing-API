@@ -148,9 +148,10 @@ components:
     LabOperation:
       type: object
       additionalProperties: false
-      required: [operationId, documentId, documentStatus, state, clave, consecutive, correlationId]
+      required: [operationId, internalOperationId, documentId, documentStatus, state, clave, consecutive, correlationId]
       properties:
         operationId: { type: string, format: uuid }
+        internalOperationId: { type: string, maxLength: 255, description: Internal audit identifier; never a fiscal consecutive. }
         documentId: { type: string, format: uuid }
         documentStatus: { type: string }
         state: { type: string, enum: [COMMITTED, RECOVERY_REQUIRED] }

@@ -285,6 +285,21 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       fiscalDocumentId: documentId,
       requestHashVersion: 'w2-b-fiscal-lab.v1',
     });
+    expect(created.body.internalOperationId).toBe(
+      `${reservation.createdAt.toISOString()}-${reservation.firstApiKeyId}-${reservation.id}`,
+    );
+    const firstAttempt = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        resource: `FiscalIdempotencyKeyV2:${reservation.id}`,
+        action: 'fiscal-v2.operation.attempt',
+      },
+    });
+    expect(firstAttempt).toMatchObject({ statusCode: created.status, apiKeyId: key.apiKeyId });
+    expect(firstAttempt.metadata).toMatchObject({
+      internalOperationId: created.body.internalOperationId,
+      attemptNumber: 1,
+      result: 'COMPLETED',
+    });
     expect(
       await prisma.fiscalIdempotencyKey.count({ where: { fiscalDocumentId: documentId } }),
     ).toBe(0);
@@ -302,6 +317,21 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
         'fiscal-v2.xml.ready',
       ]),
     );
+    const assignment = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        resource: `FiscalIdempotencyKeyV2:${reservation.id}`,
+        action: 'fiscal-v2.document.created',
+      },
+    });
+    expect(assignment.metadata).toMatchObject({
+      sequenceAssignment: {
+        branchCode: doc.branchCode,
+        terminalCode: doc.terminalCode,
+        documentType: 'INVOICE',
+        sequenceValue: doc.sequenceValue.toString(),
+        consecutive: doc.consecutive,
+      },
+    });
     await lookup(key.secret, 'w2b2-create-1', invoiceIntent('w2b2-create-1'))
       .expect(200)
       .expect(({ body }) =>
@@ -470,6 +500,18 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
         where: { originAssociationId: associationId, id: first.body.documentId },
       }),
     ).toBe(1);
+    const replayAttempts = await prisma.auditLog.findMany({
+      where: {
+        resource: `FiscalIdempotencyKeyV2:${first.body.operationId}`,
+        action: 'fiscal-v2.operation.attempt',
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(replayAttempts.map((attempt) => attempt.statusCode).sort()).toEqual([200, 201, 409]);
+    expect(replayAttempts.find((attempt) => attempt.statusCode === 409)?.metadata).toMatchObject({
+      result: 'FAILED',
+      errorCode: 'IDEMPOTENCY_PAYLOAD_CONFLICT',
+    });
   });
 
   it('serializes concurrent requests into one reservation and one document', async () => {
@@ -488,6 +530,41 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
         where: { associationId, key: 'w2b2-concurrent' },
       }),
     ).toBe(1);
+    expect(a.body.internalOperationId).toBe(b.body.internalOperationId);
+    expect(final.body.internalOperationId).toBe(a.body.internalOperationId);
+    const attempts = await prisma.auditLog.findMany({
+      where: {
+        resource: `FiscalIdempotencyKeyV2:${final.body.operationId}`,
+        action: 'fiscal-v2.operation.attempt',
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(attempts).toHaveLength(3);
+    expect(
+      attempts
+        .map((attempt) => (attempt.metadata as { attemptNumber: number }).attemptNumber)
+        .sort(),
+    ).toEqual([1, 2, 3]);
+    expect(attempts.every((attempt) => attempt.statusCode !== null)).toBe(true);
+  });
+
+  it('allocates distinct numbers for two independent payment events', async () => {
+    const firstEvent = `AFFILIATIONS:${companyId}:${randomUUID()}:FE`;
+    const secondEvent = `AFFILIATIONS:${companyId}:${randomUUID()}:FE`;
+    const [first, second] = await Promise.all([
+      post(key.secret, firstEvent, invoiceIntent(firstEvent)),
+      post(key.secret, secondEvent, invoiceIntent(secondEvent)),
+    ]);
+    expect([200, 201, 202]).toContain(first.status);
+    expect([200, 201, 202]).toContain(second.status);
+    expect(first.body.documentId).not.toBe(second.body.documentId);
+    const documents = await prisma.fiscalDocument.findMany({
+      where: { id: { in: [first.body.documentId, second.body.documentId] } },
+      select: { sequenceValue: true, consecutive: true },
+    });
+    expect(documents).toHaveLength(2);
+    expect(new Set(documents.map((document) => document.sequenceValue.toString())).size).toBe(2);
+    expect(new Set(documents.map((document) => document.consecutive)).size).toBe(2);
   });
 
   it('recovers after reservation and after document persistence without duplicate numbering', async () => {
@@ -501,6 +578,18 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       where: { associationId, key: 'w2b2-interrupt-reserve' },
     });
     expect(reserved).toMatchObject({ state: 'RESERVED', fiscalDocumentId: null });
+    const interruptedAttempt = await prisma.auditLog.findFirstOrThrow({
+      where: {
+        resource: `FiscalIdempotencyKeyV2:${reserved.id}`,
+        action: 'fiscal-v2.operation.attempt',
+      },
+    });
+    expect(interruptedAttempt.statusCode).toBe(503);
+    expect(interruptedAttempt.metadata).toMatchObject({
+      attemptNumber: 1,
+      result: 'FAILED',
+      errorCode: 'W2_B2_LAB_INTERRUPTED_AFTER_RESERVATION',
+    });
     await lookup(key.secret, 'w2b2-interrupt-reserve', invoiceIntent('w2b2-interrupt-reserve'))
       .expect(202)
       .expect(({ body }) =>
