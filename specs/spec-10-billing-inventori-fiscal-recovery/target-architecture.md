@@ -2,17 +2,17 @@
 
 ## Propiedad y límites
 
-Un despliegue lógico de Billing mantiene registro canónico de emisores, P12/PIN, credenciales Hacienda, actividades, puntos de emisión, consecutivos, XML firmado, respuesta fiscal, PDF y entregas. Inventori y Afiliaciones conservan sus clientes, facturas comerciales, membresías/pagos e intenciones; envían un snapshot inmutable de receptor, líneas, impuesto, período y destino de correo, con identidad M2M por empresa y ambiente. Billing valida autorización y retorna identidad fiscal, estado y artefactos. Solo Billing llama a Hacienda y SMTP.
+El código moderno de Billing SPEC-09 será la base del despliegue lógico único. Mantendrá registro canónico de emisores, P12/PIN, credenciales Hacienda, actividades, puntos de emisión, consecutivos, XML firmado, respuesta fiscal, PDF y entregas. Inventori y Afiliaciones conservan sus clientes, facturas comerciales, membresías/pagos e intenciones; envían un snapshot inmutable de receptor, líneas, impuesto, período y destino de correo, con identidad M2M por empresa y ambiente. Billing valida autorización y retorna identidad fiscal, estado y artefactos. Solo Billing llama a Hacienda y SMTP, reutilizando `HaciendaRecepcionAdapter` F4-S.
 
-La convergencia **no implica** fusionar automáticamente PostgreSQL. Durante la transición, cada documento histórico queda en su Billing de origen y el router de lectura lo conserva por `billingInstanceId + fiscalDocumentId`. La emisión nueva solo se asigna a una instancia después de conciliar emisor, secuencias, claves, secretos, backups y relaciones. Nunca reescribir claves, consecutivos, XML ni estados históricos. Si dos instancias contienen el mismo emisor/ambiente, bloquear nuevo alta hasta decidir secuencia única y próxima numeración.
+La convergencia **no implica** fusionar automáticamente PostgreSQL. Durante la transición, cada documento histórico queda en su Billing de origen y el router de lectura propuesto lo conserva por `billingInstanceId + fiscalDocumentId`. La emisión nueva solo se asigna a una instancia después de conciliar emisor, secuencias, claves, secretos, backups y relaciones. Nunca reescribir claves, consecutivos, XML ni estados históricos. La única entidad fiscal de pruebas en ambas bases es esperada y no bloquea T1–T4 aisladas; antes de nueva emisión compartida se debe escoger un solo asignador y una próxima numeración segura.
 
 ## Contrato propuesto (no endpoint implementado)
 
 | Operación | Solicitud mínima | Respuesta/guardas |
 | --- | --- | --- |
-| Crear factura | Empresa/ambiente; snapshot fiscal completo; `Idempotency-Key`; hash versionado; correlación | `documentId`, clave/consecutivo asignados una vez; autorización de empresa y scope `invoices:create`; rechazar hash distinto con misma llave. |
+| Crear factura | Empresa/ambiente; snapshot fiscal completo; `Idempotency-Key`; hash versionado; correlación | `documentId`, clave/consecutivo asignados una vez; autorización de empresa; `invoices:write` v1 o `fiscal-v2:invoices:create` v2. Rechazar hash distinto con misma llave. |
 | Preparar | `documentId` | XML/XSD/firma/huella; no exponer PIN ni P12. Puede quedar interno a Billing en contrato unificado. |
-| Enviar | `documentId`, modo explícito SANDBOX/PRODUCTION | Scope `invoices:submit`, readiness y guardas de ambiente; exactamente una publicación de trabajo. HTTP de la API local no equivale al de Hacienda. |
+| Enviar | `documentId`, modo explícito `SANDBOX`/`PRODUCTION` | `invoices:write` v1 o `fiscal-v2:invoices:submit` v2, readiness y guardas de ambiente; exactamente una publicación de trabajo. HTTP de la API local no equivale al de Hacienda. |
 | Consultar estado | `documentId` o identidad inmutable | Estado técnico y fiscal separados; `ACCEPTED` solo ante respuesta oficial concluyente. |
 | Artefactos/entrega | `documentId`, autorización de consulta o reenvío | PDF, XML firmado, respuesta; evidencia de SMTP y resultado incierto separados. |
 | Reconciliar | `documentId` bajo política de conflicto | GET fiscal controlado, auditado y con límites; nunca POST implícito. |

@@ -6,6 +6,8 @@ Estado: auditoría y diseño local, 2026-11-06. Rama `codex/spec10-billing-inven
 
 F4-S demostró que el pipeline de Billing recibió un documento en Hacienda SANDBOX y luego obtuvo `ind-estado=aceptado`. Eso **no demuestra** que el documento lo originó Inventori ni que se entregó por correo. La instalación actual tiene dos Billing y la emisión ordinaria de ambos consumidores está deshabilitada. El objetivo es converger en un Billing custodio, conservando sus documentos y la configuración de cada empresa, sin integrar Hacienda por tercera vez.
 
+La decisión de SPEC-10 es conservar el **código y las capacidades modernas de SPEC-09** y reutilizar el mecanismo Hacienda F4-S dentro de él. No se vuelve a una versión antigua. Que ambas instalaciones representen la única entidad fiscal de pruebas es esperado y no bloquea el ensayo local; sí exige asignación única de consecutivos antes de unir emisión nueva.
+
 Esta especificación es de lectura, pruebas sintéticas descartables y diseño. No modifica servicios persistentes ni la factura SPEC-09 `140adc48-7e4e-42bb-85bb-effe017483e2` (clave, consecutivo, XML, intento HTTP 403 y estado `MANUAL_REVIEW_REQUIRED`). No autoriza GET/POST fiscales, nuevas facturas, correo real ni actualización de Docker.
 
 ## Evidencia y método
@@ -14,17 +16,25 @@ Esta especificación es de lectura, pruebas sintéticas descartables y diseño. 
 - Código actual Billing: adaptador Hacienda, OAuth, controladores v1/v2 y workers. Inventori: `billing-api-client.service.js`, `fiscal-billing-worker.service.js`, servicios de artefactos. Inventori fue consultado en solo lectura; su worktree contiene cambios ajenos.
 - Docker fue inventariado mediante `ps` e `inspect` sin leer valores secretos. Se inspeccionaron solo flags y URLs permitidos; ninguna base persistente fue escrita.
 - F4-S unitario con red simulada: 396/396. Contratos del cliente Inventori: 37/37. E2E en PostgreSQL `postgres:15-alpine` con datos/certificado sintéticos, 32 migraciones en contenedor etiquetado y descartado: 30/30, tres suites. Véase `test-plan.md` para límites.
+- Lectura agregada de ambas bases: 25/32 migraciones aplicadas; 24 nombres compartidos, 19 checksums distintos por saltos de línea y 24/24 SQL equivalentes tras normalización; secuencias independientes. Suite W3 NC/ND: 26/26 en PostgreSQL descartable. Véanse `installation-reconciliation.md` y `capability-preservation.md`.
+
+## SDD ampliado
+
+- `f4s-spec09-communication-matrix.md`: OAuth, XML, URL, headers, sobre, 202, GET, estados, persistencia y correo.
+- `capability-preservation.md`: nivel de prueba de FE, NC, ND, referencias, puntos, CABYS, exención/exoneración, consumidores y entrega.
+- `installation-reconciliation.md`: inventario y diferencias de migraciones, documentos, secretos y secuencias sin exponer datos.
+- `e2e-fiscal-acceptance.md`: T1–T4 continuas simuladas y criterio separado de prueba real STAG.
 
 ## Gates
 
 | Gate | Estado | Fundamento |
 | --- | --- | --- |
 | `HISTORICAL_FLOW_RECONSTRUCTED` | PASS | Commit, pipeline y aceptación fiscal real documentados; origen Inventori y correo quedan explícitamente sin probar. |
-| `CURRENT_ARCHITECTURE_AUDITED` | PARTIAL | Dos Billing y conexiones confirmados; SHA del código en la imagen histórica y ledger detallado de ambas bases requieren inventario forense posterior. |
+| `CURRENT_ARCHITECTURE_AUDITED` | PARTIAL | Dos Billing, conteos y ledgers comparados; falta SHA exacto de fuente histórica y semántica de una migración aplicada ausente de su imagen. |
 | `CREDENTIAL_REQUIREMENTS_VALIDATED` | PASS | La contraseña extra pertenece solo al script de reenvío manual; se separan usuario Inventori, M2M, P12, OAuth, clave maestra y SMTP. |
 | `REGRESSIONS_IDENTIFIED` | PARTIAL | Endpoint anterior de SPEC-09 causó 403 en gateway; el endpoint se corrigió, pero no hay recepción actual confirmada. |
-| `HISTORICAL_FLOW_REPRODUCED` | PARTIAL | Suites sintéticas de Billing cubren XML/firma, 202/GET, persistencia y entrega por separado; falta prueba continua desde Inventori. |
+| `HISTORICAL_FLOW_REPRODUCED` | PARTIAL | Suites sintéticas de Billing e Inventori cubren componentes; faltan T1/T2 continuas y entrega del mismo documento. |
 | `TARGET_ARCHITECTURE_DEFINED` | PASS | Contratos, custodias y convergencia por fases descritos. |
-| `SPEC10_READY_FOR_IMPLEMENTATION` | BLOCKED | Falta decidir fuente de datos histórica por empresa, reconciliar bases/almacenes/consecutivos y aprobar contrato único de emisión v1/v2. |
+| `SPEC10_READY_FOR_IMPLEMENTATION` | BLOCKED | Falta definir la autoridad de secuencia y conservación histórica, reconciliar almacenes y probar T1/T2; la entidad fiscal única no es el bloqueo. |
 
 No confundir `READY_FOR_IMPLEMENTATION` con autorización para instalar, emitir o conectar con Hacienda.

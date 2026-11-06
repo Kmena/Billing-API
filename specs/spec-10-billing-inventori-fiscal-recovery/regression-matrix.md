@@ -13,8 +13,10 @@ F4-S = commit `04e7f1e`; Billing histórico = imagen `a4a02cbc…` usada por Inv
 | Estados | 202→`POST_OUTCOME_UNKNOWN`→GET→`ACCEPTED` | Inventori observa estado Billing | Factura SPEC-09 queda `MANUAL_REVIEW_REQUIRED` tras POST 403 | Correcto no inferir aceptación. El estado remoto sigue desconocido. |
 | Reintento | Ambigüedad requiere conciliación antes de repetir | Worker conserva documento e idempotencia | Script manual excepcional añadió contraseña Billing | Cambio intencional de control, pero **acoplamiento operativo innecesario** si se exige para facturación ordinaria. No afecta primer POST. |
 | M2M | API key v1 | Inventori v1 | Afiliaciones v2 con scopes/empresa/ambiente | Cambio intencional compatible si v1 permanece intacto. |
-| Secretos | Billing custodio | Almacén histórico separado | Almacén cifrado SPEC-09 separado, master key distinta/no comparada | Duplicación de despliegue; migración de secretos no demostrada. |
+| Secretos | Billing custodio | Almacén histórico separado | Almacén cifrado SPEC-09 separado; claves maestras no comparadas | Una huella de certificado activo coincide, pero la migración de secretos no está demostrada. |
 | PDF/XML/correo | Entrega real del documento F4-S diferida | Inventori ofrece proxy de artefactos y solicitud de reenvío | SMTP protegido disponible, `EMAIL_USE_REAL=false` | Capacidad de código, no evidencia de entrega actual. |
 | Recuperación | Persistencia y GET de estado | Intención/reconciliación en Inventori | Worker/guardas v2 y almacén durable | Mejoras compatibles; falta ensayo integral intersistemas. |
 
 **Hipótesis pendiente:** el POST SPEC-09 desde el host corregido podría funcionar como F4-S, pero no hay prueba y SPEC-10 prohíbe solicitarla. La factura existente mantiene `MANUAL_REVIEW_REQUIRED`; `RETRY_SAFE=NO`. La autenticación administrativa fallida en el procedimiento `f517eed` no es causa del 403 inicial ni evidencia de un nuevo rechazo de Hacienda.
+
+El desglose paso a paso está en `f4s-spec09-communication-matrix.md`. El delta de código F4-S→SPEC-09 añade validación estricta de OAuth y recuperación periódica/singleton de jobs; el adaptador de recepción conserva URL builder, sobre y headers. En la instalación hay 19 checksums de migraciones compartidas distintos por CRLF, pero los 24 SQL compartidos son iguales tras normalización; véase `installation-reconciliation.md`.
