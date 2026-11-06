@@ -107,8 +107,12 @@ describe('W2-B synthetic FE projection (unregistered)', () => {
     sinpe.paymentMethods[0].code = '06';
     const result = projectW2BInvoiceLab(sinpe, origin);
     expect(result.intent.paymentMethods[0].code).toBe('06');
-    const xml = serializer.serialize({ ...createFiscalXmlSnapshot(), paymentMethod: '06',
-      lines: result.lines, totals: result.totals });
+    const xml = serializer.serialize({
+      ...createFiscalXmlSnapshot(),
+      paymentMethod: '06',
+      lines: result.lines,
+      totals: result.totals,
+    });
     const signed = await signer.sign(xml.xml, signingMaterial.certificate);
     expect(validator.validate({ ...xml, xml: signed }).isValid).toBe(true);
   });
