@@ -1,5 +1,7 @@
 # SPEC-10 — cierre técnico de laboratorio y límites del corte
 
+Corrección posterior de evidencia: la investigación real documentada en `spec10-real-sequence-archive-reconciliation-20261106.md` encontró XML firmados y archivos PDF de los números 1–4 en el almacén, aunque sus filas SQL siguen ausentes. Los PDF 1–5 no superan `pdfinfo`; el número 1 sí conserva una respuesta local de aceptación. Además, la instalación SPEC-09 usa el mismo consecutivo 1 para el mismo emisor y punto. Las afirmaciones preliminares de este informe sobre artefactos ausentes quedan sustituidas por ese informe.
+
 Fecha: 2026-11-06. Base Billing `4b3c61c82b5fb2915979e76a8a2aca0295ae50f2`; base Afiliaciones `409b2397105f2073ab3a61166076ffb91cfb0ff3`. Ramas aisladas: `codex/spec10-final-technical-closure` y `codex/spec10-v2-auto-package`. No se actualizaron contenedores, bases ni contadores persistentes. Hacienda y SMTP no recibieron solicitudes.
 
 ## Consecutivos históricos
