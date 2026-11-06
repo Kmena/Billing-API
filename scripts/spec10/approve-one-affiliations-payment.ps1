@@ -1,10 +1,14 @@
-param([string] $CaseDirectory = 'D:\SPEC10-OneInvoice-20261106')
+param(
+  [string] $CaseDirectory = 'D:\SPEC10-OneInvoice-20261106',
+  [switch] $PreflightOnly
+)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $base = 'http://127.0.0.1:3081'
 $companyId = '136b2e9a-7bc4-4a68-8598-33a8b6daef9a'
 $approverEmail = 'spec09.aprobador.lab@example.test'
+$phase = 'START'
 
 function Fail([string] $Code) { throw $Code }
 function Sql([string] $Container, [string] $User, [string] $Database, [string] $Query) {
@@ -35,6 +39,7 @@ function Call([string] $Method, [string] $Path, $Body, $Identity) {
 }
 
 try {
+  $phase = 'CASE'
   $recordPath = Join-Path $CaseDirectory 'case.json'
   if (-not (Test-Path -LiteralPath $recordPath)) { Fail 'SPEC10_CASE_MISSING' }
   $record = Get-Content -LiteralPath $recordPath -Raw | ConvertFrom-Json
@@ -46,6 +51,7 @@ try {
   $historicWorker = (docker inspect billing-worker | ConvertFrom-Json)[0]
   if ($api.State.Health.Status -ne 'healthy' -or $billing.State.Health.Status -ne 'healthy' -or
       $historicApi.State.Running -or $historicWorker.State.Running) { Fail 'SPEC10_SERVICE_PREFLIGHT_FAILED' }
+  $phase = 'FLAGS'
   $apiFlags = @{}; foreach ($entry in $api.Config.Env) { $parts = $entry.Split('=', 2); $apiFlags[$parts[0]] = $parts[1] }
   $billingFlags = @{}; foreach ($entry in $billing.Config.Env) { $parts = $entry.Split('=', 2); $billingFlags[$parts[0]] = $parts[1] }
   if ($apiFlags['BILLING_MEMBERSHIP_STAG_ENABLED'] -ne 'true' -or $apiFlags['BILLING_ENABLED'] -ne 'false' -or
@@ -57,10 +63,13 @@ try {
   $billingSql = "SELECT last_assigned||'/'||next_value FROM fiscal_sequences WHERE environment='SANDBOX' AND branch_code='001' AND terminal_code='00001' AND document_type='INVOICE'; SELECT count(*) FROM fiscal_documents; SELECT count(*) FROM fiscal_submissions WHERE status NOT IN ('ACCEPTED','REJECTED','MANUAL_REVIEW_REQUIRED','SUPERSEDED');"
   $billingRows = @((Sql 'spec09-billing-postgres-1' 'billing_sandbox' 'billing_sandbox' $billingSql) -split "`n")
   if ($billingRows.Count -ne 3 -or $billingRows[0] -ne '7/8' -or $billingRows[1] -ne '1' -or $billingRows[2] -ne '0') { Fail 'SPEC10_FISCAL_PREFLIGHT_FAILED' }
+  $phase = 'PAYMENT'
   $paymentSql = "SELECT status||'|'||amount FROM `"Payment`" WHERE id='$($record.paymentId)'; SELECT count(*) FROM `"FiscalOutbox`" WHERE state IN ('PENDING','RETRY','SENDING','AWAITING_HACIENDA');"
   $paymentRows = @((Sql 'aflilientions-postgres-1' 'afiliaciones' 'afiliaciones' $paymentSql) -split "`n")
   if ($paymentRows.Count -ne 2 -or $paymentRows[0] -ne 'PENDING_APPROVAL|113.00' -or $paymentRows[1] -ne '0') { Fail 'SPEC10_PAYMENT_PREFLIGHT_FAILED' }
+  if ($PreflightOnly) { Write-Output 'SPEC10_APPROVAL_PREFLIGHT_PASS'; return }
 
+  $phase = 'LOGIN'
   $password = Hidden 'Contraseña del aprobador SPEC-09 (oculta)'
   $session = [Microsoft.PowerShell.Commands.WebRequestSession]::new()
   $loginBody = @{ companyId = $companyId; email = $approverEmail; password = $password } | ConvertTo-Json -Compress
@@ -73,6 +82,7 @@ try {
   if ($login.user.companyId -ne $companyId -or -not $login.csrfToken -or
       $login.user.permissions.Count -ne 3 -or (Compare-Object $required $login.user.permissions)) { Fail 'SPEC10_APPROVER_SCOPE_FAILED' }
   $identity = @{ session = $session; csrf = [string]$login.csrfToken }
+  $phase = 'READ_PAYMENT'
   $pending = Call 'GET' "/api/payments/$($record.paymentId)" $null $identity
   if ($pending.status -ne 200 -or $pending.data.status -ne 'PENDING_APPROVAL' -or
       $pending.data.clientId -ne $record.clientId -or $pending.data.accountId -ne $record.accountId) { Fail 'SPEC10_PAYMENT_VIEW_FAILED' }
@@ -80,6 +90,7 @@ try {
   if ($allocation.Count -ne 1) { Fail 'SPEC10_PAYMENT_ALLOCATION_MISMATCH' }
   $receipt = Call 'GET' "/api/payments/$($record.paymentId)/evidence" $null $identity
   if ($receipt.status -ne 200) { Fail 'SPEC10_EVIDENCE_VIEW_FAILED' }
+  $phase = 'APPROVAL'
   $approval = Call 'POST' "/api/payments/$($record.paymentId)/approve" @{
     fiscalLines = @(@{ allocationId = $allocation[0].id; base = '100.00'; tax = '13.00' })
   } $identity
@@ -90,7 +101,7 @@ try {
   Write-Output "SPEC10_PAYMENT_APPROVED_FISCAL_PENDING payment=$($record.paymentId)"
 } catch {
   $code = $_.Exception.Message
-  if ($code -notmatch '^SPEC10_[A-Z_]+$') { $code = 'SPEC10_APPROVAL_UNEXPECTED_FAILURE' }
+  if ($code -notmatch '^SPEC10_[A-Z_]+$') { $code = "SPEC10_APPROVAL_FAILED_$phase" }
   Write-Error $code
   exit 1
 } finally { $password = $null }
