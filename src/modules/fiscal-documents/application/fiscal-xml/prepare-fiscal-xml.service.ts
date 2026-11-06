@@ -4,6 +4,7 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  OnModuleDestroy,
   Optional,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -30,7 +31,13 @@ import { EnsureInitialFiscalPackageService } from '../delivery/ensure-initial-fi
 import { FiscalArtifactIndexService } from '../artifacts/fiscal-artifact-index.service';
 
 @Injectable()
-export class PrepareFiscalXmlService {
+export class PrepareFiscalXmlService implements OnModuleDestroy {
+  private readonly pendingInitialDeliveries = new Set<Promise<void>>();
+
+  async onModuleDestroy(): Promise<void> {
+    await Promise.allSettled([...this.pendingInitialDeliveries]);
+  }
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
@@ -277,17 +284,21 @@ export class PrepareFiscalXmlService {
       // F4 integration hook (DEC-011): trigger INITIAL_DOCUMENT delivery after READY_TO_SUBMIT
       // INVARIANT: Does NOT modify FiscalDocument.status. Delivery is independent.
       if (enableInitialDelivery && this.ensureInitialDelivery) {
-        setImmediate(async () => {
-          try {
-            await this.ensureInitialDelivery!.ensure({
+        const pending = new Promise<void>((resolve) => {
+          setImmediate(() => {
+            void this.ensureInitialDelivery!.ensure({
               tenantId: document.tenantId,
               companyId: document.companyId,
               fiscalDocumentId: document.id,
-            });
-          } catch {
-            // Hook failure must NOT affect fiscal processing — startup recovery will compensate
-          }
+            })
+              .catch(() => {
+                // The durable recovery path owns a failed independent delivery.
+              })
+              .finally(resolve);
+          });
         });
+        this.pendingInitialDeliveries.add(pending);
+        void pending.then(() => this.pendingInitialDeliveries.delete(pending));
       }
 
       return this.toResult(document.id, 'READY_TO_SUBMIT', completed);

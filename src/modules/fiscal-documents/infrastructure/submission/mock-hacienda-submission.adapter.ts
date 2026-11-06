@@ -196,7 +196,8 @@ export class MockHaciendaSubmissionAdapter implements HaciendaSubmissionPort {
     providerStatus: 'aceptado' | 'rechazado',
     clave: string,
   ): HaciendaSubmissionResult {
-    const responseXml = `<MensajeHacienda><Clave>${clave}</Clave><Estado>${providerStatus}</Estado></MensajeHacienda>`;
+    const mensaje = kind === 'ACCEPTED' ? '1' : '3';
+    const responseXml = `<MensajeHacienda xmlns="https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/mensajeHacienda"><Clave>${clave}</Clave><Mensaje>${mensaje}</Mensaje><Estado>${providerStatus}</Estado></MensajeHacienda>`;
 
     return {
       kind,

@@ -1,5 +1,7 @@
 # SPEC-10 — cierre de autoridad y preparación de implementación
 
+Actualización: el ensayo posterior de contador compartido v1/v2, la lectura de bytes del archivo histórico y el paquete PDF/XML/respuesta están en `spec10-unified-closure-evidence.md`. Los controles de corte persistente y automatización v2 siguen pendientes; el estado global continúa `NO`.
+
 Fecha: 2026-11-06. Ramas de laboratorio: Billing `codex/spec10-authority-reconciliation`; Afiliaciones `codex/spec10-affiliations-e2e`. No se instalaron imágenes, no se migraron bases persistentes, no se contactó Hacienda y no se usaron secretos reales. Este informe complementa `authority-sequence-reconciliation.md` y `e2e-fiscal-acceptance.md`.
 
 Tras el apagado del equipo, se comprobó de nuevo que el Billing histórico arrancó `healthy`, mientras que los contenedores persistentes SPEC-09 permanecían detenidos. No se iniciaron ni alteraron. Se repitieron en PostgreSQL descartable `fiscal-submission-continuity` (15/15), el recorrido Inventori (1/1) y el recorrido Afiliaciones (2/2); el `typecheck` de ambas API, ESLint de los archivos Billing modificados y `npm run lint` de Afiliaciones pasaron. Esto valida la candidata de laboratorio, no la salud actual de la instalación SPEC-09 detenida.

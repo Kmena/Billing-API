@@ -31,10 +31,13 @@ import {
 import { createGuardedTestPrisma } from '../../helpers/guarded-test-prisma';
 import { installGuardedTestDatabaseEnvironment } from '../../helpers/test-database-safety';
 import {
+  authorizeApiKeyForCompany,
   configureDefaultFiscalSetup,
   configureValidCompanyFiscalProfile,
   createEnabledHaciendaConnection,
+  createFiscalApiKey,
   createFiscalTenantFixture,
+  fiscalInvoicePayload,
   resetFiscalE2eData,
   type FiscalE2eContext,
 } from '../../helpers/fiscal-e2e-helpers';
@@ -863,6 +866,55 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .get(`${endpoint()}/${randomUUID()}/submission`)
       .set('X-API-Key', key.secret)
       .expect(404);
+  });
+
+  it('shares one transactional sequence between Inventori v1 and Afiliaciones v2', async () => {
+    const inventoriKey = await createFiscalApiKey(prisma, tenantId, ['invoices:write']);
+    await authorizeApiKeyForCompany(prisma, inventoriKey.id, companyId);
+    const before = await prisma.fiscalSequence.findFirstOrThrow({
+      where: { tenantId, companyId, environment: 'SANDBOX', documentType: 'INVOICE' },
+    });
+    const seed = randomUUID();
+    const v1 = (index: number) =>
+      request(app.getHttpServer())
+        .post('/api/v1/invoices')
+        .set('X-API-Key', inventoriKey.secret)
+        .set('Idempotency-Key', `spec10-inventori-${seed}-${index}`)
+        .send(fiscalInvoicePayload(companyId));
+    const v2 = (index: number) =>
+      post(
+        key.secret,
+        `spec10-affiliations-${seed}-${index}`,
+        invoiceIntent(`spec10-affiliations-${seed}-${index}`),
+      );
+    const results = await Promise.all([v1(1), v2(1), v1(2), v2(2)]);
+    for (const result of results) expect([200, 201, 202]).toContain(result.status);
+    const finalV2 = await Promise.all([v2(1), v2(2)]);
+    for (const result of finalV2) expect(result.body.state).toBe('COMMITTED');
+    const ids = [
+      results[0].body.id,
+      finalV2[0].body.documentId,
+      results[2].body.id,
+      finalV2[1].body.documentId,
+    ] as string[];
+    expect(new Set(ids).size).toBe(4);
+    const docs = await prisma.fiscalDocument.findMany({
+      where: { id: { in: ids } },
+      select: { sequenceValue: true, consecutive: true, clave: true },
+    });
+    expect(docs).toHaveLength(4);
+    expect(docs.map((doc) => doc.sequenceValue).sort((a, b) => Number(a - b))).toEqual([
+      before.nextValue,
+      before.nextValue + 1n,
+      before.nextValue + 2n,
+      before.nextValue + 3n,
+    ]);
+    expect(new Set(docs.map((doc) => doc.consecutive)).size).toBe(4);
+    expect(new Set(docs.map((doc) => doc.clave)).size).toBe(4);
+    const replay = await v1(1);
+    expect(replay.body.id).toBe(ids[0]);
+    const after = await prisma.fiscalSequence.findUniqueOrThrow({ where: { id: before.id } });
+    expect(after.nextValue).toBe(before.nextValue + 4n);
   });
 
   it('enforces scope, origin isolation, rotation, revocation and v1 separation', async () => {
