@@ -1,0 +1,18 @@
+# Credenciales y autorizaciones
+
+Nunca copiar valores entre instalaciones ni incluirlos en evidencia. Esta tabla describe **funciones**, no contenido de secretos.
+
+| Credencial | Custodio / uso | F4-S e Inventori | SPEC-09 y decisión |
+| --- | --- | --- | --- |
+| Inicio de sesión Inventori | Inventori, usuario humano para operar su interfaz/API | Necesaria para la acción de usuario; no se envía a Billing ni Hacienda. | Mantener identidad y permisos de cada consumidor; no usarla como OAuth fiscal. |
+| Clave API v1 `X-API-Key` | Billing emite y valida; Inventori guarda referencia y resuelve en backend | Contrato normal de crear/preparar/enviar/consultar, con empresa y scopes. | Conservar compatibilidad durante transición y rotar bajo procedimiento; no sustituir silenciosamente por la contraseña del usuario. |
+| Clave M2M v2 | Billing emite y asocia por empresa/ambiente; Afiliaciones la custodia cifrada en backend | No requerida por F4-S. | Es requisito del contrato v2 de Afiliaciones; la clave de onboarding no se debe autoasociar ni otorgarse emisión por implicación. Scopes de emisión separados. |
+| Certificado P12 y PIN | Billing, firma XAdES; referencias y secreto protegido | F4-S requirió material de firma válido. | Dos almacenes instalados, preservar originales y sus versiones. El PIN no se pide al usuario por cada factura. |
+| Usuario/contraseña de Hacienda | Billing, obtiene token OAuth del IDP `rut-stag`/`api-stag` cuando hace falta | Sí, para auth STAG; token efímero no es credencial de Inventori. | Se guardan en el almacén cifrado. OAuth 200 demuestra autenticación, no aceptación de factura. |
+| Clave maestra cifrado | Operación Billing, abre almacén de secretos | Dependencia del proveedor de secretos de cada instalación. | Recuperación DPAPI/segundo sobre de SPEC-09 no implica que el Billing histórico use la misma clave. No unificar ni rotar sin inventario y restore probado. |
+| SMTP | Billing entrega paquetes; `EMAIL_USE_REAL` controla transporte | F4-S no probó entrega del documento aceptado; existe adaptador SMTP y mock. | SPEC-09 guarda `SMTP_AUTH` cifrado; hoy correo real apagado. No tomar dirección de Inventori como prueba de entrega. |
+| Contraseña administrativa del script de reenvío | Usuario `TENANT_ADMIN` de Billing, verificada con Argon2 desde el script local `f517eed` | **No pertenecía** al camino ordinario F4-S ni al cliente API Inventori. | Control adicional de una operación manual excepcional. El fallo de autenticación del intento anterior ocurrió antes de OAuth/POST. No convertirla en requisito de emisión normal. Diseñar recuperación administrativa auditada con identidad existente y doble control, sin crear una contraseña nueva automáticamente. |
+
+La falta de una contraseña humana de Billing no explica el primer HTTP 403: el primer POST de SPEC-09 se alcanzó antes de existir el script manual. Tampoco debe confundirse `EMAIL_USE_REAL=false` con autorización fiscal. El flujo operativo legítimo usa identidad del consumidor + scopes/asociación; Billing obtiene sus credenciales fiscales protegidas internamente. Toda elevación para reintento manual necesita un mecanismo de autorización explícito y recuperable, con auditoría, ajeno a la emisión ordinaria.
+
+Verificación de código: `src/modules/hacienda-connection/infrastructure/auth/hacienda-oidc-auth.adapter.ts`, `src/modules/fiscal-documents/infrastructure/submission/hacienda-recepcion.adapter.ts`, `src/modules/fiscal-documents/infrastructure/email/create-smtp-email-delivery.adapter.ts`, `src/modules/fiscal-consumers/domain/consumer-v2.policy.ts`, Inventori `src/services/billing-api-client.service.js`; script excepcional en `git show f517eed:scripts/spec09-manual-stag-runner.cjs`.
