@@ -1,6 +1,6 @@
 services:
   billing-spec09-sandbox:
-    image: billing-spec10:single-stag-8a7a38a
+    image: billing-spec10:single-stag-c3890d7
     environment:
       USE_REAL_HACIENDA: "true"
       FISCAL_WORKER_ENABLE_IN_TESTS: "true"
