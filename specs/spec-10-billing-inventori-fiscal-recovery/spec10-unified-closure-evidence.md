@@ -1,5 +1,7 @@
 # SPEC-10 — contador compartido, archivo histórico y paquete fiscal
 
+Actualización posterior: `spec10-final-technical-closure-20261106.md` identificó en la auditoría histórica creación y firma de los consecutivos 1–4, cuyos documentos ya no figuran en la tabla actual. Los tres FE de la tabla siguiente son los documentos **presentes y verificables**, no el inventario completo de números consumidos.
+
 Fecha: 2026-11-06. Ramas aisladas: `codex/spec10-unified-sequence-and-delivery` (Billing) y `codex/spec10-complete-affiliations-delivery` (Afiliaciones). Todas las escrituras de prueba ocurrieron en PostgreSQL descartable; Hacienda y correo fueron simulados. No se inició ni modificó el Billing SPEC-09 persistente.
 
 ## Contador único

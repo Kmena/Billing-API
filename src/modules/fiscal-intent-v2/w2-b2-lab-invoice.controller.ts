@@ -23,6 +23,7 @@ import { W2AStructuralValidationError } from './w2-a-structural-intent';
 import { W2BLabProjectionError } from './w2-b-lab-projection';
 import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
 import { W2B2LabSubmissionService } from './w2-b2-lab-submission.service';
+import { W2B2LabAcceptedPackageService } from './w2-b2-lab-accepted-package.service';
 
 /** Registered only by W2B2FiscalLabModule in disposable test applications. */
 @UseGuards(ConsumerV2Guard)
@@ -31,6 +32,7 @@ export class W2B2LabInvoiceController {
   constructor(
     private readonly invoices: W2B2LabInvoiceService,
     private readonly submissions: W2B2LabSubmissionService,
+    private readonly acceptedPackages: W2B2LabAcceptedPackageService,
   ) {}
 
   @Post()
@@ -122,5 +124,19 @@ export class W2B2LabInvoiceController {
   ) {
     response.setHeader('Cache-Control', 'no-store');
     return this.submissions.status(request.consumerV2, documentId);
+  }
+
+  @Post(':documentId/accepted-package')
+  @ConsumerV2RequiredScope('fiscal-v2:deliveries:request')
+  async requestAcceptedPackage(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.acceptedPackages.request(request.consumerV2, documentId);
+    response
+      .status(result.status === 'DELIVERED' ? 200 : 202)
+      .setHeader('Cache-Control', 'no-store');
+    return result;
   }
 }

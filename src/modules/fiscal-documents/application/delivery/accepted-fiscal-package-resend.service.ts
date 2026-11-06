@@ -137,6 +137,16 @@ export class AcceptedFiscalPackageResendService {
     return result;
   }
 
+  /** Internal preflight for an association-authorized v2 request. Never exposed over HTTP. */
+  preflightForAuthorizedRequest(input: {
+    tenantId: string;
+    companyId: string;
+    fiscalDocumentId: string;
+    environment: 'SANDBOX' | 'PRODUCTION';
+  }): Promise<AcceptedPackagePreflight> {
+    return this.preflight(input);
+  }
+
   private async preflight(input: {
     tenantId: string;
     companyId: string;

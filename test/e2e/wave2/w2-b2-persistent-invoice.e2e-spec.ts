@@ -2,6 +2,9 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import { createHash, randomUUID } from 'crypto';
+import { cp, mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import * as request from 'supertest';
 import { AppModule } from '../../../src/app.module';
 import { GlobalExceptionFilter } from '../../../src/api/filters/global-exception.filter';
@@ -23,6 +26,7 @@ import { ConsumerV2LabService } from '../../../src/modules/fiscal-consumers/appl
 import { createTestSigningMaterial } from '../../../src/modules/fiscal-documents/domain/fiscal-xml/__tests__/fiscal-xml-test-fixtures';
 import { W2B2FiscalLabModule } from '../../../src/modules/fiscal-intent-v2/w2-b2-fiscal-lab.module';
 import { W2B2LabInvoiceService } from '../../../src/modules/fiscal-intent-v2/w2-b2-lab-invoice.service';
+import { FiscalSubmissionStateService } from '../../../src/modules/fiscal-documents/application/submission/fiscal-submission-state.service';
 import {
   projectW2BInvoiceLab,
   projectW2BTicketLab,
@@ -48,6 +52,7 @@ const scopes = [
   'fiscal-v2:tickets:create',
   'fiscal-v2:operations:read',
   'fiscal-v2:invoices:submit',
+  'fiscal-v2:deliveries:request',
 ] as const;
 
 function invoiceIntent(externalOperationId: string, description = 'Servicio sintético') {
@@ -915,6 +920,160 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     expect(replay.body.id).toBe(ids[0]);
     const after = await prisma.fiscalSequence.findUniqueOrThrow({ where: { id: before.id } });
     expect(after.nextValue).toBe(before.nextValue + 4n);
+  });
+
+  it('requests one complete accepted package through the association-bound v2 route', async () => {
+    const operationId = `spec10-package-${randomUUID()}`;
+    const created = await post(key.secret, operationId, invoiceIntent(operationId)).expect(201);
+    const documentId = created.body.documentId as string;
+    const url = `${endpoint()}/${documentId}/accepted-package`;
+    await request(app.getHttpServer()).post(url).set('X-API-Key', key.secret).expect(409);
+    const submitted = await request(app.getHttpServer())
+      .post(`${endpoint()}/${documentId}/submit`)
+      .set('X-API-Key', key.secret)
+      .expect(202);
+    const state = app.get(FiscalSubmissionStateService);
+    // The worker owns QUEUED -> SUBMITTING. Simulate that transition before its provider callbacks.
+    await prisma.fiscalSubmission.update({
+      where: { id: submitted.body.submissionId as string },
+      data: { status: 'SUBMITTING' },
+    });
+    await state.applyProviderResult(submitted.body.submissionId as string, {
+      kind: 'ACKNOWLEDGED',
+      nextStatus: 'ACKNOWLEDGED',
+      httpStatus: 202,
+    });
+    await state.applyProviderResult(submitted.body.submissionId as string, {
+      kind: 'ACCEPTED',
+      nextStatus: 'ACCEPTED',
+      providerStatus: 'aceptado',
+      responseArtifact: {
+        content: Buffer.from(
+          '<MensajeHacienda xmlns="https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/mensajeHacienda"><Mensaje>1</Mensaje></MensajeHacienda>',
+        ),
+        contentType: 'application/xml',
+      },
+    });
+    const [first, concurrent] = await Promise.all([
+      request(app.getHttpServer()).post(url).set('X-API-Key', key.secret),
+      request(app.getHttpServer()).post(url).set('X-API-Key', key.secret),
+    ]);
+    if (![200, 202].includes(first.status) || ![200, 202].includes(concurrent.status)) {
+      throw new Error(
+        `ACCEPTED_PACKAGE_CONCURRENT_${first.status}_${String(first.body?.error?.code ?? first.body?.code ?? 'UNKNOWN')}_${concurrent.status}_${String(concurrent.body?.error?.code ?? concurrent.body?.code ?? 'UNKNOWN')}`,
+      );
+    }
+    expect([200, 202]).toContain(first.status);
+    expect([200, 202]).toContain(concurrent.status);
+    expect(first.body.deliveryId).toBe(concurrent.body.deliveryId);
+    const delivery = await prisma.documentDelivery.findMany({
+      where: {
+        fiscalDocumentId: documentId,
+        kind: 'ACCEPTED_FISCAL_PACKAGE',
+      },
+    });
+    expect(delivery).toHaveLength(1);
+    expect(
+      await prisma.fiscalArtifact.count({ where: { fiscalDocumentId: documentId, type: 'PDF' } }),
+    ).toBe(1);
+    const replay = await request(app.getHttpServer()).post(url).set('X-API-Key', key.secret);
+    expect([200, 202]).toContain(replay.status);
+    expect(replay.body.deliveryId).toBe(first.body.deliveryId);
+  });
+
+  it('restores a source-qualified historical archive and serves verified evidence read-only', async () => {
+    const sourceId = 'inventori-history';
+    const sourceRoot = await mkdtemp(join(tmpdir(), 'spec10-archive-source-'));
+    const restoredRoot = await mkdtemp(join(tmpdir(), 'spec10-archive-restored-'));
+    const invoiceId = randomUUID();
+    const creditId = randomUUID();
+    const debitId = randomUUID();
+    const documents = [
+      { id: invoiceId, type: 'INVOICE', sourceFiscalDocumentId: null },
+      { id: creditId, type: 'CREDIT_NOTE', sourceFiscalDocumentId: invoiceId },
+      { id: debitId, type: 'DEBIT_NOTE', sourceFiscalDocumentId: creditId },
+    ];
+    try {
+      for (const [index, doc] of documents.entries()) {
+        const directory = join(sourceRoot, sourceId, doc.id);
+        await mkdir(directory, { recursive: true });
+        const artifacts = [];
+        for (const type of ['SIGNED_XML', 'PDF', 'HACIENDA_RESPONSE_XML'] as const) {
+          const filename = `${type.toLowerCase()}.bin`;
+          const bytes = Buffer.from(`SPEC10_SYNTHETIC_${doc.type}_${type}_${doc.id}`);
+          await writeFile(join(directory, filename), bytes);
+          artifacts.push({
+            type,
+            filename,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+            sizeBytes: bytes.length,
+            contentType: type === 'PDF' ? 'application/pdf' : 'application/xml',
+          });
+        }
+        await writeFile(
+          join(directory, 'manifest.json'),
+          JSON.stringify({
+            sourceId,
+            documentId: doc.id,
+            tenantId,
+            companyId,
+            environment: 'SANDBOX',
+            type: doc.type,
+            status: 'ACCEPTED',
+            clave: `5060111260003101000001010000101000000000${String(index + 1).padStart(10, '0')}`,
+            consecutive: `0010000101000000000${index + 1}`,
+            sourceFiscalDocumentId: doc.sourceFiscalDocumentId,
+            artifacts,
+          }),
+        );
+      }
+      await cp(join(sourceRoot, sourceId), join(restoredRoot, sourceId), { recursive: true });
+      process.env.SPEC10_ARCHIVE_ROOT = restoredRoot;
+      for (const doc of documents) {
+        const url = `/api/v2/lab/companies/${companyId}/fiscal-documents/SANDBOX/historical/${sourceId}/${doc.id}`;
+        const metadata = await request(app.getHttpServer())
+          .get(url)
+          .set('X-API-Key', key.secret)
+          .expect(200);
+        expect(metadata.body.type).toBe(doc.type);
+        expect(metadata.body.sourceFiscalDocumentId).toBe(doc.sourceFiscalDocumentId);
+        expect(metadata.body).not.toHaveProperty('tenantId');
+        for (const type of ['SIGNED_XML', 'PDF', 'HACIENDA_RESPONSE_XML']) {
+          const artifact = await request(app.getHttpServer())
+            .get(`${url}/artifacts/${type}`)
+            .set('X-API-Key', key.secret)
+            .buffer(true)
+            .parse((response, callback) => {
+              const chunks: Buffer[] = [];
+              response.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+              response.on('end', () => callback(null, Buffer.concat(chunks)));
+            })
+            .expect(200);
+          expect(
+            createHash('sha256')
+              .update(artifact.body as Buffer)
+              .digest('hex'),
+          ).toBe(artifact.headers['x-content-sha256']);
+        }
+      }
+      const url = `/api/v2/lab/companies/${companyId}/fiscal-documents/SANDBOX/historical/${sourceId}/${invoiceId}`;
+      await request(app.getHttpServer())
+        .get(url.replace(companyId, randomUUID()))
+        .set('X-API-Key', key.secret)
+        .expect(404);
+      await writeFile(
+        join(restoredRoot, sourceId, invoiceId, 'pdf.bin'),
+        Buffer.from('TAMPERED_SYNTHETIC_PDF'),
+      );
+      await request(app.getHttpServer())
+        .get(`${url}/artifacts/PDF`)
+        .set('X-API-Key', key.secret)
+        .expect(422);
+    } finally {
+      delete process.env.SPEC10_ARCHIVE_ROOT;
+      await rm(sourceRoot, { recursive: true, force: true });
+      await rm(restoredRoot, { recursive: true, force: true });
+    }
   });
 
   it('enforces scope, origin isolation, rotation, revocation and v1 separation', async () => {

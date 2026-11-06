@@ -234,6 +234,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     SubmitFiscalDocumentService,
     FiscalArtifactService,
     DeliveryRequestService,
+    AcceptedFiscalPackageResendService,
   ],
 })
 export class FiscalDocumentsModule {}
