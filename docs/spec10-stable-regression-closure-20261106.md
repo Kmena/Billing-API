@@ -40,6 +40,16 @@ La suite NC/ND Wave 3 pasó 26/26 en tres corridas dirigidas sobre bases nuevas 
 
 No se contactó Hacienda, no se generaron facturas, no se enviaron correos, no se cambió Inventori ni Afiliaciones y no se modificaron las bases o volúmenes persistentes. La base auxiliar W5 y las bases Billing utilizadas fueron descartables.
 
+## Último gate de promoción (7 de noviembre de 2026)
+
+Desde `544e4c1434731cefdfa6a903a01a8ad13c914f15`, Wave 8 se ejecutó sola con PostgreSQL descartable, el cliente HTTP real de Inventori y captura de métricas en memoria. Salida 0; 32,86 s de pared; 1.054,73 MiB de pico en la suma de los procesos Node nuevos (no incluye PostgreSQL); timeout de 300 s no alcanzado; Jest 1/1 en 23,034 s. No hubo interrupción que diagnosticar en esa ejecución.
+
+La regresión integral posterior pasó 34/34 suites y 236/236 pruebas, incluida Wave 8 1/1, NC/ND 26/26, contratos M2M, entrega v2 y recuperación cifrada. `npm run test:safety:static` devolvió `TEST_SAFETY_STATIC_CHECK=PASS`; build, typecheck y lint pasaron. Estas pruebas se ejecutaron con bases Billing aisladas por suite y una base auxiliar Afiliaciones de 20 migraciones en `tmpfs`, retirada al concluir. No se contactó Hacienda ni se usó SMTP real.
+
+La interrupción de Wave 8 de la corrida anterior ocurrió antes de un resumen de Jest y su causa histórica no puede afirmarse con la salida disponible. La suite pasó dirigida y dentro de la regresión integral de este gate. El runner conserva el diagnóstico categórico agregado para una futura interrupción; no se relajaron expectativas ni se modificó código fiscal.
+
+Antes de la promoción, `origin/main` estaba en `fb64aa1ff31135b86985beeb95457350f3942815` y el `main` local en `b6c454f7d559c8f05eca173482f0ba56d7ba702a`. El único commit remoto no presente en la candidata era el merge `fb64aa1`; su árbol no introducía archivos distintos del ancestro común `cd1ad1da90db20f4cf3f4295b2546df619c9dcab`. Su historia debe integrarse sin modificar el árbol probado. El tag `billing-v1.0.0-stable` estaba libre. La promoción se registra después en Git por sus SHA finales.
+
 ## Reproducción segura
 
 1. Preparar la base W5 de Afiliaciones en PostgreSQL 16 descartable y configurar `AFILIACIONES_W5_ROOT`, `W5_TEST_DATABASE_URL` e `INVENTORI_BILLING_CLIENT_PATH` hacia copias de laboratorio. No apuntar a instalaciones persistentes.
