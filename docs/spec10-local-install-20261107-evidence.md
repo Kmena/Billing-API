@@ -36,6 +36,10 @@ Cinco GET M2M desde Afiliaciones devolvieron `ACCEPTED`, aceptación `2026-11-06
 
 Antes y después: Billing `2` documentos, `2` submissions, suma de intentos `2`, `2` entregas y `2` intentos de entrega; Afiliaciones `2` outbox y `2` referencias. Las cuatro descargas añadieron exactamente cuatro eventos de auditoría. El GET público sin sesión devolvió 401.
 
-## Verificación pendiente
+## Verificación visual y cierre
 
-Falta observar el panel y las descargas en una pestaña autenticada del usuario autorizado. El control de navegador disponible no pudo determinar con seguridad la URL de Brave, y la consulta de solo conteo confirmó que el aprobador aún no tenía una sesión vigente. La ruta API real con actor de base, la Web servida y las pruebas Web pasaron; **`FISCAL_STATUS_VISIBLE` en una sesión real y `SPEC10_AFFILIATIONS_FISCAL_UX_READY` permanecen pendientes** hasta esa comprobación. No afirmar PASS global con esta evidencia parcial.
+El usuario compartió una captura del detalle de Pagos en la sesión autenticada después del despliegue. Muestra «Facturación electrónica», pago aprobado, Hacienda `ACCEPTED`, ambiente STAG, consecutivo `00100001010000000008`, fecha de aceptación, correo `DELIVERED`, las tres huellas originales y los cuatro botones habilitados. El usuario confirmó además que la columna «Estado fiscal» ya aparece en la tabla. La captura se conservó fuera del repositorio en `D:\SPEC10-Install-20261106-2247\afiliaciones-fiscal-panel-20261107.png`, SHA-256 `200ee156999053755b5a8c12799af1c9e7f33a5f86e6191a6ae32e13362947f2`.
+
+La última comprobación de contadores mantuvo Billing en `2|2|2|2|2` (documentos, submissions, intentos de submission, entregas e intentos de entrega) y Afiliaciones en `2|2|4` (outbox, referencias y auditorías de las cuatro descargas verificadas). Billing y API siguen `healthy`; Web sigue en ejecución.
+
+Resultado: `BILLING_DOCUMENT_API_DEPLOYED=PASS`, `AFFILIATIONS_FISCAL_UX_DEPLOYED=PASS`, `FISCAL_STATUS_VISIBLE=PASS`, `PDF_DOWNLOAD=PASS`, `SIGNED_XML_DOWNLOAD=PASS`, `HACIENDA_RESPONSE_DOWNLOAD=PASS`, `FULL_PACKAGE_DOWNLOAD=PASS`, `TENANT_AUTHORIZATION=PASS`, `SPEC10_AFFILIATIONS_FISCAL_UX_READY=PASS`. Las descargas se comprobaron con GET binarios a la ruta Afiliaciones y huellas SHA-256; la captura prueba que las acciones están disponibles en la interfaz, sin registrar clics manuales en cada botón.
