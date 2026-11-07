@@ -44,8 +44,27 @@ for (const suite of suites) {
   const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
   if (result.status !== 0) {
     process.stderr.write(`E2E_ISOLATED_FAILED ${suite}\n`);
+    const failureKind = /Docker command failed:/i.test(output)
+      ? 'DOCKER_PROVISION_OR_CLEANUP'
+      : /Disposable PostgreSQL did not become stably ready/i.test(output)
+        ? 'POSTGRES_STARTUP'
+        : /Error: P\d{4}|Migration failed|prisma migrate/i.test(output) &&
+            !/All migrations have been successfully applied/i.test(output)
+          ? 'MIGRATION'
+          : /^FAIL /m.test(output)
+            ? 'JEST_ASSERTION'
+            : /^PASS /m.test(output)
+              ? 'POST_JEST_CLEANUP'
+              : 'PROCESS_OR_ENVIRONMENT';
+    process.stderr.write(
+      `E2E_ISOLATED_FAILURE_KIND ${failureKind} exit=${result.status ?? 'null'} signal=${result.signal ?? 'none'}\n`,
+    );
     for (const line of output.split(/\r?\n/)) {
-      if (/^FAIL |^  ●|^Test Suites:|^Tests:|^E2E_ISOLATED_/.test(line))
+      if (
+        /^FAIL |^  ●|^Test Suites:|^Tests:|^E2E_ISOLATED_|^\s*(?:Expected:|Received:|W3_EXPECTED_201_GOT_|at Object\.<anonymous>)/.test(
+          line,
+        )
+      )
         process.stderr.write(`${line}\n`);
     }
     if (result.error) process.stderr.write(`E2E_ISOLATED_PROCESS_ERROR ${result.error.name}\n`);

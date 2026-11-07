@@ -21,9 +21,24 @@ La prueba de recuperación llamaba `pg_isready` por socket Unix dentro del conte
 
 La entrega v2 ya tenía índice único, PDF único y reclamación atómica del trabajo de correo. Se añadió una aserción HTTP que observa el efecto final con el adaptador de correo capturado: dos solicitudes, un correo y tres adjuntos. El fallo anterior de dos HTTP 500 no se reprodujo al aislar la suite; los datos compartidos y el tiempo de ejecución variable del runner anterior son una explicación probable, no una causa de producto demostrada. `test:e2e:isolated` ejecuta cada suite contra una base y un almacén descartables nuevos para impedir interferencia entre suites. El runner original sigue disponible para pruebas focalizadas.
 
-## Bloqueo residual
+## Seguimiento desde `da88f6822da666e88adbab3306bce0099004674d` (7 de noviembre de 2026)
 
-La segunda corrida aislada tardó más de cinco minutos en Wave 3 y falló en dos escenarios de NC/ND que habían pasado en la primera corrida. Cada escenario volvió a pasar individualmente. La causa de esa variación no está demostrada. Conforme a la decisión del usuario, se difiere su investigación a la integración de NC/ND con Afiliaciones. La comprobación estática preexistente también requiere cierre antes de una promoción. No se cambia la lógica fiscal de NC/ND ni se promueve una versión estable con gates pendientes.
+La comprobación estática de CI Wave 2 identificaba una instancia directa de `PrismaClient` en la prueba de durabilidad de pg-boss. Se sustituyó por `createGuardedTestPrisma()`, que valida la base descartable y conserva el URL protegido para reiniciar la cola. `npm run test:safety:static` pasó, al igual que la prueba HTTP dirigida, typecheck, build y lint.
+
+La suite NC/ND Wave 3 pasó 26/26 en tres corridas dirigidas sobre bases nuevas y en dos corridas integrales completas. Los dos fallos intermitentes de la corrida anterior no volvieron a ocurrir. No hay evidencia suficiente para atribuirlos a una condición de carrera de producto, al validador XSD o a datos compartidos. Las dos pruebas complejas ahora conservan la exigencia HTTP 201 y emiten solo un código seguro de estado/error si reaparece el problema. El runner aislado muestra la categoría del fallo de aprovisionamiento o proceso sin copiar secretos. No se cambió la lógica ni la expectativa fiscal.
+
+| Control solicitado | Resultado actual | Evidencia |
+| --- | --- | --- |
+| `NC_ND_REGRESSION` | PASS observado, causa histórica pendiente | Tres corridas Wave 3 dirigidas 26/26; dos corridas integrales 26/26 dentro de 34/34. El fallo histórico no se reprodujo, así que no se afirma causa raíz corregida. |
+| `CI_WAVE2_STATIC` | PASS | `TEST_SAFETY_STATIC_CHECK=PASS`; prueba pg-boss dirigida 1/1. |
+| `FULL_REGRESSION` | NO REPRODUCIBLE AÚN | Dos corridas integrales 34/34 suites y 236/236 pruebas. Entre ellas, otra corrida se interrumpió en Wave 8 antes de cualquier resumen de Jest; la misma suite pasó dirigida y en ambas corridas completas. La salida antigua del runner no clasificaba esa interrupción. El runner ahora sí la clasifica si reaparece. No se cuentan dos PASS aislados como estabilidad mientras exista este fallo sin diagnóstico. |
+| Unidades | PASS | 126 suites y 1.402 pruebas aprobadas; 3 suites y 13 pruebas omitidas ya existentes. |
+| Build, typecheck, lint | PASS | `npm run build`, `npm run typecheck`, `npm run lint:check`. |
+| M2M v1/v2, entrega v2, recuperación cifrada | PASS en corridas completas | Incluidos en las dos regresiones integrales 34/34; la restauración cifrada y la entrega se ejecutaron sobre PostgreSQL descartable. |
+| `BILLING_MAIN_MERGE` | NO EJECUTADO | La interrupción Wave 8 y la causa NC/ND no demostrada impiden afirmar regresión reproducible. `main` permaneció en `b6c454f7d559c8f05eca173482f0ba56d7ba702a`. |
+| `BILLING_STABLE_TAG` | NO CREADO | `billing-v1.0.0-stable` sigue disponible; no se asignó a una revisión sin gates cerrados. |
+
+No se contactó Hacienda, no se generaron facturas, no se enviaron correos, no se cambió Inventori ni Afiliaciones y no se modificaron las bases o volúmenes persistentes. La base auxiliar W5 y las bases Billing utilizadas fueron descartables.
 
 ## Reproducción segura
 

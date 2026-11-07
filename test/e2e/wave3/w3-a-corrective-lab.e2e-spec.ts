@@ -119,6 +119,14 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       .set('X-API-Key', secret)
       .set('Idempotency-Key', key)
       .send(body as object);
+  const requireCreated = (response: Awaited<ReturnType<typeof post>>) => {
+    if (response.status !== 201) {
+      const value = String(response.body?.error?.code ?? response.body?.state ?? 'UNKNOWN');
+      const code = /^[A-Z0-9_]{1,80}$/.test(value) ? value : 'UNKNOWN';
+      throw new Error(`W3_EXPECTED_201_GOT_${response.status}_${code}`);
+    }
+    return response;
+  };
   const credit = (
     sourceDocumentId: string,
     mode: 'TOTAL' | 'PARTIAL' | 'REMAINING',
@@ -163,12 +171,13 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       .get(`${cancellationBase()}/${workflowId}${suffix}`)
       .set('X-API-Key', secret);
   async function acceptedInvoice(operation: string, tax: 'TAX' | 'EXEMPT' = 'TAX', mixed = false) {
-    const created = await request(app.getHttpServer())
-      .post(`${base()}/invoices`)
-      .set('X-API-Key', apiKey.secret)
-      .set('Idempotency-Key', operation)
-      .send(invoiceIntent(operation, tax, mixed))
-      .expect(201);
+    const created = requireCreated(
+      await request(app.getHttpServer())
+        .post(`${base()}/invoices`)
+        .set('X-API-Key', apiKey.secret)
+        .set('Idempotency-Key', operation)
+        .send(invoiceIntent(operation, tax, mixed)),
+    );
     // Synthetic Hacienda acceptance is fixture state in the disposable database only.
     await prisma.fiscalDocument.update({
       where: { id: created.body.documentId },
@@ -541,19 +550,18 @@ describe('W3-A/B synthetic corrective laboratory', () => {
 
   it('creates signed exempt NC and taxed/exempt ND', async () => {
     const exemptId = await acceptedInvoice('w3a-exempt-source', 'EXEMPT');
-    await post(
-      'credit-notes',
-      apiKey.secret,
-      'w3a-exempt-credit',
-      credit(exemptId, 'PARTIAL', '1'),
-    ).expect(201);
+    requireCreated(
+      await post(
+        'credit-notes',
+        apiKey.secret,
+        'w3a-exempt-credit',
+        credit(exemptId, 'PARTIAL', '1'),
+      ),
+    );
     const exemptDebitSource = await acceptedInvoice('w3b-exempt-debit-source', 'EXEMPT');
-    const exemptDebit = await post(
-      'debit-notes',
-      apiKey.secret,
-      'w3a-exempt-debit',
-      debit(exemptDebitSource, '100'),
-    ).expect(201);
+    const exemptDebit = requireCreated(
+      await post('debit-notes', apiKey.secret, 'w3a-exempt-debit', debit(exemptDebitSource, '100')),
+    );
     expect(
       (
         await prisma.fiscalDocument.findUniqueOrThrow({
@@ -562,26 +570,20 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       ).type,
     ).toBe('DEBIT_NOTE');
     const taxableId = await acceptedInvoice('w3a-debit-source');
-    await post('debit-notes', apiKey.secret, 'w3a-taxed-debit', debit(taxableId, '100')).expect(
-      201,
+    requireCreated(
+      await post('debit-notes', apiKey.secret, 'w3a-taxed-debit', debit(taxableId, '100')),
     );
     const exemptTotalId = await acceptedInvoice('w3a-exempt-total-source', 'EXEMPT');
-    await post(
-      'credit-notes',
-      apiKey.secret,
-      'w3a-exempt-total',
-      credit(exemptTotalId, 'TOTAL'),
-    ).expect(201);
+    requireCreated(
+      await post('credit-notes', apiKey.secret, 'w3a-exempt-total', credit(exemptTotalId, 'TOTAL')),
+    );
   });
 
   it('corrects a synthetic mixed invoice while preserving each tax treatment', async () => {
     const sourceId = await acceptedInvoice('w3a-mixed-source', 'TAX', true);
-    const created = await post(
-      'credit-notes',
-      apiKey.secret,
-      'w3a-mixed-total',
-      credit(sourceId, 'TOTAL'),
-    ).expect(201);
+    const created = requireCreated(
+      await post('credit-notes', apiKey.secret, 'w3a-mixed-total', credit(sourceId, 'TOTAL')),
+    );
     const document = await prisma.fiscalDocument.findUniqueOrThrow({
       where: { id: created.body.documentId },
     });
