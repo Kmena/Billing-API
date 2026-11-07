@@ -233,6 +233,7 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     PrepareFiscalXmlService,
     SubmitFiscalDocumentService,
     FiscalArtifactService,
+    FiscalPdfArtifactStateService,
     DeliveryRequestService,
     AcceptedFiscalPackageResendService,
   ],

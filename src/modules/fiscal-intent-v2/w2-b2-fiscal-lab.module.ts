@@ -10,6 +10,7 @@ import { W2B2LabSubmissionService } from './w2-b2-lab-submission.service';
 import { W2B2LabAcceptedPackageService } from './w2-b2-lab-accepted-package.service';
 import { Spec10HistoricalArchiveController } from './spec10-historical-archive.controller';
 import { Spec10HistoricalArchiveService } from './spec10-historical-archive.service';
+import { Spec10InvoiceDocumentsService } from './spec10-invoice-documents.service';
 
 /** Test-only module. It is deliberately absent from AppModule and worker bootstrap. */
 @Module({
@@ -24,6 +25,7 @@ import { Spec10HistoricalArchiveService } from './spec10-historical-archive.serv
     W2B2LabSubmissionService,
     W2B2LabAcceptedPackageService,
     Spec10HistoricalArchiveService,
+    Spec10InvoiceDocumentsService,
   ],
   exports: [W2B2LabInvoiceService],
 })

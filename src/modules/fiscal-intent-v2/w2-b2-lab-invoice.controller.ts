@@ -24,6 +24,10 @@ import { W2BLabProjectionError } from './w2-b-lab-projection';
 import { W2B2LabInvoiceService } from './w2-b2-lab-invoice.service';
 import { W2B2LabSubmissionService } from './w2-b2-lab-submission.service';
 import { W2B2LabAcceptedPackageService } from './w2-b2-lab-accepted-package.service';
+import {
+  Spec10InvoiceDocumentsService,
+  Spec10ArtifactType,
+} from './spec10-invoice-documents.service';
 
 /** Registered only by W2B2FiscalLabModule in disposable test applications. */
 @UseGuards(ConsumerV2Guard)
@@ -33,6 +37,7 @@ export class W2B2LabInvoiceController {
     private readonly invoices: W2B2LabInvoiceService,
     private readonly submissions: W2B2LabSubmissionService,
     private readonly acceptedPackages: W2B2LabAcceptedPackageService,
+    private readonly documents: Spec10InvoiceDocumentsService,
   ) {}
 
   @Post()
@@ -85,6 +90,58 @@ export class W2B2LabInvoiceController {
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ) {
     return this.invoices.getDocument(request.consumerV2, documentId, ['INVOICE']);
+  }
+
+  @Get(':documentId/fiscal-view')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  fiscalView(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+  ) {
+    return this.documents.view(request.consumerV2, documentId);
+  }
+
+  @Get(':documentId/artifacts/:type')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  async fiscalArtifact(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Param('type') type: string,
+    @Res() response: Response,
+  ) {
+    if (!['PDF', 'SIGNED_XML', 'HACIENDA_RESPONSE_XML'].includes(type))
+      throw new BadRequestException({ code: 'FISCAL_ARTIFACT_TYPE_INVALID' });
+    const artifact = await this.documents.artifact(
+      request.consumerV2,
+      documentId,
+      type as Spec10ArtifactType,
+    );
+    this.sendArtifact(response, artifact);
+  }
+
+  @Get(':documentId/package')
+  @ConsumerV2RequiredScope('fiscal-v2:operations:read')
+  async fiscalPackage(
+    @Req() request: { consumerV2: ConsumerV2Principal },
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Res() response: Response,
+  ) {
+    this.sendArtifact(response, await this.documents.package(request.consumerV2, documentId));
+  }
+
+  private sendArtifact(
+    response: Response,
+    artifact: { bytes: Buffer; contentType: string; sha256: string; filename: string },
+  ) {
+    const safeName = artifact.filename.replace(/[^A-Za-z0-9_.-]/g, '_');
+    response
+      .status(200)
+      .setHeader('Cache-Control', 'no-store')
+      .setHeader('Content-Type', artifact.contentType)
+      .setHeader('Content-Length', String(artifact.bytes.length))
+      .setHeader('Content-Disposition', `attachment; filename="${safeName}"`)
+      .setHeader('X-Content-SHA256', artifact.sha256)
+      .send(artifact.bytes);
   }
 
   @Get(':documentId/signed-xml')

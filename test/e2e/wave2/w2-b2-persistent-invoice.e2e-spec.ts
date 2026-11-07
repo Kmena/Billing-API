@@ -1016,6 +1016,17 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     const created = await post(key.secret, operationId, invoiceIntent(operationId)).expect(201);
     const documentId = created.body.documentId as string;
     const url = `${endpoint()}/${documentId}/accepted-package`;
+    const pendingView = await request(app.getHttpServer())
+      .get(`${endpoint()}/${documentId}/fiscal-view`)
+      .set('X-API-Key', key.secret)
+      .expect(200);
+    expect(pendingView.body.status).not.toBe('ACCEPTED');
+    expect(pendingView.body.documents.pdf).toBeNull();
+    expect(pendingView.body.documents.haciendaResponse).toBeNull();
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${documentId}/package`)
+      .set('X-API-Key', key.secret)
+      .expect(404);
     await request(app.getHttpServer()).post(url).set('X-API-Key', key.secret).expect(409);
     const submitted = await request(app.getHttpServer())
       .post(`${endpoint()}/${documentId}/submit`)
@@ -1065,6 +1076,62 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     expect(
       await prisma.fiscalArtifact.count({ where: { fiscalDocumentId: documentId, type: 'PDF' } }),
     ).toBe(1);
+    const fiscalView = await request(app.getHttpServer())
+      .get(`${endpoint()}/${documentId}/fiscal-view`)
+      .set('X-API-Key', key.secret)
+      .expect(200);
+    expect(fiscalView.body).toMatchObject({
+      id: documentId,
+      status: 'ACCEPTED',
+      environment: 'STAG',
+      documents: {
+        pdf: { sha256: expect.any(String) },
+        signedXml: { sha256: expect.any(String) },
+        haciendaResponse: { sha256: expect.any(String) },
+      },
+    });
+    expect(fiscalView.body.acceptedAt).toBeTruthy();
+    expect(fiscalView.body.emailDelivery.status).toBeTruthy();
+    const beforeReads = await prisma.fiscalDocument.count();
+    const beforeDeliveries = await prisma.documentDelivery.count({
+      where: { fiscalDocumentId: documentId },
+    });
+    for (const type of ['PDF', 'SIGNED_XML', 'HACIENDA_RESPONSE_XML']) {
+      const downloaded = await request(app.getHttpServer())
+        .get(`${endpoint()}/${documentId}/artifacts/${type}`)
+        .set('X-API-Key', key.secret)
+        .buffer(true)
+        .parse((response, callback) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+          response.on('end', () => callback(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      const bytes = downloaded.body as Buffer;
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+        downloaded.headers['x-content-sha256'],
+      );
+    }
+    const zipped = await request(app.getHttpServer())
+      .get(`${endpoint()}/${documentId}/package`)
+      .set('X-API-Key', key.secret)
+      .buffer(true)
+      .parse((response, callback) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+        response.on('end', () => callback(null, Buffer.concat(chunks)));
+      })
+      .expect(200);
+    expect((zipped.body as Buffer).subarray(0, 4).toString('hex')).toBe('504b0304');
+    expect(
+      createHash('sha256')
+        .update(zipped.body as Buffer)
+        .digest('hex'),
+    ).toBe(zipped.headers['x-content-sha256']);
+    expect(await prisma.fiscalDocument.count()).toBe(beforeReads);
+    expect(await prisma.documentDelivery.count({ where: { fiscalDocumentId: documentId } })).toBe(
+      beforeDeliveries,
+    );
     const replay = await request(app.getHttpServer()).post(url).set('X-API-Key', key.secret);
     expect([200, 202]).toContain(replay.status);
     expect(replay.body.deliveryId).toBe(first.body.deliveryId);
@@ -1225,6 +1292,14 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       .expect(404);
     await request(app.getHttpServer()).get(ownXml).set('X-API-Key', otherKey.secret).expect(404);
     await request(app.getHttpServer()).get(ownXml).set('X-API-Key', readOnly.secret).expect(404);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${own.body.documentId}/fiscal-view`)
+      .set('X-API-Key', otherKey.secret)
+      .expect(404);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${own.body.documentId}/artifacts/SIGNED_XML`)
+      .set('X-API-Key', otherKey.secret)
+      .expect(404);
     const anotherCompany = await createFiscalTenantFixture(context);
     await request(app.getHttpServer())
       .get(
@@ -1266,6 +1341,18 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
     });
     await post(rotated.secret, 'w2b2-isolation', invoiceIntent('w2b2-isolation')).expect(200);
     await request(app.getHttpServer()).get(ownXml).set('X-API-Key', rotated.secret).expect(403);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${own.body.documentId}/fiscal-view`)
+      .set('X-API-Key', rotated.secret)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${own.body.documentId}/artifacts/SIGNED_XML`)
+      .set('X-API-Key', rotated.secret)
+      .expect(403);
+    await request(app.getHttpServer())
+      .get(`${endpoint()}/${own.body.documentId}/package`)
+      .set('X-API-Key', rotated.secret)
+      .expect(403);
     await lab.revokeKey({
       tenantId,
       associationId,
