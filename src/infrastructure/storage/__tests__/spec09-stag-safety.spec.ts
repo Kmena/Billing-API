@@ -75,3 +75,29 @@ it('keeps disposable tests offline and permits only the guarded persistent STAG 
     }),
   ).toThrow();
 });
+
+it('allows only an email-only worker window with every Hacienda connection disabled', () => {
+  const emailOnly: NodeJS.ProcessEnv = {
+    ...safe,
+    BILLING_SPEC09_STAG_INVOICING: 'false',
+    USE_REAL_HACIENDA: 'false',
+    FISCAL_WORKER_ENABLE_IN_TESTS: 'true',
+    EMAIL_USE_REAL: 'true',
+    SPEC10_SINGLE_EMAIL: 'true',
+    SPEC09_TAXPAYER_LOOKUP_MODE: 'disabled',
+    SPEC09_CREDENTIAL_VALIDATION_MODE: 'disabled',
+  };
+  expect(isSafeSpec09ExternalMode(emailOnly)).toBe(true);
+  for (const change of [
+    { USE_REAL_HACIENDA: 'true' },
+    { EMAIL_USE_REAL: 'false' },
+    { FISCAL_WORKER_ENABLE_IN_TESTS: 'false' },
+    { BILLING_SPEC09_STAG_INVOICING: 'true' },
+    { SPEC09_TAXPAYER_LOOKUP_MODE: 'public' },
+    { SPEC09_CREDENTIAL_VALIDATION_MODE: 'sandbox' },
+    { HACIENDA_RECEPCION_PRODUCTION_BASE_URL: 'https://example.invalid' },
+    { HACIENDA_IDP_PRODUCTION_URL: 'https://example.invalid' },
+  ]) {
+    expect(isSafeSpec09ExternalMode({ ...emailOnly, ...change })).toBe(false);
+  }
+});

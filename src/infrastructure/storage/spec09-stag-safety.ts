@@ -1,7 +1,20 @@
 /** Exact external-connection combinations permitted by the local SPEC-09 sandbox. */
 export function isSafeSpec09ExternalMode(env: NodeJS.ProcessEnv): boolean {
-  if (env.BILLING_SPEC09_STAG_INVOICING !== 'true')
+  if (env.BILLING_SPEC09_STAG_INVOICING !== 'true') {
+    if (env.SPEC10_SINGLE_EMAIL === 'true') {
+      return (
+        env.USE_REAL_HACIENDA === 'false' &&
+        env.FISCAL_WORKER_ENABLE_IN_TESTS === 'true' &&
+        env.EMAIL_USE_REAL === 'true' &&
+        env.SPEC09_TAXPAYER_LOOKUP_MODE === 'disabled' &&
+        env.SPEC09_CREDENTIAL_VALIDATION_MODE === 'disabled' &&
+        env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL === 'https://127.0.0.1:9/' &&
+        env.HACIENDA_IDP_PRODUCTION_URL === 'https://127.0.0.1:9/'
+      );
+    }
     return env.USE_REAL_HACIENDA === 'false' && env.FISCAL_WORKER_ENABLE_IN_TESTS === 'false';
+  }
+  if (env.SPEC10_SINGLE_EMAIL === 'true') return false;
   return (
     env.USE_REAL_HACIENDA === 'true' &&
     env.FISCAL_WORKER_ENABLE_IN_TESTS === 'true' &&
