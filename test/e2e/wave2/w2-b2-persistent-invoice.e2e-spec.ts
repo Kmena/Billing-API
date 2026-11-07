@@ -93,6 +93,7 @@ function ticketIntent(externalOperationId: string) {
 
 describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   jest.setTimeout(120000);
+  const previousFiscalWorkerSetting = process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
   let context: FiscalE2eContext;
   let app: INestApplication;
   let prisma: PrismaClient;
@@ -243,9 +244,15 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
   });
 
   afterAll(async () => {
-    if (context) await resetFiscalE2eData(context);
-    await prisma?.$disconnect();
-    await app?.close();
+    try {
+      if (context) await resetFiscalE2eData(context);
+      await prisma?.$disconnect();
+      await app?.close();
+    } finally {
+      if (previousFiscalWorkerSetting === undefined)
+        delete process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+      else process.env.FISCAL_WORKER_ENABLE_IN_TESTS = previousFiscalWorkerSetting;
+    }
   });
 
   it('creates one durable document and signed XSD-valid XML with v2 origin', async () => {

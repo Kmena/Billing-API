@@ -1,6 +1,6 @@
 services:
   billing-spec09-sandbox:
-    image: billing-spec10:single-stag-c3890d7
+    image: billing-spec10:single-email-0e1f6ef
     environment:
       USE_REAL_HACIENDA: "false"
       BILLING_SPEC09_STAG_INVOICING: "false"

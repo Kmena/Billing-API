@@ -51,12 +51,14 @@ const TEST_INVOICE = {
 };
 
 describe('Wave 8 Inventori to Billing integrated onboarding — disposable PostgreSQL', () => {
+  const previousFiscalWorkerSetting = process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
   let context: FiscalE2eContext;
   let baseUrl: string;
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.env.USE_REAL_HACIENDA = 'false';
+    process.env.FISCAL_WORKER_ENABLE_IN_TESTS = 'true';
     context = await createFiscalE2eApp();
     context.app.get(MockHaciendaSubmissionAdapter).setAcknowledgementHttpStatus(202);
     await context.app.listen(0, '127.0.0.1');
@@ -69,8 +71,14 @@ describe('Wave 8 Inventori to Billing integrated onboarding — disposable Postg
   beforeEach(async () => resetFiscalE2eData(context));
 
   afterAll(async () => {
-    await resetFiscalE2eData(context);
-    await context.app.close();
+    try {
+      await resetFiscalE2eData(context);
+      await context.app.close();
+    } finally {
+      if (previousFiscalWorkerSetting === undefined)
+        delete process.env.FISCAL_WORKER_ENABLE_IN_TESTS;
+      else process.env.FISCAL_WORKER_ENABLE_IN_TESTS = previousFiscalWorkerSetting;
+    }
   });
 
   it('uses the real Inventori client for bootstrap recovery, configuration, readiness, one SANDBOX identity and credential rotation', async () => {
