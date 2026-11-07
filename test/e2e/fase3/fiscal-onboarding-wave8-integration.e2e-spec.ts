@@ -365,20 +365,25 @@ describe('Wave 8 Inventori to Billing integrated onboarding — disposable Postg
         expect.objectContaining({ kind: 'HACIENDA_RESPONSE', status: 'DELIVERED' }),
       ]),
     );
-    const sent = context.app.get(MockEmailDeliveryAdapter).sentEmails;
+    const emailAdapter = context.app.get(MockEmailDeliveryAdapter);
+    const packageDelivered = () =>
+      emailAdapter.sentEmails.some(
+        (email) =>
+          email.attachmentFilenames.some((name) => name.endsWith('.pdf')) &&
+          email.attachmentFilenames.some((name) => name.endsWith('.xml')),
+      );
+    const deliveryDeadline = Date.now() + 15_000;
+    while (!packageDelivered() && Date.now() < deliveryDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    const sent = emailAdapter.sentEmails;
     expect(sent.length).toBeGreaterThanOrEqual(1);
     expect(
       sent.some((email) =>
         email.attachmentFilenames.some((name) => name.endsWith('_respuesta.xml')),
       ),
     ).toBe(true);
-    expect(
-      sent.some(
-        (email) =>
-          email.attachmentFilenames.some((name) => name.endsWith('.pdf')) &&
-          email.attachmentFilenames.some((name) => name.endsWith('.xml')),
-      ),
-    ).toBe(true);
+    expect(packageDelivered()).toBe(true);
     expect(
       await context.prisma.fiscalDocument.count({ where: { tenantId: fixture.tenantId } }),
     ).toBe(1);
