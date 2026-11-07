@@ -22,7 +22,21 @@ function docker(args: string[], input?: Buffer, includeStderr = false): Buffer {
     windowsHide: true,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (result.status !== 0) throw new Error(`Disposable Docker operation failed: ${args[0]}`);
+  if (result.status !== 0) {
+    const stderr = result.stderr.toString('utf8');
+    const category = /already exists/i.test(stderr)
+      ? 'OBJECT_EXISTS'
+      : /does not exist/i.test(stderr)
+        ? 'OBJECT_MISSING'
+        : /permission denied/i.test(stderr)
+          ? 'PERMISSION_DENIED'
+          : /out of memory|no space left/i.test(stderr)
+            ? 'RESOURCE_EXHAUSTED'
+            : /connection|server closed/i.test(stderr)
+              ? 'CONNECTION_LOST'
+              : 'OTHER';
+    throw new Error(`Disposable Docker operation failed: ${args[0]} (${category})`);
+  }
   return includeStderr ? Buffer.concat([result.stdout, result.stderr]) : result.stdout;
 }
 
@@ -310,7 +324,20 @@ describe('SPEC-09 paired synthetic PostgreSQL and encrypted-store recovery', () 
       for (let attempt = 0; attempt < 60; attempt += 1) {
         const probe = spawnSync(
           'docker',
-          ['exec', restoredContainer, 'pg_isready', '-U', 'postgres', '-d', 'postgres'],
+          // The Docker entrypoint briefly starts a Unix-socket-only server to
+          // initialize the database, then stops it. TCP readiness identifies
+          // the final server and prevents restoring into that transient phase.
+          [
+            'exec',
+            restoredContainer,
+            'pg_isready',
+            '-h',
+            '127.0.0.1',
+            '-U',
+            'postgres',
+            '-d',
+            'postgres',
+          ],
           { windowsHide: true },
         );
         if (probe.status === 0) {

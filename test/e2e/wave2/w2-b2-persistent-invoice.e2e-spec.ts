@@ -27,6 +27,7 @@ import { createTestSigningMaterial } from '../../../src/modules/fiscal-documents
 import { W2B2FiscalLabModule } from '../../../src/modules/fiscal-intent-v2/w2-b2-fiscal-lab.module';
 import { W2B2LabInvoiceService } from '../../../src/modules/fiscal-intent-v2/w2-b2-lab-invoice.service';
 import { FiscalSubmissionStateService } from '../../../src/modules/fiscal-documents/application/submission/fiscal-submission-state.service';
+import { MockEmailDeliveryAdapter } from '../../../src/modules/fiscal-documents/infrastructure/email/mock-email-delivery.adapter';
 import {
   projectW2BInvoiceLab,
   projectW2BTicketLab,
@@ -1050,13 +1051,22 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
         contentType: 'application/xml',
       },
     });
+    const email = app.get(MockEmailDeliveryAdapter);
+    email.clearSentEmails();
     const [first, concurrent] = await Promise.all([
       request(app.getHttpServer()).post(url).set('X-API-Key', key.secret),
       request(app.getHttpServer()).post(url).set('X-API-Key', key.secret),
     ]);
     if (![200, 202].includes(first.status) || ![200, 202].includes(concurrent.status)) {
+      const classify = (response: typeof first) => {
+        const message = String(response.body?.error?.message ?? '');
+        if (/P2028|transaction.*(closed|expired|timeout)/i.test(message)) return 'TX_TIMEOUT';
+        if (/P2034|deadlock|write conflict/i.test(message)) return 'TX_CONFLICT';
+        if (/PDF_GENERATION_FAILED|PDF generation/i.test(message)) return 'PDF_FAILURE';
+        return String(response.body?.error?.code ?? response.body?.code ?? 'UNKNOWN');
+      };
       throw new Error(
-        `ACCEPTED_PACKAGE_CONCURRENT_${first.status}_${String(first.body?.error?.code ?? first.body?.code ?? 'UNKNOWN')}_${concurrent.status}_${String(concurrent.body?.error?.code ?? concurrent.body?.code ?? 'UNKNOWN')}`,
+        `ACCEPTED_PACKAGE_CONCURRENT_${first.status}_${classify(first)}_${concurrent.status}_${classify(concurrent)}`,
       );
     }
     expect([200, 202]).toContain(first.status);
@@ -1069,6 +1079,11 @@ describe('W2-B2 persistent fiscal creation in disposable PostgreSQL', () => {
       },
     });
     expect(delivery).toHaveLength(1);
+    const acceptedEmails = email.sentEmails.filter(
+      (record) => record.subject === 'Factura electrónica aceptada por Hacienda',
+    );
+    expect(acceptedEmails).toHaveLength(1);
+    expect(acceptedEmails[0].attachmentFilenames).toHaveLength(3);
     expect(
       await prisma.fiscalArtifact.count({ where: { fiscalDocumentId: documentId, type: 'PDF' } }),
     ).toBe(1);

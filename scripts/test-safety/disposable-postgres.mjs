@@ -41,7 +41,8 @@ function waitForPostgres(containerName, bootstrapRole, secrets) {
   let consecutiveReadyChecks = 0;
   for (let attempt = 0; attempt < 90; attempt += 1) {
     const result = docker(
-      ['exec', containerName, 'pg_isready', '-U', bootstrapRole, '-d', 'postgres'],
+      // The entrypoint's temporary Unix-socket server is not the final server.
+      ['exec', containerName, 'pg_isready', '-h', '127.0.0.1', '-U', bootstrapRole, '-d', 'postgres'],
       secrets,
       true,
     );
