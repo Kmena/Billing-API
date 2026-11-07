@@ -1,0 +1,18 @@
+services:
+  billing-spec09-sandbox:
+    image: billing-spec10:documents-install-20261106
+    environment:
+      USE_REAL_HACIENDA: "false"
+      BILLING_SPEC09_STAG_INVOICING: "false"
+      FISCAL_WORKER_ENABLE_IN_TESTS: "false"
+      EMAIL_USE_REAL: "false"
+      SPEC10_SINGLE_EMAIL: "false"
+      SPEC10_SINGLE_STAG_POST: "false"
+      SPEC10_DOCUMENTS_READ: "true"
+      FISCAL_DELIVERY_RECOVERY_ENABLED: "false"
+      FISCAL_DELIVERY_STARTUP_RECOVERY_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: ${SPEC10_DOCUMENTS_BOOTSTRAP_PATH:?Required}
+        target: /app/spec09-bootstrap.cjs
+        read_only: true
