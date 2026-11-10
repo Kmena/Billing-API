@@ -1,5 +1,6 @@
 services:
   billing-spec09-sandbox:
+    restart: unless-stopped
     image: billing-spec10:documents-install-20261106
     environment:
       USE_REAL_HACIENDA: "false"
