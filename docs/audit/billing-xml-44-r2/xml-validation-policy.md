@@ -15,7 +15,7 @@ Base de código: `b0bef77b3d1ae4ec756855f61bfa6ac977c547c8`, rama `codex/billing
 
 Tras firmar, Billing verifica XAdES, exige que el XML firmado menos el único nodo `ds:Signature` sea exactamente el XML fiscal previo y valida el documento completo contra el XSD oficial. Una firma válida no sustituye la validación XSD. Los bytes firmados se persisten solo después de ambas verificaciones.
 
-El timeout del proceso local XSD 1.1 pasó de 10 a 30 segundos por validación. R1 observó expiración intermitente con 10 segundos bajo carga; el límite explícito de 25 ms de la prueba negativa sigue probando el rechazo por timeout. Este cambio no afecta el timeout transaccional Prisma de W2-B.
+El proceso local XSD 1.1 conserva el límite de producto de 10 segundos por validación. R1 observó una expiración intermitente bajo carga; R2 no la considera resuelta mediante un aumento de timeout. Las pruebas sintéticas de firma usan un presupuesto propio de 30 segundos para ejecutar varios pasos, y la prueba negativa con 25 ms comprueba el rechazo por timeout. Este cambio no afecta el timeout transaccional Prisma de W2-B.
 
 ## Esquemas fijados
 
