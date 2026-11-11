@@ -66,6 +66,10 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           unitMeasure: 'Sp',
           quantity: '1.00000',
           unitPrice: '1000.00000',
+          taxAmount: '0.00000',
+          taxCode: '01',
+          taxRateCode: '10',
+          taxRate: '0.00000',
         },
       ],
     });
@@ -241,7 +245,10 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           unitMeasure: 'Sp',
           quantity: '1.00000',
           unitPrice: '1000.00000',
-          // No taxAmount — exempt line
+          taxAmount: '0.00000',
+          taxCode: '01',
+          taxRateCode: '10',
+          taxRate: '0.00000',
         },
       ],
     };
