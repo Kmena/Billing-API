@@ -33,9 +33,9 @@ interface EngineValidationPayload {
 }
 
 const MAX_VALIDATOR_OUTPUT_BYTES = 64 * 1024;
-// Two offline XSD 1.1 passes now run per document. The 10 s subprocess limit
-// intermittently expired under the R1 regression load despite valid XML.
-const DEFAULT_TIMEOUT_MS = 30000;
+// Keep the established production limit. A slow offline XSD pass fails closed
+// and is reported as FISCAL_XML_VALIDATOR_TIMEOUT for investigation.
+const DEFAULT_TIMEOUT_MS = 10000;
 
 @Injectable()
 export class Xsd11ValidatorAdapter implements XsdValidatorPort {
