@@ -83,6 +83,22 @@ export class PrepareFiscalXmlService {
         lines: document.lines,
         totals: document.totals,
       });
+      this.assertPreSignStructure(generated.xml);
+      const preSignValidation = this.xsdValidator.validateUnsignedStructure(generated);
+      if (!preSignValidation.isValid) {
+        await this.markFailure(
+          artifact.id,
+          FISCAL_XML_ERROR.xmlValidationFailed,
+          preSignValidation.errors[0]?.message,
+        );
+        this.recordAudit(input, document, 'fiscal-xml.pre-sign-validation-failed', {
+          normalizedErrorCode: FISCAL_XML_ERROR.xmlValidationFailed,
+        });
+        throw new BadRequestException({
+          code: FISCAL_XML_ERROR.xmlValidationFailed,
+          errors: preSignValidation.errors,
+        });
+      }
       const unsignedXmlBuffer = Buffer.from(generated.xml, 'utf8');
       const unsignedXmlSha256 = this.sha256(unsignedXmlBuffer);
       const unsignedKey = this.storageKey(document, 'unsigned');
@@ -111,10 +127,12 @@ export class PrepareFiscalXmlService {
           },
         });
       });
-      this.assertPreSignStructure(generated.xml);
       this.recordAudit(input, document, 'fiscal-xml.generated', {
         artifactHash: unsignedXmlSha256,
         schemaVersion: generated.schemaVersion,
+      });
+      this.recordAudit(input, document, 'fiscal-xml.pre-sign-validated', {
+        schemaVersion: preSignValidation.schemaVersion,
       });
 
       const certificate = await this.certificateService.getActiveCertificate({
@@ -144,6 +162,10 @@ export class PrepareFiscalXmlService {
       this.recordAudit(input, document, 'fiscal-xml.signature-verified', {
         certificateId: certificate.id,
       });
+      if (!this.signedFiscalContentMatches(generated.xml, signedXml)) {
+        await this.markFailure(artifact.id, FISCAL_XML_ERROR.signedContentChanged);
+        throw new BadRequestException({ code: FISCAL_XML_ERROR.signedContentChanged });
+      }
 
       const signedGenerated = { ...generated, xml: signedXml };
       const validation = this.xsdValidator.validate(signedGenerated);
@@ -278,6 +300,11 @@ export class PrepareFiscalXmlService {
     if (unsignedXml.includes('<ds:Signature')) {
       throw new Error('FISCAL_XML_UNSIGNED_PAYLOAD_CONTAINS_SIGNATURE');
     }
+  }
+
+  private signedFiscalContentMatches(unsignedXml: string, signedXml: string): boolean {
+    const signatures = signedXml.match(/<ds:Signature\b[\s\S]*?<\/ds:Signature>/g);
+    return signatures?.length === 1 && signedXml.replace(signatures[0], '') === unsignedXml;
   }
 
   private async upsertAttemptArtifact(

@@ -114,6 +114,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
     await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
     const changedPayload = fiscalInvoicePayload(fixture.companyId);
     changedPayload.lines[0].unitPrice = '2000.00000';
+    changedPayload.lines[0].taxAmount = '260.00000';
 
     const responses = await Promise.all([
       request(context.app.getHttpServer())

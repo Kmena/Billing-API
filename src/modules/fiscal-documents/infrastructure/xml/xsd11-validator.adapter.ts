@@ -33,7 +33,9 @@ interface EngineValidationPayload {
 }
 
 const MAX_VALIDATOR_OUTPUT_BYTES = 64 * 1024;
-const DEFAULT_TIMEOUT_MS = 10000;
+// Two offline XSD 1.1 passes now run per document. The 10 s subprocess limit
+// intermittently expired under the R1 regression load despite valid XML.
+const DEFAULT_TIMEOUT_MS = 30000;
 
 @Injectable()
 export class Xsd11ValidatorAdapter implements XsdValidatorPort {
@@ -51,6 +53,17 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
   }
 
   validate(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult {
+    return this.validateWithCommand(generatedXml, 'validate');
+  }
+
+  validateUnsignedStructure(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult {
+    return this.validateWithCommand(generatedXml, 'validate-unsigned');
+  }
+
+  private validateWithCommand(
+    generatedXml: FiscalXmlGenerationResult,
+    command: 'validate' | 'validate-unsigned',
+  ): FiscalXmlValidationResult {
     const blockedInput = this.blockedUnsafeXml(generatedXml.xml);
     if (blockedInput) return this.invalid(blockedInput);
 
@@ -66,7 +79,7 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
     const xmlPath = path.join(tempDirectory, `${crypto.randomUUID()}.xml`);
     try {
       fs.writeFileSync(xmlPath, generatedXml.xml, { encoding: 'utf8', mode: 0o600 });
-      const payload = this.runValidator(['validate', schemaPath, xmlPath]);
+      const payload = this.runValidator([command, schemaPath, xmlPath]);
       if (payload.valid)
         return { isValid: true, schemaVersion: generatedXml.schemaVersion, errors: [] };
       return this.invalid(this.normalizeEngineErrors(payload.errors));

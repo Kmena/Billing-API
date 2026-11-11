@@ -120,6 +120,7 @@ describe('HaciendaV44XmlSerializerAdapter', () => {
           {
             ...baseLine,
             discountAmount: '100.00000',
+            taxAmount: '117.00000',
           },
         ],
       }),

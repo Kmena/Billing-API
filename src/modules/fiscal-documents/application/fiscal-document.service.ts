@@ -26,6 +26,7 @@ import {
 import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../domain/fiscal-catalogs';
 import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
+import { classifyFiscalLineTax } from '../domain/fiscal-line-tax-treatment';
 import {
   canonicalFiscalPayloadHash,
   FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
@@ -600,15 +601,19 @@ export class FiscalDocumentService {
       ) {
         throw new BadRequestException({ code: 'INVALID_LINE_AMOUNT' });
       }
-      if (ScaledDecimal.from(line.taxAmount ?? '0').toString() !== '0.00000') {
-        if (!line.taxCode || !line.taxRateCode || !line.taxRate) {
-          throw new BadRequestException({ code: 'FISCAL_TAX_METADATA_REQUIRED' });
-        }
-        if (!/^\d{2}$/.test(line.taxCode) || !/^\d{2}$/.test(line.taxRateCode)) {
-          throw new BadRequestException({ code: 'INVALID_FISCAL_TAX_METADATA' });
-        }
-      }
       this.validateLineDiscount(line);
+      const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
+      const subtotal = gross.subtract(ScaledDecimal.from(line.discountAmount ?? '0'));
+      try {
+        classifyFiscalLineTax(line, subtotal);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message.split(':')[0] : '';
+        const code = reason === 'FISCAL_XML_TAX_METADATA_REQUIRED' ||
+          reason === 'FISCAL_XML_IVA_RATE_CODE_REQUIRED'
+          ? 'FISCAL_TAX_METADATA_REQUIRED'
+          : reason.startsWith('FISCAL_XML_') ? reason : 'INVALID_FISCAL_TAX_METADATA';
+        throw new BadRequestException({ code });
+      }
     }
   }
 

@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { FiscalXmlGenerationResult } from '../../../domain/fiscal-xml/fiscal-xml.types';
 import { Xsd11ValidatorAdapter } from '../xsd11-validator.adapter';
+import { HaciendaV44XmlSerializerAdapter } from '../hacienda-v44-xml-serializer.adapter';
+import { createFiscalXmlSnapshot } from '../../../domain/fiscal-xml/__tests__/fiscal-xml-test-fixtures';
 
 const fixturesDirectory = path.join(__dirname, 'fixtures');
 const invoiceXml = readFixture('valid-factura-electronica-v44.xml');
@@ -34,6 +36,44 @@ describe('Xsd11ValidatorAdapter', () => {
       schemaVersion: 'v4.4',
       errors: [],
     });
+  });
+
+  it('accepts unsigned fiscal structure only when the sole official XSD error is missing root Signature', () => {
+    const unsignedInvoice = invoiceXml.replace(/<ds:Signature[\s\S]*?<\/ds:Signature>/, '');
+    const unsignedTicket = ticketXml.replace(/<ds:Signature[\s\S]*?<\/ds:Signature>/, '');
+    expect(validator.validate(generatedInvoice(unsignedInvoice)).isValid).toBe(false);
+    expect(validator.validateUnsignedStructure(generatedInvoice(unsignedInvoice)).isValid).toBe(true);
+    expect(validator.validateUnsignedStructure(generatedTicket(unsignedTicket)).isValid).toBe(true);
+    expect(validator.validateUnsignedStructure(generatedInvoice(invoiceXml)).isValid).toBe(false);
+  });
+
+  it('rejects missing fiscal fields, wrong order and namespace before signing', () => {
+    const unsigned = invoiceXml.replace(/<ds:Signature[\s\S]*?<\/ds:Signature>/, '');
+    const missingTotal = unsigned.replace(/<TotalComprobante>[^<]*<\/TotalComprobante>/, '');
+    const badOrder = unsigned.replace(
+      /(<TotalVenta>[^<]*<\/TotalVenta>)(\s*<TotalVentaNeta>[^<]*<\/TotalVentaNeta>)/,
+      '$2$1',
+    );
+    const badNamespace = unsigned.replace('xml-schemas/v4.4/facturaElectronica',
+      'xml-schemas/v4.4/incorrecto');
+    for (const xml of [missingTotal, badOrder, badNamespace]) {
+      expect(validator.validateUnsignedStructure(generatedInvoice(xml)).isValid).toBe(false);
+    }
+  });
+
+  it('rejects structurally valid XML with an incompatible taxable base or summary total', () => {
+    const generated = new HaciendaV44XmlSerializerAdapter().serialize(createFiscalXmlSnapshot());
+    expect(validator.validateUnsignedStructure(generated).isValid).toBe(true);
+    for (const xml of [
+      generated.xml.replace('<BaseImponible>1000.00000</BaseImponible>',
+        '<BaseImponible>1001.00000</BaseImponible>'),
+      generated.xml.replace('<TotalComprobante>1130.00000</TotalComprobante>',
+        '<TotalComprobante>1131.00000</TotalComprobante>'),
+    ]) {
+      const result = validator.validateUnsignedStructure({ ...generated, xml });
+      expect(result.isValid).toBe(false);
+      expect(result.errors[0].code).toBe('FISCAL_XML_PRE_SIGN_AMOUNT_MISMATCH');
+    }
   });
 
   it('fails missing mandatory elements with normalized sanitized errors', () => {
