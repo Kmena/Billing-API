@@ -1,2 +1,4 @@
 # Match the TypeScript line endings required by Prettier.
 *.ts text eol=lf
+# Fiscal schemas are byte-pinned; never convert their line endings on checkout.
+resources/hacienda/v4.4/*.xsd -text whitespace=-trailing-space

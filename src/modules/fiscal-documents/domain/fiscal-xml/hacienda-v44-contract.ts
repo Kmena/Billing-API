@@ -20,6 +20,18 @@ export const HACIENDA_V44_TIQUETE_ELECTRONICO = {
   sha256: 'aaa273b368997d47214c92455c22b851cb5ab6ef105dc571233268c1ef5fd6c7',
 } as const;
 
+/** Pinned official schema; NC issuance remains disabled pending fiscal policy. */
+export const HACIENDA_V44_NOTA_CREDITO = {
+  documentType: 'CREDIT_NOTE',
+  rootElement: 'NotaCreditoElectronica',
+  namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaCreditoElectronica',
+  xsdFileName: 'NotaCreditoElectronica.xsd',
+  sourceUrl:
+    'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/NotaCreditoElectronica.xsd',
+  fileSizeBytes: 118974,
+  sha256: 'a86a86d2f3ad85d050b85b09fd6b8d450beed76f6dcdbe60e0dfe259b3f97ef7',
+} as const;
+
 export const HACIENDA_V44_XADES_CONTRACT = {
   profile: 'XAdES-EPES',
   packaging: 'ENVELOPED',
