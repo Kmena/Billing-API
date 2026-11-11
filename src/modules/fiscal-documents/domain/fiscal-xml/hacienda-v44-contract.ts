@@ -32,6 +32,18 @@ export const HACIENDA_V44_NOTA_CREDITO = {
   sha256: 'a86a86d2f3ad85d050b85b09fd6b8d450beed76f6dcdbe60e0dfe259b3f97ef7',
 } as const;
 
+/** Byte-pinned official v4.4 debit-note schema, used only by isolated lab flows. */
+export const HACIENDA_V44_NOTA_DEBITO = {
+  documentType: 'DEBIT_NOTE',
+  rootElement: 'NotaDebitoElectronica',
+  namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaDebitoElectronica',
+  xsdFileName: 'NotaDebitoElectronica.xsd',
+  sourceUrl:
+    'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/NotaDebitoElectronica.xsd',
+  fileSizeBytes: 118992,
+  sha256: '879b782ce33e91bdca3b7d2dc33642b51dc6b45bc8a15a85c0ee22cc594cee4a',
+} as const;
+
 export const HACIENDA_V44_XADES_CONTRACT = {
   profile: 'XAdES-EPES',
   packaging: 'ENVELOPED',

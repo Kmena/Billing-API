@@ -8,6 +8,7 @@ import { XsdValidatorPort } from '../../application/fiscal-xml/xsd-validator.por
 import {
   HACIENDA_V44_FACTURA_ELECTRONICA,
   HACIENDA_V44_NOTA_CREDITO,
+  HACIENDA_V44_NOTA_DEBITO,
   HACIENDA_V44_SCHEMA_VERSION,
   HACIENDA_V44_TIQUETE_ELECTRONICO,
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
@@ -71,7 +72,11 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
     const schemaAsset =
       generatedXml.documentType === 'INVOICE'
         ? HACIENDA_V44_FACTURA_ELECTRONICA
-        : HACIENDA_V44_TIQUETE_ELECTRONICO;
+        : generatedXml.documentType === 'TICKET'
+          ? HACIENDA_V44_TIQUETE_ELECTRONICO
+          : generatedXml.documentType === 'CREDIT_NOTE'
+            ? HACIENDA_V44_NOTA_CREDITO
+            : HACIENDA_V44_NOTA_DEBITO;
     const schemaPath = this.schemaPath(schemaAsset.xsdFileName);
     const checksumIssue = this.verifySchemaChecksum(schemaPath, schemaAsset.sha256);
     if (checksumIssue) return this.invalid(checksumIssue);
@@ -91,14 +96,16 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
   }
 
   compileSchema(
-    documentType: FiscalXmlGenerationResult['documentType'] | 'CREDIT_NOTE',
+    documentType: FiscalXmlGenerationResult['documentType'],
   ): FiscalXmlValidationResult {
     const schemaAsset =
       documentType === 'INVOICE'
         ? HACIENDA_V44_FACTURA_ELECTRONICA
         : documentType === 'CREDIT_NOTE'
           ? HACIENDA_V44_NOTA_CREDITO
-          : HACIENDA_V44_TIQUETE_ELECTRONICO;
+          : documentType === 'DEBIT_NOTE'
+            ? HACIENDA_V44_NOTA_DEBITO
+            : HACIENDA_V44_TIQUETE_ELECTRONICO;
     const schemaPath = this.schemaPath(schemaAsset.xsdFileName);
     const checksumIssue = this.verifySchemaChecksum(schemaPath, schemaAsset.sha256);
     if (checksumIssue) return this.invalid(checksumIssue);

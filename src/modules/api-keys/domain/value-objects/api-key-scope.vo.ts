@@ -20,6 +20,10 @@ export const ALLOWED_API_KEY_SCOPES = [
   'invoices:write',
   'tickets:read',
   'tickets:write',
+  'credit-notes:read',
+  'credit-notes:write',
+  'debit-notes:read',
+  'debit-notes:write',
   'documents:read',
   'documents:write',
   // AFPR: narrowly authorizes delivery retry of an already accepted package.

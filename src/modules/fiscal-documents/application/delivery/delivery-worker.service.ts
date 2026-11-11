@@ -109,6 +109,9 @@ export class DeliveryWorkerService implements OnModuleInit {
     }
 
     const { fiscalDocument: doc } = delivery;
+    if (doc.type !== 'INVOICE' && doc.type !== 'TICKET') {
+      throw new Error('FISCAL_ISSUANCE_BLOCKED');
+    }
 
     // Idempotency: check for duplicate trigger (already DELIVERED)
     if (delivery.status === 'DELIVERED') {
@@ -152,7 +155,7 @@ export class DeliveryWorkerService implements OnModuleInit {
     });
 
     try {
-      const attachments = await this.buildAttachments(delivery, doc);
+      const attachments = await this.buildAttachments(delivery, { ...doc, type: doc.type });
       const emailResult = await this.emailPort.sendEmail({
         to: delivery.recipient,
         subject: this.buildSubject(delivery.kind as DocumentDeliveryKind, doc.clave, doc.type),

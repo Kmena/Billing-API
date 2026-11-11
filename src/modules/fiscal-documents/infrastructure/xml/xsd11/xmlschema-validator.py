@@ -163,7 +163,10 @@ def validate_command(schema_path: Path, xml_path: Path, unsigned_structure: bool
     for error in schema.iter_errors(xml_resource):
         reason = getattr(error, "reason", None) or str(error)
         if unsigned_structure and (
-            getattr(error, "path", "") in ("/FacturaElectronica", "/TiqueteElectronico")
+            getattr(error, "path", "") in (
+                "/FacturaElectronica", "/TiqueteElectronico",
+                "/NotaCreditoElectronica", "/NotaDebitoElectronica",
+            )
             and "Tag 'ds:Signature' expected." in reason
         ):
             signature_errors += 1

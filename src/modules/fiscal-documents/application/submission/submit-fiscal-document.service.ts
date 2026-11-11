@@ -42,6 +42,9 @@ export class SubmitFiscalDocumentService {
   ) {}
 
   async execute(input: SubmitFiscalDocumentInput): Promise<SubmitFiscalDocumentResult> {
+    if (input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
     this.assertScope(input.documentType, input.scopes);
     await this.assertApiKeyCompany(input.apiKeyId, input.companyId);
 

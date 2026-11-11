@@ -3,6 +3,8 @@ import { create } from 'xmlbuilder2';
 import { FiscalXmlSerializerPort } from '../../application/fiscal-xml/fiscal-xml-serializer.port';
 import {
   HACIENDA_V44_FACTURA_ELECTRONICA,
+  HACIENDA_V44_NOTA_CREDITO,
+  HACIENDA_V44_NOTA_DEBITO,
   HACIENDA_V44_SCHEMA_VERSION,
   HACIENDA_V44_TIQUETE_ELECTRONICO,
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
@@ -82,7 +84,11 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     const contract =
       document.type === 'INVOICE'
         ? HACIENDA_V44_FACTURA_ELECTRONICA
-        : HACIENDA_V44_TIQUETE_ELECTRONICO;
+        : document.type === 'TICKET'
+          ? HACIENDA_V44_TIQUETE_ELECTRONICO
+          : document.type === 'CREDIT_NOTE'
+            ? HACIENDA_V44_NOTA_CREDITO
+            : HACIENDA_V44_NOTA_DEBITO;
     this.assertSupportedCatalog('currency', document.currency, ['CRC', 'USD']);
     this.assertSupportedCatalog('saleCondition', document.saleCondition, [
       '01',
@@ -242,6 +248,17 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
     summary.ele('TotalComprobante').txt(this.decimal(summaryData.totalComprobante.toString())).up();
     summary.up();
 
+    if (document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE') {
+      const reference = this.requireCorrectionReference(document.referenceSnapshot);
+      const element = root.ele('InformacionReferencia');
+      element.ele('TipoDocIR').txt(reference.documentTypeCode).up();
+      element.ele('Numero').txt(reference.clave).up();
+      element.ele('FechaEmisionIR').txt(reference.issueDate).up();
+      element.ele('Codigo').txt(reference.code).up();
+      element.ele('Razon').txt(reference.reason).up();
+      element.up();
+    }
+
     const xml = root.end({ prettyPrint: false, headless: false });
     return {
       documentType: document.type,
@@ -249,6 +266,39 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       namespace: contract.namespace,
       schemaVersion: HACIENDA_V44_SCHEMA_VERSION,
       xml,
+    };
+  }
+
+  private requireCorrectionReference(value: unknown): {
+    documentTypeCode: string;
+    clave: string;
+    issueDate: string;
+    code: string;
+    reason: string;
+  } {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('FISCAL_XML_CORRECTION_REFERENCE_REQUIRED');
+    }
+    const item = value as Record<string, unknown>;
+    if (
+      item.documentTypeCode !== '01' ||
+      typeof item.clave !== 'string' ||
+      !/^\d{50}$/.test(item.clave) ||
+      typeof item.issueDate !== 'string' ||
+      Number.isNaN(Date.parse(item.issueDate)) ||
+      !/^\d{2}$/.test(String(item.code)) ||
+      typeof item.reason !== 'string' ||
+      item.reason.trim().length < 3 ||
+      item.reason.length > 180
+    ) {
+      throw new Error('FISCAL_XML_CORRECTION_REFERENCE_INVALID');
+    }
+    return item as {
+      documentTypeCode: string;
+      clave: string;
+      issueDate: string;
+      code: string;
+      reason: string;
     };
   }
 

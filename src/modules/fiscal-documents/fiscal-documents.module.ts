@@ -223,6 +223,8 @@ import { PdfjsValidPdfVerifierAdapter } from './infrastructure/pdf/pdfjs-valid-p
     AcceptedFiscalPackageResendService,
   ],
   exports: [
+    FiscalDocumentService,
+    PrepareFiscalXmlService,
     // Export F4 services needed by workers
     EnsureInitialFiscalPackageService,
     EnsureHaciendaResponseDeliveryService,

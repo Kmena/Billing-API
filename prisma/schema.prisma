@@ -95,6 +95,8 @@ enum HaciendaEnvironment {
 enum FiscalDocumentType {
   INVOICE
   TICKET
+  CREDIT_NOTE
+  DEBIT_NOTE
 }
 
 enum FiscalDocumentStatus {
@@ -385,6 +387,8 @@ model FiscalDocument {
   totals                       Json
   idempotencyKey               String?                @map("idempotency_key") @db.VarChar(255)
   requestHash                  String?                @map("request_hash") @db.Char(64)
+  sourceFiscalDocumentId       String?                @map("source_fiscal_document_id") @db.Uuid
+  referenceSnapshot            Json?                  @map("reference_snapshot")
   disposedAt                   DateTime?              @map("disposed_at")
   disposedBy                   String?                @map("disposed_by") @db.VarChar(255)
   dispositionReason            String?                @map("disposition_reason") @db.VarChar(500)
@@ -401,13 +405,33 @@ model FiscalDocument {
   documentDeliveries           DocumentDelivery[]
   supersededByFiscalDocument   FiscalDocument?        @relation("FiscalDocumentSupersession", fields: [supersededByFiscalDocumentId], references: [id], onUpdate: Cascade, onDelete: SetNull, map: "fiscal_documents_superseded_by_fkey")
   supersededDocuments          FiscalDocument[]       @relation("FiscalDocumentSupersession")
+  sourceFiscalDocument         FiscalDocument?        @relation("FiscalDocumentCorrection", fields: [sourceFiscalDocumentId], references: [id], onDelete: Restrict)
+  correctiveDocuments          FiscalDocument[]       @relation("FiscalDocumentCorrection")
+  noteAuditEvents              FiscalNoteAudit[]
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
   @@index([tenantId, companyId, status])
   @@index([tenantId, companyId, idempotencyKey])
   @@index([supersededByFiscalDocumentId], map: "fiscal_documents_superseded_by_idx")
+  @@index([tenantId, companyId, sourceFiscalDocumentId], map: "fiscal_documents_source_scope_idx")
   @@map("fiscal_documents")
+}
+
+model FiscalNoteAudit {
+  id               String         @id @db.Uuid
+  tenantId         String         @map("tenant_id") @db.Uuid
+  companyId        String         @map("company_id") @db.Uuid
+  fiscalDocumentId String         @map("fiscal_document_id") @db.Uuid
+  sourceDocumentId String         @map("source_document_id") @db.Uuid
+  apiKeyId         String         @map("api_key_id") @db.Uuid
+  action           String         @db.VarChar(60)
+  requestHash      String         @map("request_hash") @db.Char(64)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  document         FiscalDocument @relation(fields: [fiscalDocumentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, companyId, sourceDocumentId])
+  @@map("fiscal_note_audit")
 }
 
 model FiscalSigningCertificate {

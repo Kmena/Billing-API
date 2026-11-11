@@ -19,11 +19,16 @@ export interface FiscalXmlDocumentSnapshot {
   readonly paymentMethod?: string | null;
   readonly lines: unknown;
   readonly totals: unknown;
+  readonly referenceSnapshot?: unknown;
 }
 
 export interface FiscalXmlGenerationResult {
   readonly documentType: FiscalDocumentType;
-  readonly rootElement: 'FacturaElectronica' | 'TiqueteElectronico';
+  readonly rootElement:
+    | 'FacturaElectronica'
+    | 'TiqueteElectronico'
+    | 'NotaCreditoElectronica'
+    | 'NotaDebitoElectronica';
   readonly namespace: string;
   readonly schemaVersion: string;
   readonly xml: string;
