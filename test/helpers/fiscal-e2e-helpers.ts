@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import { randomBytes, randomUUID } from 'crypto';
 import * as request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { CorrectiveNotesLabModule } from '../../src/modules/fiscal-documents/corrective-notes-lab.module';
 import { GlobalExceptionFilter } from '../../src/api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../../src/api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../../src/api/interceptors/tenant-context.interceptor';
@@ -39,10 +40,14 @@ export interface FiscalApiKeyFixture {
   readonly keyPrefix: string;
 }
 
-export async function createFiscalE2eApp(): Promise<FiscalE2eContext> {
+export async function createFiscalE2eApp(
+  options: { correctiveLab?: boolean } = {},
+): Promise<FiscalE2eContext> {
   installGuardedTestDatabaseEnvironment();
   const { prisma } = await createGuardedTestPrisma();
-  const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const module = await Test.createTestingModule({
+    imports: options.correctiveLab ? [AppModule, CorrectiveNotesLabModule] : [AppModule],
+  }).compile();
   const app = module.createNestApplication();
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'health/live'] });
   app.useGlobalFilters(new GlobalExceptionFilter('test'));
@@ -78,6 +83,7 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
   await prisma.companyEconomicActivity.deleteMany({ where: tenantScope });
   await prisma.companyPdfSettings.deleteMany({ where: tenantScope });
   await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
+  await prisma.fiscalNoteAudit.deleteMany({ where: tenantScope });
   await prisma.fiscalDocument.deleteMany({ where: tenantScope });
   await prisma.fiscalSequence.deleteMany({ where: tenantScope });
   await prisma.fiscalIssuancePoint.deleteMany({ where: tenantScope });

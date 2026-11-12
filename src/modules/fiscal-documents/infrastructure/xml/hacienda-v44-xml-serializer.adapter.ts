@@ -5,6 +5,7 @@ import {
   HACIENDA_V44_FACTURA_ELECTRONICA,
   HACIENDA_V44_NOTA_CREDITO,
   HACIENDA_V44_NOTA_DEBITO,
+  HACIENDA_V44_REFERENCE_CODES,
   HACIENDA_V44_SCHEMA_VERSION,
   HACIENDA_V44_TIQUETE_ELECTRONICO,
 } from '../../domain/fiscal-xml/hacienda-v44-contract';
@@ -286,7 +287,7 @@ export class HaciendaV44XmlSerializerAdapter implements FiscalXmlSerializerPort 
       !/^\d{50}$/.test(item.clave) ||
       typeof item.issueDate !== 'string' ||
       Number.isNaN(Date.parse(item.issueDate)) ||
-      !/^\d{2}$/.test(String(item.code)) ||
+      !HACIENDA_V44_REFERENCE_CODES.some((code) => code === String(item.code)) ||
       typeof item.reason !== 'string' ||
       item.reason.trim().length < 3 ||
       item.reason.length > 180

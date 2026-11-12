@@ -1,5 +1,21 @@
 export const HACIENDA_V44_SCHEMA_VERSION = 'v4.4' as const;
 
+/** Structural catalog shared by the pinned NC/ND v4.4 XSDs; no commercial default. */
+export const HACIENDA_V44_REFERENCE_CODES = [
+  '01',
+  '02',
+  '04',
+  '05',
+  '06',
+  '07',
+  '08',
+  '09',
+  '10',
+  '11',
+  '12',
+  '99',
+] as const;
+
 export const HACIENDA_V44_FACTURA_ELECTRONICA = {
   documentType: 'INVOICE',
   rootElement: 'FacturaElectronica',

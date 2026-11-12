@@ -26,6 +26,7 @@ import {
 import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../domain/fiscal-catalogs';
 import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
+import { HACIENDA_V44_REFERENCE_CODES } from '../domain/fiscal-xml/hacienda-v44-contract';
 import { classifyFiscalLineTax } from '../domain/fiscal-line-tax-treatment';
 import {
   canonicalFiscalPayloadHash,
@@ -766,7 +767,7 @@ export class FiscalDocumentService {
       }
       if (
         !command.referenceCode ||
-        !/^\d{2}$/.test(command.referenceCode) ||
+        !HACIENDA_V44_REFERENCE_CODES.some((code) => code === command.referenceCode) ||
         !command.referenceReason ||
         command.referenceReason.trim().length < 3 ||
         command.referenceReason.length > 180
