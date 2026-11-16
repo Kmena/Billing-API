@@ -97,7 +97,28 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     );
   }
 
+  private protectedDemoCompanyInMock(): string | null {
+    if (process.env.NODE_ENV !== 'development' ||
+        process.env.USE_REAL_HACIENDA !== 'false' ||
+        !process.env.DATABASE_URL?.includes('@billing-db:5432/billing_demo') ||
+        process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL !==
+          'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1' ||
+        process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL !== 'https://127.0.0.1:9/' ||
+        process.env.EMAIL_USE_REAL !== 'false') return null;
+    return process.env.DEMO_STAG_PROTECTED_COMPANY_ID || null;
+  }
+
+  private async mockWouldProcessProtectedSubmission(id: string): Promise<boolean> {
+    const companyId = this.protectedDemoCompanyInMock();
+    if (!companyId) return false;
+    const row = await this.prisma.fiscalSubmission.findUnique({
+      where: { id }, select: { companyId: true },
+    });
+    return row?.companyId === companyId;
+  }
+
   async handleSubmitJob(payload: FiscalSubmissionJobPayload): Promise<void> {
+    if (await this.mockWouldProcessProtectedSubmission(payload.submissionId)) return;
     if (this.singlePostStagTest()) {
       const current = await this.prisma.fiscalSubmission.findUnique({
         where: { id: payload.submissionId },
@@ -190,6 +211,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   async handleReconcileJob(payload: FiscalSubmissionJobPayload): Promise<void> {
+    if (await this.mockWouldProcessProtectedSubmission(payload.submissionId)) return;
     const context = await this.loadContext(payload.submissionId);
     if (!context || FiscalSubmissionStateMachine.isTerminal(context.submission.status)) {
       return;
@@ -234,8 +256,10 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
 
   async enqueueDueWork(): Promise<void> {
     const singlePost = this.singlePostStagTest();
+    const protectedCompanyId = this.protectedDemoCompanyInMock();
     const due = await this.prisma.fiscalSubmission.findMany({
       where: {
+        ...(protectedCompanyId ? { companyId: { not: protectedCompanyId } } : {}),
         status: {
           in: [
             'QUEUED',
@@ -252,6 +276,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
 
     const staleSubmitting = await this.prisma.fiscalSubmission.findMany({
       where: {
+        ...(protectedCompanyId ? { companyId: { not: protectedCompanyId } } : {}),
         status: 'SUBMITTING',
         lastAttemptAt: { lte: new Date(Date.now() - 5 * 60_000) },
       },

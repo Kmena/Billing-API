@@ -193,6 +193,41 @@ describe('FiscalSubmissionWorkerService', () => {
     }
   });
 
+  it('never lets the normal demo mock adjudicate the protected STAG company', async () => {
+    const keys = ['NODE_ENV', 'USE_REAL_HACIENDA', 'DATABASE_URL',
+      'HACIENDA_RECEPCION_SANDBOX_BASE_URL', 'HACIENDA_RECEPCION_PRODUCTION_BASE_URL',
+      'EMAIL_USE_REAL', 'DEMO_STAG_PROTECTED_COMPANY_ID'] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    Object.assign(process.env, {
+      NODE_ENV: 'development', USE_REAL_HACIENDA: 'false',
+      DATABASE_URL: 'postgresql://synthetic:synthetic@billing-db:5432/billing_demo',
+      HACIENDA_RECEPCION_SANDBOX_BASE_URL:
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
+      HACIENDA_RECEPCION_PRODUCTION_BASE_URL: 'https://127.0.0.1:9/',
+      EMAIL_USE_REAL: 'false', DEMO_STAG_PROTECTED_COMPANY_ID: 'company-id',
+    });
+    try {
+      const { worker, prisma, hacienda } = makeWorker();
+      await worker.handleSubmitJob({ submissionId: 'submission-id' });
+      await worker.handleReconcileJob({ submissionId: 'submission-id' });
+      await worker.enqueueDueWork();
+      expect(prisma.fiscalSubmission.updateMany).not.toHaveBeenCalled();
+      expect(prisma.fiscalSubmission.update).not.toHaveBeenCalled();
+      expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+      expect(hacienda.queryStatusByClave).not.toHaveBeenCalled();
+      expect(prisma.fiscalSubmission.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({
+          companyId: { not: 'company-id' },
+        }) }),
+      );
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
   it('does not replay a stale submission after a crash in the single STAG test', async () => {
     const previous = {
       nodeEnv: process.env.NODE_ENV,
