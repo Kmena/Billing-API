@@ -27,7 +27,7 @@ describe('Hacienda reception HTTP wire contract, local only', () => {
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    url = `http://127.0.0.1:${(server.address() as { port: number }).port}/recepcion-sandbox/v1/`;
+    url = `http://127.0.0.1:${(server.address() as { port: number }).port}/recepcion/v1/`;
   });
   afterAll(async () => { await new Promise<void>((resolve) => server.close(() => resolve())); });
   beforeEach(() => { requests.length = 0; status = 201; });
@@ -35,7 +35,7 @@ describe('Hacienda reception HTTP wire contract, local only', () => {
     productionBaseUrl: 'http://127.0.0.1:9/', timeoutMs: 1000 }) } as unknown as ConfigService,
   new HttpService(axios.create({ proxy: false }) as unknown as ConstructorParameters<typeof HttpService>[0]));
 
-  it('sends one bearer header and valid JSON to the official STAG path shape', async () => {
+  it('sends one bearer header and valid JSON to the historically accepted STAG path shape', async () => {
     const result = await adapter().submitSignedDocument({ environment: 'SANDBOX',
       accessToken: 'fake.token.local', clave, consecutive: '00100999010000000001',
       issueDate: new Date('2026-11-16T12:00:00.000Z'), documentType: 'INVOICE',
@@ -44,7 +44,7 @@ describe('Hacienda reception HTTP wire contract, local only', () => {
     expect(result.nextStatus).toBe('ACKNOWLEDGED');
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ method: 'POST',
-      path: '/recepcion-sandbox/v1/recepcion', authorization: ['bearer fake.token.local'],
+      path: '/recepcion/v1/recepcion', authorization: ['bearer fake.token.local'],
       contentType: 'application/json; charset=utf-8' });
     expect(requests[0]!.accept).toContain('application/json');
     expect(JSON.parse(requests[0]!.body)).toMatchObject({ clave,
@@ -70,7 +70,7 @@ describe('Hacienda reception HTTP wire contract, local only', () => {
       accessToken: 'fake.token.local', clave });
     expect(result.nextStatus).toBe('PROCESSING');
     expect(requests).toMatchObject([{ method: 'GET',
-      path: `/recepcion-sandbox/v1/recepcion/${clave}`,
+      path: `/recepcion/v1/recepcion/${clave}`,
       authorization: ['bearer fake.token.local'] }]);
   });
 });

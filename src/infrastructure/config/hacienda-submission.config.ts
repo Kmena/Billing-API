@@ -16,7 +16,7 @@ export default registerAs('haciendaSubmission', (): HaciendaSubmissionConfig => 
       'https://api.comprobanteselectronicos.go.cr/recepcion/v1/',
     sandboxBaseUrl:
       process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL ??
-      'https://api.comprobanteselectronicos.go.cr/recepcion-sandbox/v1/',
+      'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
     timeoutMs: Number(process.env.HACIENDA_SUBMISSION_TIMEOUT_MS ?? '15000'),
     callbackUrl: callbackUrl === '' ? undefined : callbackUrl,
   };
