@@ -1,5 +1,21 @@
 export const HACIENDA_V44_SCHEMA_VERSION = 'v4.4' as const;
 
+/** Structural catalog shared by the pinned NC/ND v4.4 XSDs; no commercial default. */
+export const HACIENDA_V44_REFERENCE_CODES = [
+  '01',
+  '02',
+  '04',
+  '05',
+  '06',
+  '07',
+  '08',
+  '09',
+  '10',
+  '11',
+  '12',
+  '99',
+] as const;
+
 export const HACIENDA_V44_FACTURA_ELECTRONICA = {
   documentType: 'INVOICE',
   rootElement: 'FacturaElectronica',
@@ -20,8 +36,8 @@ export const HACIENDA_V44_TIQUETE_ELECTRONICO = {
   sha256: 'aaa273b368997d47214c92455c22b851cb5ab6ef105dc571233268c1ef5fd6c7',
 } as const;
 
-/** Official CDN v4.4 bytes fetched for W3-B; normative code meanings remain a fiscal gate. */
-export const HACIENDA_V44_NOTA_CREDITO_LAB = {
+/** Pinned official schema; NC issuance remains disabled pending fiscal policy. */
+export const HACIENDA_V44_NOTA_CREDITO = {
   documentType: 'CREDIT_NOTE',
   rootElement: 'NotaCreditoElectronica',
   namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaCreditoElectronica',
@@ -32,7 +48,8 @@ export const HACIENDA_V44_NOTA_CREDITO_LAB = {
   sha256: 'a86a86d2f3ad85d050b85b09fd6b8d450beed76f6dcdbe60e0dfe259b3f97ef7',
 } as const;
 
-export const HACIENDA_V44_NOTA_DEBITO_LAB = {
+/** Byte-pinned official v4.4 debit-note schema, used only by isolated lab flows. */
+export const HACIENDA_V44_NOTA_DEBITO = {
   documentType: 'DEBIT_NOTE',
   rootElement: 'NotaDebitoElectronica',
   namespace: 'https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.4/notaDebitoElectronica',
@@ -42,6 +59,10 @@ export const HACIENDA_V44_NOTA_DEBITO_LAB = {
   fileSizeBytes: 118992,
   sha256: '879b782ce33e91bdca3b7d2dc33642b51dc6b45bc8a15a85c0ee22cc594cee4a',
 } as const;
+
+// Existing v2 laboratory flows retain their names while sharing the same pinned XSD bytes.
+export const HACIENDA_V44_NOTA_CREDITO_LAB = HACIENDA_V44_NOTA_CREDITO;
+export const HACIENDA_V44_NOTA_DEBITO_LAB = HACIENDA_V44_NOTA_DEBITO;
 
 export const HACIENDA_V44_XADES_CONTRACT = {
   profile: 'XAdES-EPES',

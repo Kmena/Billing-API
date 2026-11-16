@@ -5,6 +5,7 @@ import {
 
 export interface XsdValidatorPort {
   validate(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult;
+  validateUnsignedStructure(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult;
 }
 
 export const XSD_VALIDATOR = Symbol('XsdValidatorPort');

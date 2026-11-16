@@ -1,9 +1,29 @@
 # Match the TypeScript line endings required by Prettier.
 *.ts text eol=lf
-
-# Official XSD assets are pinned by SHA-256; checkout bytes must match Git bytes.
-resources/hacienda/v4.4/*.xsd text eol=lf
+# Fiscal schemas are byte-pinned; never convert their line endings on checkout.
+resources/hacienda/v4.4/*.xsd -text
 
 # Prisma stores migration checksums from exact SQL bytes.
 prisma/migrations/**/migration.sql text eol=lf
 prisma/migrations/migration_lock.toml text eol=lf
+
+# Applied Billing migrations retain ledger-verified CRLF bytes.
+prisma/migrations/20250001000000_initial_foundation/migration.sql -text
+prisma/migrations/20250002000000_company_hacienda_fields/migration.sql -text
+prisma/migrations/20260911140000_fiscal_document_core/migration.sql -text
+prisma/migrations/20260911143000_fiscal_idempotency_scope/migration.sql -text
+prisma/migrations/20260912123000_post_f2_2_fiscal_constraints/migration.sql -text
+prisma/migrations/20260912180000_fiscal_xml_signing_metadata/migration.sql -text
+prisma/migrations/20260913110000_company_fiscal_profile/migration.sql -text
+prisma/migrations/20260913113000_company_fiscal_address_positive_codes/migration.sql -text
+prisma/migrations/20260914193000_fiscal_submission/migration.sql -text
+prisma/migrations/20260915100000_f4_fiscal_artifacts_delivery/migration.sql -text
+prisma/migrations/20260916000000_f4_fix_delivery_unique_null/migration.sql -text
+prisma/migrations/20260920000000_fix_economic_activity_code_format/migration.sql -text
+prisma/migrations/20260924000000_add_cert_extracted_identity/migration.sql -text
+prisma/migrations/20260924123000_inventori_p0_fiscal_compatibility/migration.sql -text
+prisma/migrations/20260924200000_cert_single_active_partial_unique_index/migration.sql -text
+prisma/migrations/20260925000000_p0_economic_activities/migration.sql -text
+prisma/migrations/20261031000000_fix_fiscal_artifact_xml_unique_index/migration.sql -text
+prisma/migrations/20261108000000_add_accepted_fiscal_package_delivery/migration.sql -text
+prisma/migrations/20261107000000_restore_fiscal_superseded_lifecycle/migration.sql -text

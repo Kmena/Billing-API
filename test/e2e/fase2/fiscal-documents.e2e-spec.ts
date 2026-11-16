@@ -256,6 +256,27 @@ describe('Fiscal Documents (E2E)', () => {
       .expect(400)
       .expect(({ body }) => expect(body.error.code).toBe('FISCAL_TAX_METADATA_REQUIRED'));
 
+    const ambiguousZero = fiscalInvoicePayload(fixture.companyId);
+    ambiguousZero.lines[0].taxAmount = '0';
+    delete (ambiguousZero.lines[0] as { taxCode?: string }).taxCode;
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'ambiguous-zero-tax')
+      .send(ambiguousZero)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_TAX_METADATA_REQUIRED'));
+
+    const contradictory13 = fiscalInvoicePayload(fixture.companyId);
+    contradictory13.lines[0].taxAmount = '129.00000';
+    await request(context.app.getHttpServer())
+      .post('/api/v1/invoices')
+      .set('X-API-Key', apiKey.secret)
+      .set('Idempotency-Key', 'contradictory-iva-13')
+      .send(contradictory13)
+      .expect(400)
+      .expect(({ body }) => expect(body.error.code).toBe('FISCAL_XML_TAX_AMOUNT_RATE_MISMATCH'));
+
     const discountPayload = fiscalInvoicePayload(fixture.companyId) as ReturnType<
       typeof fiscalInvoicePayload
     > & { lines: Array<{ discountAmount?: string }> };
@@ -423,6 +444,7 @@ describe('Fiscal Documents (E2E)', () => {
 
     const changedPayload = fiscalInvoicePayload(fixture.companyId);
     changedPayload.lines[0].unitPrice = '2000.00000';
+    changedPayload.lines[0].taxAmount = '260.00000';
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', apiKeyA.secret)

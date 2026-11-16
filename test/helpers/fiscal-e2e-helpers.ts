@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import { randomBytes, randomUUID } from 'crypto';
 import * as request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { CorrectiveNotesLabModule } from '../../src/modules/fiscal-documents/corrective-notes-lab.module';
 import { GlobalExceptionFilter } from '../../src/api/filters/global-exception.filter';
 import { CorrelationIdInterceptor } from '../../src/api/interceptors/correlation-id.interceptor';
 import { TenantContextInterceptor } from '../../src/api/interceptors/tenant-context.interceptor';
@@ -41,12 +42,16 @@ export interface FiscalApiKeyFixture {
   readonly keyPrefix: string;
 }
 
-export async function createFiscalE2eApp(): Promise<FiscalE2eContext> {
+export async function createFiscalE2eApp(
+  options: { correctiveLab?: boolean } = {},
+): Promise<FiscalE2eContext> {
   // A disposable sentinel exists only for eligibility checks; no real credential is used.
   process.env[FISCAL_E2E_HACIENDA_SECRET_REFERENCE] ??= 'disposable-test-sentinel';
   installGuardedTestDatabaseEnvironment();
   const { prisma } = await createGuardedTestPrisma();
-  const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+  const module = await Test.createTestingModule({
+    imports: options.correctiveLab ? [AppModule, CorrectiveNotesLabModule] : [AppModule],
+  }).compile();
   const app = module.createNestApplication();
   app.setGlobalPrefix('api/v1', { exclude: ['health', 'health/ready', 'health/live'] });
   app.useGlobalFilters(new GlobalExceptionFilter('test'));
@@ -88,6 +93,7 @@ export async function resetFiscalE2eData(context: FiscalE2eCleanupContext): Prom
       await prisma.fiscalIdempotencyKeyV2.deleteMany({ where: tenantScope });
       await prisma.fiscalIdempotencyKey.deleteMany({ where: tenantScope });
       await prisma.fiscalCancellationWorkflow.deleteMany({ where: tenantScope });
+      await prisma.fiscalNoteAudit.deleteMany({ where: tenantScope });
       await prisma.fiscalDocument.deleteMany({ where: tenantScope });
       fiscalDocumentsDeleted = true;
       break;

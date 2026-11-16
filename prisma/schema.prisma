@@ -623,6 +623,7 @@ model FiscalDocument {
   cancellationAsReplacement    FiscalCancellationWorkflow?  @relation("CancellationReplacement")
   cancellationAsReplacementNc  FiscalCancellationWorkflow?  @relation("CancellationReplacementNc")
   cancellationAsReversalNd     FiscalCancellationWorkflow?  @relation("CancellationReversalNd")
+  noteAuditEvents              FiscalNoteAudit[]
 
   @@unique([tenantId, companyId, environment, consecutive])
   @@index([tenantId, companyId, createdAt(sort: Desc)])
@@ -630,6 +631,7 @@ model FiscalDocument {
   @@index([tenantId, companyId, idempotencyKey])
   @@index([supersededByFiscalDocumentId], map: "fiscal_documents_superseded_by_idx")
   @@index([tenantId, companyId, sourceFiscalDocumentId], map: "fiscal_documents_corrections_source_idx")
+  @@index([tenantId, companyId, sourceFiscalDocumentId], map: "fiscal_documents_source_scope_idx")
   @@index([tenantId, originAssociationId, createdAt(sort: Desc)], map: "fiscal_documents_v2_origin_idx")
   @@map("fiscal_documents")
 }
@@ -671,6 +673,22 @@ model FiscalCancellationWorkflow {
 
   @@index([tenantId, companyId, associationId, state], map: "fcw_scope_state_idx")
   @@map("fiscal_cancellation_workflows")
+}
+
+model FiscalNoteAudit {
+  id               String         @id @db.Uuid
+  tenantId         String         @map("tenant_id") @db.Uuid
+  companyId        String         @map("company_id") @db.Uuid
+  fiscalDocumentId String         @map("fiscal_document_id") @db.Uuid
+  sourceDocumentId String         @map("source_document_id") @db.Uuid
+  apiKeyId         String         @map("api_key_id") @db.Uuid
+  action           String         @db.VarChar(60)
+  requestHash      String         @map("request_hash") @db.Char(64)
+  createdAt        DateTime       @default(now()) @map("created_at")
+  document         FiscalDocument @relation(fields: [fiscalDocumentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, companyId, sourceDocumentId])
+  @@map("fiscal_note_audit")
 }
 
 model FiscalSigningCertificate {

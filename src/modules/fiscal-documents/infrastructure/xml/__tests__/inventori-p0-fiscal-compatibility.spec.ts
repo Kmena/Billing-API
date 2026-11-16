@@ -156,7 +156,7 @@ describe('Inventori P0 fiscal compatibility — Hacienda v4.4 XML', () => {
           ],
         }),
       ),
-    ).toThrow('FISCAL_XML_ZERO_TAX_TREATMENT_UNSUPPORTED');
+    ).toThrow('FISCAL_XML_UNSUPPORTED_ZERO_TAX_TREATMENT:11');
   });
   it('keeps zero-discount behavior unchanged', () => {
     const result = serializer.serialize(invoice());

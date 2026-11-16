@@ -124,6 +124,7 @@ describe('Fiscal idempotency migration historical rehearsal (E2E, disposable Pos
 
     const changed = fiscalInvoicePayload(fixture.companyId);
     changed.lines[0].unitPrice = '2000.00000';
+    changed.lines[0].taxAmount = '260.00000';
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', rotatedKey.secret)

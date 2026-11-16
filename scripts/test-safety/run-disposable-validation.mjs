@@ -36,7 +36,25 @@ if (suite === 'safety-db') {
   ];
   if (process.argv[3]) e2eArgs.push('--testPathPattern', process.argv[3]);
   if (process.argv[4]) e2eArgs.push('--testNamePattern', process.argv[4]);
-  run(e2eArgs);
+  if (process.argv[3]) {
+    run(e2eArgs);
+  } else {
+    // A Jest environment can leave async PDF and queue callbacks alive after a
+    // suite ends. Give every suite its own process while retaining the same
+    // labeled disposable database and migration state.
+    const listing = spawnSync(
+      process.execPath,
+      ['node_modules/jest/bin/jest.js', '--config', './test/jest-e2e.json', '--listTests', '--json'],
+      { cwd: process.cwd(), env: process.env, encoding: 'utf8', windowsHide: true },
+    );
+    if (listing.status !== 0) throw new Error(listing.stderr || 'Could not list E2E suites');
+    const paths = JSON.parse(listing.stdout);
+    if (!Array.isArray(paths) || paths.length === 0) throw new Error('No E2E suites found');
+    for (const [index, path] of paths.entries()) {
+      process.stdout.write(`E2E_SUITE ${index + 1}/${paths.length} ${path}\n`);
+      run([...e2eArgs, '--runTestsByPath', path]);
+    }
+  }
 } else {
   run([
     'node_modules/jest/bin/jest.js',

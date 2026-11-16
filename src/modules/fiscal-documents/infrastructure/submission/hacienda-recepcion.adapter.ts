@@ -1,5 +1,5 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AxiosError, AxiosResponse } from 'axios';
 import { firstValueFrom } from 'rxjs';
@@ -63,6 +63,9 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
   async submitSignedDocument(
     input: HaciendaSubmitSignedDocumentInput,
   ): Promise<HaciendaSubmissionResult> {
+    if (input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
     const body: HaciendaSubmissionRequest = {
       clave: input.clave,
       fecha: input.issueDate.toISOString(),

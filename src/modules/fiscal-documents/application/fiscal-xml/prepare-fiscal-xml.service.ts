@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -62,6 +63,10 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
       include: { xmlArtifacts: true },
     });
     if (!document) throw new NotFoundException({ code: FISCAL_XML_ERROR.documentNotFound });
+    const isNote = document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE';
+    if (isNote && (process.env.NODE_ENV !== 'test' || document.environment !== 'SANDBOX')) {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
     this.assertScope(document.type, input.scopes);
     await this.assertApiKeyCompany(input.apiKeyId, document.companyId);
 
@@ -101,8 +106,12 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
     document: FiscalDocumentWithXmlArtifacts,
     enableInitialDelivery = true,
   ): Promise<FiscalXmlProcessingResult> {
+    const isNote = document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE';
     const existingArtifact = document.xmlArtifacts[0];
-    if (document.status === 'READY_TO_SUBMIT' && existingArtifact?.signedXmlSha256) {
+    if (
+      (document.status === 'READY_TO_SUBMIT' || (isNote && document.status === 'XML_VALIDATED')) &&
+      existingArtifact?.signedXmlSha256
+    ) {
       return this.toResult(document.id, document.status, existingArtifact);
     }
     if (!['READY_FOR_XML', 'XML_GENERATED', 'XML_VALIDATED', 'SIGNED'].includes(document.status)) {
@@ -127,6 +136,22 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
         lines: document.lines,
         totals: document.totals,
       });
+      this.assertPreSignStructure(generated.xml);
+      const preSignValidation = this.xsdValidator.validateUnsignedStructure(generated);
+      if (!preSignValidation.isValid) {
+        await this.markFailure(
+          artifact.id,
+          FISCAL_XML_ERROR.xmlValidationFailed,
+          preSignValidation.errors[0]?.message,
+        );
+        this.recordAudit(input, document, 'fiscal-xml.pre-sign-validation-failed', {
+          normalizedErrorCode: FISCAL_XML_ERROR.xmlValidationFailed,
+        });
+        throw new BadRequestException({
+          code: FISCAL_XML_ERROR.xmlValidationFailed,
+          errors: preSignValidation.errors,
+        });
+      }
       const unsignedXmlBuffer = Buffer.from(generated.xml, 'utf8');
       const unsignedXmlSha256 = this.sha256(unsignedXmlBuffer);
       const unsignedKey = this.storageKey(document, 'unsigned');
@@ -155,10 +180,12 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
           },
         });
       });
-      this.assertPreSignStructure(generated.xml);
       this.recordAudit(input, document, 'fiscal-xml.generated', {
         artifactHash: unsignedXmlSha256,
         schemaVersion: generated.schemaVersion,
+      });
+      this.recordAudit(input, document, 'fiscal-xml.pre-sign-validated', {
+        schemaVersion: preSignValidation.schemaVersion,
       });
 
       const certificate = await this.certificateService.getActiveCertificate({
@@ -188,6 +215,10 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
       this.recordAudit(input, document, 'fiscal-xml.signature-verified', {
         certificateId: certificate.id,
       });
+      if (!this.signedFiscalContentMatches(generated.xml, signedXml)) {
+        await this.markFailure(artifact.id, FISCAL_XML_ERROR.signedContentChanged);
+        throw new BadRequestException({ code: FISCAL_XML_ERROR.signedContentChanged });
+      }
 
       const signedGenerated = { ...generated, xml: signedXml };
       const validation = this.xsdValidator.validate(signedGenerated);
@@ -262,7 +293,7 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
             id: document.id,
             status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
           },
-          data: { status: 'READY_TO_SUBMIT' },
+          data: { status: isNote ? 'XML_VALIDATED' : 'READY_TO_SUBMIT' },
         });
         this.assertDocumentStatusAdvanced(readyUpdate.count);
         return updatedArtifact;
@@ -276,14 +307,19 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
         artifactHash: signedXmlSha256,
         schemaVersion: validation.schemaVersion,
       });
-      this.recordAudit(input, document, 'fiscal-document.ready-to-submit', {
-        durationMs: Date.now() - startedAt,
-        schemaVersion: HACIENDA_V44_SCHEMA_VERSION,
-      });
+      this.recordAudit(
+        input,
+        document,
+        isNote ? 'fiscal-note.validated-lab' : 'fiscal-document.ready-to-submit',
+        {
+          durationMs: Date.now() - startedAt,
+          schemaVersion: HACIENDA_V44_SCHEMA_VERSION,
+        },
+      );
 
       // F4 integration hook (DEC-011): trigger INITIAL_DOCUMENT delivery after READY_TO_SUBMIT
       // INVARIANT: Does NOT modify FiscalDocument.status. Delivery is independent.
-      if (enableInitialDelivery && this.ensureInitialDelivery) {
+      if (!isNote && enableInitialDelivery && this.ensureInitialDelivery) {
         const pending = new Promise<void>((resolve) => {
           setImmediate(() => {
             void this.ensureInitialDelivery!.ensure({
@@ -301,7 +337,7 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
         void pending.then(() => this.pendingInitialDeliveries.delete(pending));
       }
 
-      return this.toResult(document.id, 'READY_TO_SUBMIT', completed);
+      return this.toResult(document.id, isNote ? 'XML_VALIDATED' : 'READY_TO_SUBMIT', completed);
     } catch (error) {
       if (
         error instanceof BadRequestException ||
@@ -348,6 +384,11 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
     }
   }
 
+  private signedFiscalContentMatches(unsignedXml: string, signedXml: string): boolean {
+    const signatures = signedXml.match(/<ds:Signature\b[\s\S]*?<\/ds:Signature>/g);
+    return signatures?.length === 1 && signedXml.replace(signatures[0], '') === unsignedXml;
+  }
+
   private async upsertAttemptArtifact(
     document: {
       id: string;
@@ -387,7 +428,14 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
   }
 
   private assertScope(type: string, scopes: string[]): void {
-    const requiredScope = type === 'INVOICE' ? 'invoices:write' : 'tickets:write';
+    const requiredScope =
+      type === 'INVOICE'
+        ? 'invoices:write'
+        : type === 'TICKET'
+          ? 'tickets:write'
+          : type === 'CREDIT_NOTE'
+            ? 'credit-notes:write'
+            : 'debit-notes:write';
     if (!scopes.includes(requiredScope))
       throw new BadRequestException({ code: 'INSUFFICIENT_SCOPE' });
   }

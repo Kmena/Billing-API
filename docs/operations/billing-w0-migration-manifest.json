@@ -1,11 +1,11 @@
 [
   {
     "name": "20250001000000_initial_foundation",
-    "sha256": "58627ed15e6adbc9357055ce79416503ffa0bfb20b669b4ba3c27cbd585793a0"
+    "sha256": "2b026331ef79a1cd4558009abe62c26ab75aed0733cc5c529ae80485bba40715"
   },
   {
     "name": "20250002000000_company_hacienda_fields",
-    "sha256": "c7573b97d9825fcfaab67bf8ef456103097dc712c2e5627c70acc0675b5d7e25"
+    "sha256": "d3e421517b11977c13c654f60da455e281d560dc678b084e57a16a34c3680725"
   },
   {
     "name": "20250003000000_hacienda_connection",
@@ -13,71 +13,71 @@
   },
   {
     "name": "20260911140000_fiscal_document_core",
-    "sha256": "6c8711ded4c3091ac1274f258c22330e97068b6842d4d035f837b99026e997cb"
+    "sha256": "166f2b9f6dc367503a3bad910103d72a31d3541f696726259a785a021bc46320"
   },
   {
     "name": "20260911143000_fiscal_idempotency_scope",
-    "sha256": "195376c41e6387783bad06d4f015084d623cd423a59c4b3be5d3edfb95eeb773"
+    "sha256": "8f9fe56667e9c5ff0f39804137b3afb5468ae5faeb8c192583d96e18f5d5b872"
   },
   {
     "name": "20260912123000_post_f2_2_fiscal_constraints",
-    "sha256": "67d1b752fd14052a3a4c8e4ed6651e9ddbfb410bcc606d224aebc9c6ec15f862"
+    "sha256": "a7784a32072968a82c223c42bc34de51e5aaae17da41759956e675868dfe1d3f"
   },
   {
     "name": "20260912180000_fiscal_xml_signing_metadata",
-    "sha256": "169ef7a6c30975b372bd60a5ac2f9384c00909c121108ebcdb3d7712c01e9308"
+    "sha256": "e5ca97ab9696afb4818f8a763b5102519f7c5a2540342b824c48ce7a236b09ee"
   },
   {
     "name": "20260913110000_company_fiscal_profile",
-    "sha256": "f20ff47b0715af2f24db902f82ac614e9702e2a2a59f79c289d978f58334d689"
+    "sha256": "7dfed04062cc8b980f5aec669a38bb9a8c4635bfb54fa286a5e5f8047161830f"
   },
   {
     "name": "20260913113000_company_fiscal_address_positive_codes",
-    "sha256": "ad20cb9294f715c08131f37ba6ecdaf83b3503979ac3283c5753046ae5bb2629"
+    "sha256": "096d1fd019f6e4cb2cbd7345dbab09274a25756690e7c0dac742e09c3f77569f"
   },
   {
     "name": "20260914193000_fiscal_submission",
-    "sha256": "975f1dbc42d693cece7d8fcd42ab53626ebaa4548bbf609556922a53cabce63a"
+    "sha256": "a7b6b1eaf4f7a8bf03de0d65cfba22055c8856cad3effdaa32559f0eefb2ada2"
   },
   {
     "name": "20260915100000_f4_fiscal_artifacts_delivery",
-    "sha256": "405307f33af88965cf68d0ae6e4feb941215bb34e67fc7da066e0280874f9e9c"
+    "sha256": "ab2e2d61f79598c55914735fb0d7f9622d3ba28ad38ba4fa7fd4462ce70db1ac"
   },
   {
     "name": "20260916000000_f4_fix_delivery_unique_null",
-    "sha256": "e53257d3886863c7adf0e63c6269631de78e2b15d1138d4d59c0148e70ead4dd"
+    "sha256": "62a8e876d7cc3be8caab355f8d4c28377e8a1f2bfc1e7b00be52658065effe23"
   },
   {
     "name": "20260920000000_fix_economic_activity_code_format",
-    "sha256": "91864136bb8b483d7cbe586684dd1bb18405e1c06851e25610820f6c9371ac97"
+    "sha256": "c92b36610e328449806b20f2a0fef921d4275a5200960629e98f2db135067ad3"
   },
   {
     "name": "20260924000000_add_cert_extracted_identity",
-    "sha256": "dd5892f9e3fc7f93786c3e7b759dda6a831ebaddc10413112c4ca3a48cc9d5b0"
+    "sha256": "b7a1a767a60477cbf4579c55529cde6d4d4b362be131b0cf9876b21f607518c5"
   },
   {
     "name": "20260924123000_inventori_p0_fiscal_compatibility",
-    "sha256": "67b902a2a849c6858586344b3d0fe8329b069c22a6ee651b227294d2ea3717b8"
+    "sha256": "225269ea2b704bbdd2dc90ca820ab29310aab453ba6cc6d6e6bb891c7f634e18"
   },
   {
     "name": "20260924200000_cert_single_active_partial_unique_index",
-    "sha256": "e7583ff9ed86cbd1c4177959a6f6fe5122d7927ebbee9a36d233a74d288ff4a5"
+    "sha256": "95c175256be36ea6001db996234d261cb108be12821a13edfddf62e0eb7a1f28"
   },
   {
     "name": "20260925000000_p0_economic_activities",
-    "sha256": "db827cef39df4a952cb9c9c60d83f8d992cdeec82d9aed13ff94ee833282a213"
+    "sha256": "236bb3fe27b2822671b28c2fe3a3018841ececc07e8ff498c4a3eba3e716dcb1"
   },
   {
     "name": "20261031000000_fix_fiscal_artifact_xml_unique_index",
-    "sha256": "7d5e47cfc0aab887ce372ac55f6222d6475abd1f40f7788f65d46542fd2fe7fb"
+    "sha256": "bea617f772cf96f0e98fa483b174da8f80cf085af47f7941798640017ca9baa0"
   },
   {
     "name": "20261107000000_restore_fiscal_superseded_lifecycle",
-    "sha256": "c3a2248a46be2f21788a50aed87727768715d4f2b9b914c29cecaae95056d62f"
+    "sha256": "db7fb5af7179398703d8fbbbb408353e2ece825cdd1a89ab9f8e4f843fa4cd54"
   },
   {
     "name": "20261108000000_add_accepted_fiscal_package_delivery",
-    "sha256": "eb2f049faa1fa1a1ff3ba0daf1a8c7d20e666b32a53d48a1ef8d54dbae3d7f10"
+    "sha256": "2ebcd400636efdb8d14ae44f2627059b5e4c33bb11e804bbb983eb69c38e1928"
   },
   {
     "name": "20261109000000_reconcile_fiscal_idempotency_api_key_scope",
@@ -86,6 +86,14 @@
   {
     "name": "20261110000000_make_fiscal_idempotency_rotation_safe",
     "sha256": "ea43d0566814497ae1bd0ca5b37905c6d9215098f90cf33046897b26ec9dd7cf"
+  },
+  {
+    "name": "20261111090000_lab_corrective_note_types",
+    "sha256": "08c76ab165dd93686a8271aef8f4428561ca8e646c1cc71c97acafb80e677a12"
+  },
+  {
+    "name": "20261111100000_lab_corrective_notes",
+    "sha256": "5f8221207747945e75c992df7c3e96aea8f35531730a08802f4062675f43af8b"
   },
   {
     "name": "20261112000000_add_fiscal_onboarding_v1",
@@ -105,7 +113,7 @@
   },
   {
     "name": "20261116000000_w3_a_corrective_lab",
-    "sha256": "bc765f3f2959f22798bad2759db62500b3d60939079f3282d0751534c1fa8eec"
+    "sha256": "492c144ac9700dcc53e9a2f1237f3ff46994c6078f40c1351d96efb67bdd776f"
   },
   {
     "name": "20261117000000_cancellation_reversal_lab",

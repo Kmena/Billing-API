@@ -35,6 +35,8 @@ interface EngineValidationPayload {
 }
 
 const MAX_VALIDATOR_OUTPUT_BYTES = 64 * 1024;
+// Keep the established production limit. A slow offline XSD pass fails closed
+// and is reported as FISCAL_XML_VALIDATOR_TIMEOUT for investigation.
 const DEFAULT_TIMEOUT_MS = 10000;
 
 @Injectable()
@@ -53,6 +55,17 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
   }
 
   validate(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult {
+    return this.validateWithCommand(generatedXml, 'validate');
+  }
+
+  validateUnsignedStructure(generatedXml: FiscalXmlGenerationResult): FiscalXmlValidationResult {
+    return this.validateWithCommand(generatedXml, 'validate-unsigned');
+  }
+
+  private validateWithCommand(
+    generatedXml: FiscalXmlGenerationResult,
+    command: 'validate' | 'validate-unsigned',
+  ): FiscalXmlValidationResult {
     const blockedInput = this.blockedUnsafeXml(generatedXml.xml);
     if (blockedInput) return this.invalid(blockedInput);
 
@@ -65,7 +78,7 @@ export class Xsd11ValidatorAdapter implements XsdValidatorPort {
     const xmlPath = path.join(tempDirectory, `${crypto.randomUUID()}.xml`);
     try {
       fs.writeFileSync(xmlPath, generatedXml.xml, { encoding: 'utf8', mode: 0o600 });
-      const payload = this.runValidator(['validate', schemaPath, xmlPath]);
+      const payload = this.runValidator([command, schemaPath, xmlPath]);
       if (payload.valid)
         return { isValid: true, schemaVersion: generatedXml.schemaVersion, errors: [] };
       return this.invalid(this.normalizeEngineErrors(payload.errors));

@@ -101,8 +101,13 @@ function createService(
   };
   const serializer = overrides.serializer ?? new HaciendaV44XmlSerializerAdapter();
   const signer = overrides.signer ?? new NodeXadesEpesSignerAdapter();
-  const xsdValidator = overrides.xsdValidator ?? new Xsd11ValidatorAdapter();
+  const xsdValidator = overrides.xsdValidator ?? new Xsd11ValidatorAdapter({ timeoutMs: 30000 });
+  const preSignValidator = new Xsd11ValidatorAdapter({ timeoutMs: 30000 });
   const validatingXsd = {
+    validateUnsignedStructure: jest.fn((generated) => {
+      validationOrder.push('xsd-pre-sign');
+      return preSignValidator.validateUnsignedStructure(generated);
+    }),
     validate: jest.fn((generated) => {
       validationOrder.push('xsd-validate');
       return (xsdValidator as Xsd11ValidatorAdapter).validate(generated);
@@ -170,7 +175,7 @@ describe('PrepareFiscalXmlService', () => {
         actor: 'apiKey:test',
       });
 
-      expect(validationOrder).toEqual(['sign', 'verify', 'xsd-validate']);
+      expect(validationOrder).toEqual(['xsd-pre-sign', 'sign', 'verify', 'xsd-validate']);
       expect(result.status).toBe('READY_TO_SUBMIT');
       expect(document.status).toBe('READY_TO_SUBMIT');
       expect(artifact().xsdValidationStatus).toBe('VALID');
@@ -206,6 +211,7 @@ describe('PrepareFiscalXmlService', () => {
     expect(storage.upload).not.toHaveBeenCalled();
     expect(signer.sign).not.toHaveBeenCalled();
     expect(xsdValidator.validate).not.toHaveBeenCalled();
+    expect(xsdValidator.validateUnsignedStructure).not.toHaveBeenCalled();
   });
 
   it('returns READY_TO_SUBMIT metadata without mutating signed artifacts', async () => {
@@ -357,5 +363,57 @@ describe('PrepareFiscalXmlService', () => {
     expect(xsdValidator.validate).not.toHaveBeenCalled();
     expect(artifact().lastErrorCode).toBe(FISCAL_XML_ERROR.signatureVerificationFailed);
     expect(document.status).not.toBe('READY_TO_SUBMIT');
+  });
+
+  it('rejects an invalid unsigned structure before signing or uploading XML', async () => {
+    const document = createDocument('INVOICE');
+    const { service, xsdValidator, signer, storage, artifact } = createService(document);
+    xsdValidator.validateUnsignedStructure.mockReturnValueOnce({
+      isValid: false,
+      schemaVersion: 'v4.4',
+      errors: [{ code: 'FISCAL_XML_VALIDATION_FAILED', message: 'BaseImponible expected' }],
+    });
+
+    await expect(
+      service.execute({
+        tenantId: document.tenantId,
+        documentId: document.id,
+        apiKeyId,
+        scopes: ['invoices:write'],
+      }),
+    ).rejects.toMatchObject({ response: { code: FISCAL_XML_ERROR.xmlValidationFailed } });
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(storage.upload).not.toHaveBeenCalled();
+    expect(artifact().lastErrorCode).toBe(FISCAL_XML_ERROR.xmlValidationFailed);
+  });
+
+  it('rejects a signer that changes fiscal content despite a valid signature result', async () => {
+    const document = createDocument('INVOICE');
+    const realSigner = new NodeXadesEpesSignerAdapter();
+    const material = createTestSigningMaterial();
+    const signer = {
+      sign: jest.fn(async (xml: string) =>
+        realSigner.sign(
+          xml.replace(
+            '<TotalComprobante>1130.00000</TotalComprobante>',
+            '<TotalComprobante>1131.00000</TotalComprobante>',
+          ),
+          material.certificate,
+        ),
+      ),
+      verify: jest.fn(async (xml: string) => realSigner.verify(xml)),
+    };
+    const { service, xsdValidator, artifact } = createService(document, { signer });
+
+    await expect(
+      service.execute({
+        tenantId: document.tenantId,
+        documentId: document.id,
+        apiKeyId,
+        scopes: ['invoices:write'],
+      }),
+    ).rejects.toMatchObject({ response: { code: FISCAL_XML_ERROR.signedContentChanged } });
+    expect(xsdValidator.validate).not.toHaveBeenCalled();
+    expect(artifact().lastErrorCode).toBe(FISCAL_XML_ERROR.signedContentChanged);
   });
 });

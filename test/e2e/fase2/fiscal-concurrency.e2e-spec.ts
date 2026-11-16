@@ -137,6 +137,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
 
     const conflictingPayload = fiscalInvoicePayload(fixture.companyId);
     conflictingPayload.lines[0].unitPrice = '2000.00000';
+    conflictingPayload.lines[0].taxAmount = '260.00000';
     await request(context.app.getHttpServer())
       .post('/api/v1/invoices')
       .set('X-API-Key', rotatedKey.secret)
@@ -193,6 +194,7 @@ describe('Fiscal Concurrency (E2E, PostgreSQL)', () => {
     await authorizeApiKeyForCompany(context.prisma, apiKey.id, fixture.companyId);
     const changedPayload = fiscalInvoicePayload(fixture.companyId);
     changedPayload.lines[0].unitPrice = '2000.00000';
+    changedPayload.lines[0].taxAmount = '260.00000';
 
     const responses = await Promise.all([
       request(context.app.getHttpServer())

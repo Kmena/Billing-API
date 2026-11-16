@@ -27,6 +27,8 @@ import {
 import { isCanonicalHaciendaUnit, isHaciendaDiscountCode } from '../domain/fiscal-catalogs';
 import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.mapper';
 import { ScaledDecimal } from '../domain/scaled-decimal';
+import { HACIENDA_V44_REFERENCE_CODES } from '../domain/fiscal-xml/hacienda-v44-contract';
+import { classifyFiscalLineTax } from '../domain/fiscal-line-tax-treatment';
 import {
   canonicalFiscalPayloadHash,
   FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
@@ -80,6 +82,9 @@ export interface CreateFiscalDocumentCommand {
     readonly contractVersion?: string;
     readonly hash?: string;
   };
+  readonly sourceDocumentId?: string;
+  readonly referenceCode?: string;
+  readonly referenceReason?: string;
 }
 
 @Injectable()
@@ -221,6 +226,9 @@ export class FiscalDocumentService {
       where: { id: input.documentId, tenantId: input.tenantId },
     });
     if (!document) throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
+    if (document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE') {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
     const requiredScope = document.type === 'INVOICE' ? 'invoices:read' : 'tickets:read';
     if (!input.scopes.includes(requiredScope))
       throw new ForbiddenException({ code: 'INSUFFICIENT_SCOPE' });
@@ -239,7 +247,73 @@ export class FiscalDocumentService {
     return this.toFiscalDocumentResponse(document);
   }
 
+  async getCorrectiveNoteLab(input: {
+    tenantId: string;
+    companyId: string;
+    environment: HaciendaEnvironment;
+    apiKeyId: string;
+    type: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+    documentId?: string;
+    idempotencyKey?: string;
+  }) {
+    if (process.env.NODE_ENV !== 'test' || input.environment !== 'SANDBOX') {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
+    const authorization = await this.prisma.apiKeyCompany.findUnique({
+      where: { apiKeyId_companyId: { apiKeyId: input.apiKeyId, companyId: input.companyId } },
+    });
+    if (!authorization) throw new ForbiddenException({ code: 'API_KEY_COMPANY_NOT_AUTHORIZED' });
+    let documentId = input.documentId;
+    if (input.idempotencyKey) {
+      const key = await this.prisma.fiscalIdempotencyKey.findUnique({
+        where: {
+          tenantId_companyId_operation_key: {
+            tenantId: input.tenantId,
+            companyId: input.companyId,
+            operation: `fiscal-document.create.${input.type.toLowerCase()}`,
+            key: input.idempotencyKey,
+          },
+        },
+      });
+      if (!key) throw new NotFoundException({ code: 'CORRECTION_NOT_FOUND' });
+      if (!key.fiscalDocumentId) {
+        throw new ConflictException({ code: 'IDEMPOTENCY_REQUEST_IN_PROGRESS' });
+      }
+      documentId = key.fiscalDocumentId;
+    }
+    const document = await this.prisma.fiscalDocument.findFirst({
+      where: {
+        id: documentId,
+        tenantId: input.tenantId,
+        companyId: input.companyId,
+        environment: input.environment,
+        type: input.type,
+      },
+    });
+    if (!document) throw new NotFoundException({ code: 'CORRECTION_NOT_FOUND' });
+    await this.prisma.fiscalNoteAudit.create({
+      data: {
+        id: randomUUID(),
+        tenantId: input.tenantId,
+        companyId: input.companyId,
+        fiscalDocumentId: document.id,
+        sourceDocumentId: document.sourceFiscalDocumentId as string,
+        apiKeyId: input.apiKeyId,
+        action: input.idempotencyKey ? 'NOTE.RECOVERED_LAB' : 'NOTE.READ_LAB',
+        requestHash: document.requestHash as string,
+      },
+    });
+    return this.toFiscalDocumentResponse(document);
+  }
+
   async createDocument(command: CreateFiscalDocumentCommand) {
+    const isNote = command.type === 'CREDIT_NOTE' || command.type === 'DEBIT_NOTE';
+    if (isNote && (process.env.NODE_ENV !== 'test' || command.environment !== 'SANDBOX')) {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
+    if (!isNote && (command.sourceDocumentId || command.referenceCode || command.referenceReason)) {
+      throw new BadRequestException({ code: 'CORRECTION_FIELDS_NOT_ALLOWED' });
+    }
     this.validateCreateCommand(command);
     const requestHash = this.hashRequest(command);
     const apiKeyId = command.apiKeyId as string;
@@ -274,7 +348,92 @@ export class FiscalDocumentService {
       });
       if ('response' in idempotency) return idempotency.response;
 
-      const document = await this.createDocumentCore(tx, command, requestHash, idempotencyKey);
+      let source: Awaited<ReturnType<typeof tx.fiscalDocument.findFirst>> = null;
+      if (isNote) {
+        // Lock before checking the source and allocating a consecutive. This
+        // also serializes direct total notes without blocking partial v2 notes.
+        await tx.$queryRaw`SELECT "id" FROM "fiscal_documents" WHERE "id" = ${command.sourceDocumentId}::uuid FOR UPDATE`;
+        source = await tx.fiscalDocument.findFirst({
+          where: {
+            id: command.sourceDocumentId,
+            tenantId: command.tenantId,
+            companyId: command.companyId,
+            environment: 'SANDBOX',
+            type: 'INVOICE',
+            status: 'ACCEPTED',
+            disposedAt: null,
+          },
+        });
+        if (!source) throw new NotFoundException({ code: 'CORRECTION_SOURCE_NOT_FOUND' });
+        const issuer = source.issuerSnapshot as Record<string, unknown>;
+        if (issuer.identificationNumber !== company.identificationNumber) {
+          throw new ConflictException({ code: 'CORRECTION_ISSUER_CHANGED' });
+        }
+        if (
+          !source.receiverSnapshot ||
+          JSON.stringify(source.receiverSnapshot) !== JSON.stringify(command.receiver)
+        ) {
+          throw new BadRequestException({ code: 'CORRECTION_RECEIVER_MISMATCH' });
+        }
+        if (command.type === 'CREDIT_NOTE') {
+          if (JSON.stringify(source.lines) !== JSON.stringify(command.lines)) {
+            throw new BadRequestException({ code: 'CREDIT_NOTE_MUST_BE_TOTAL' });
+          }
+          const prior = await tx.fiscalDocument.findFirst({
+            where: { sourceFiscalDocumentId: source.id, type: 'CREDIT_NOTE' },
+          });
+          if (prior) throw new ConflictException({ code: 'CREDIT_NOTE_ALREADY_EXISTS' });
+        }
+        const verifiedSourceXml = await tx.fiscalXmlArtifact.findFirst({
+          where: {
+            fiscalDocumentId: source.id,
+            tenantId: command.tenantId,
+            companyId: command.companyId,
+            xsdValidationStatus: 'VALID',
+            signedXmlStorageKey: { not: null },
+            signatureVerifiedAt: { not: null },
+          },
+          select: { id: true },
+        });
+        if (!verifiedSourceXml) {
+          throw new ConflictException({ code: 'CORRECTION_SOURCE_XML_UNVERIFIED' });
+        }
+      }
+
+      const document = await this.createDocumentCore(
+        tx,
+        command,
+        requestHash,
+        idempotencyKey,
+        undefined,
+        source
+          ? {
+              sourceFiscalDocumentId: source.id,
+              referenceSnapshot: {
+                documentTypeCode: '01',
+                clave: source.clave,
+                issueDate: source.issueDate.toISOString(),
+                code: command.referenceCode,
+                reason: command.referenceReason,
+              },
+            }
+          : undefined,
+      );
+
+      if (source) {
+        await tx.fiscalNoteAudit.create({
+          data: {
+            id: randomUUID(),
+            tenantId: command.tenantId,
+            companyId: command.companyId,
+            fiscalDocumentId: document.id,
+            sourceDocumentId: source.id,
+            apiKeyId,
+            action: `${command.type}.CREATED_LAB`,
+            requestHash,
+          },
+        });
+      }
 
       await tx.fiscalIdempotencyKey.update({
         where: { id: idempotency.id },
@@ -504,6 +663,48 @@ export class FiscalDocumentService {
     return document;
   }
 
+  async createCorrectiveNoteLab(input: {
+    tenantId: string;
+    companyId: string;
+    environment: HaciendaEnvironment;
+    type: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+    sourceDocumentId: string;
+    referenceCode: string;
+    referenceReason: string;
+    lines?: FiscalDocumentLineInput[];
+    idempotencyKey: string;
+    apiKeyId: string;
+    actor: string;
+  }) {
+    if (process.env.NODE_ENV !== 'test' || input.environment !== 'SANDBOX') {
+      throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
+    }
+    const source = await this.prisma.fiscalDocument.findFirst({
+      where: {
+        id: input.sourceDocumentId,
+        tenantId: input.tenantId,
+        companyId: input.companyId,
+        environment: 'SANDBOX',
+        type: 'INVOICE',
+        status: 'ACCEPTED',
+      },
+    });
+    if (!source) throw new NotFoundException({ code: 'CORRECTION_SOURCE_NOT_FOUND' });
+    return this.createDocument({
+      ...input,
+      receiver: source.receiverSnapshot as Record<string, unknown> | undefined,
+      currency: source.currency,
+      exchangeRate: source.exchangeRate?.toString(),
+      saleCondition: source.saleCondition,
+      creditTermDays: source.creditTermDays ?? undefined,
+      paymentMethod: source.paymentMethod ?? undefined,
+      lines:
+        input.type === 'CREDIT_NOTE'
+          ? (source.lines as unknown as FiscalDocumentLineInput[])
+          : (input.lines ?? []),
+    });
+  }
+
   private async reserveIdempotencyKey(
     tx: Pick<PrismaService, 'fiscalIdempotencyKey' | 'fiscalDocument' | '$queryRaw'>,
     input: {
@@ -674,6 +875,20 @@ export class FiscalDocumentService {
   }
 
   private validateCreateCommand(command: CreateFiscalDocumentCommand): void {
+    if (command.type === 'CREDIT_NOTE' || command.type === 'DEBIT_NOTE') {
+      if (!command.sourceDocumentId || !/^[0-9a-f-]{36}$/i.test(command.sourceDocumentId)) {
+        throw new BadRequestException({ code: 'CORRECTION_SOURCE_REQUIRED' });
+      }
+      if (
+        !command.referenceCode ||
+        !HACIENDA_V44_REFERENCE_CODES.some((code) => code === command.referenceCode) ||
+        !command.referenceReason ||
+        command.referenceReason.trim().length < 3 ||
+        command.referenceReason.length > 180
+      ) {
+        throw new BadRequestException({ code: 'CORRECTION_REFERENCE_INVALID' });
+      }
+    }
     if (!command.apiKeyId) {
       throw new BadRequestException({ code: 'API_KEY_CONTEXT_REQUIRED' });
     }
@@ -760,6 +975,21 @@ export class FiscalDocumentService {
         }
       }
       this.validateLineDiscount(line);
+      const gross = ScaledDecimal.from(line.quantity).multiply(ScaledDecimal.from(line.unitPrice));
+      const subtotal = gross.subtract(ScaledDecimal.from(line.discountAmount ?? '0'));
+      try {
+        classifyFiscalLineTax(line, subtotal);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message.split(':')[0] : '';
+        const code =
+          reason === 'FISCAL_XML_TAX_METADATA_REQUIRED' ||
+          reason === 'FISCAL_XML_IVA_RATE_CODE_REQUIRED'
+            ? 'FISCAL_TAX_METADATA_REQUIRED'
+            : reason.startsWith('FISCAL_XML_')
+              ? reason
+              : 'INVALID_FISCAL_TAX_METADATA';
+        throw new BadRequestException({ code });
+      }
     }
   }
 

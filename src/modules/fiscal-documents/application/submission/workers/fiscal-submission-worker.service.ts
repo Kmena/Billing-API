@@ -113,6 +113,9 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     try {
       const context = await this.loadContext(payload.submissionId);
       if (!context) return;
+      if (context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') {
+        throw new Error('FISCAL_ISSUANCE_BLOCKED');
+      }
 
       const signedXml = await this.storage.download(context.submission.signedXmlStorageKey);
       this.assertHash(signedXml, context.submission.signedXmlSha256);
@@ -181,6 +184,9 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     const context = await this.loadContext(payload.submissionId);
     if (!context || FiscalSubmissionStateMachine.isTerminal(context.submission.status)) {
       return;
+    }
+    if (context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') {
+      throw new Error('FISCAL_ISSUANCE_BLOCKED');
     }
 
     await this.prisma.fiscalSubmission.update({

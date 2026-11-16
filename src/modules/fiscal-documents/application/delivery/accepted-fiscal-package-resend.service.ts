@@ -181,6 +181,13 @@ export class AcceptedFiscalPackageResendService {
         'Fiscal document not found.',
       );
     }
+    if (document.type !== 'INVOICE') {
+      throw new AcceptedPackageResendException(
+        'FISCAL_ISSUANCE_BLOCKED',
+        403,
+        'Unsupported fiscal document type.',
+      );
+    }
     if (
       document.status === 'SUPERSEDED' ||
       document.supersededByFiscalDocumentId !== null ||

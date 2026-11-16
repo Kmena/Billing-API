@@ -109,6 +109,9 @@ export class DeliveryWorkerService implements OnModuleInit {
     }
 
     const { fiscalDocument: doc } = delivery;
+    if (doc.type !== 'INVOICE' && doc.type !== 'TICKET') {
+      throw new Error('FISCAL_ISSUANCE_BLOCKED');
+    }
 
     // Idempotency: check for duplicate trigger (already DELIVERED)
     if (delivery.status === 'DELIVERED') {

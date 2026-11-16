@@ -306,7 +306,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
     const sourceId = await acceptedInvoice('w3a-total-source');
     const body = credit(sourceId, 'TOTAL');
     const first = await post('credit-notes', apiKey.secret, 'w3a-total', body).expect(201);
-    expect(first.body).toMatchObject({ state: 'COMMITTED', documentStatus: 'READY_TO_SUBMIT' });
+    expect(first.body).toMatchObject({ state: 'COMMITTED', documentStatus: 'XML_VALIDATED' });
     const doc = await prisma.fiscalDocument.findUniqueOrThrow({
       where: { id: first.body.documentId },
       include: { xmlArtifacts: true },
@@ -329,7 +329,7 @@ describe('W3-A/B synthetic corrective laboratory', () => {
       .get(`${base()}/corrective-notes/${doc.id}`)
       .set('X-API-Key', apiKey.secret)
       .expect(200)
-      .expect(({ body: status }) => expect(status.status).toBe('READY_TO_SUBMIT'));
+      .expect(({ body: status }) => expect(status.status).toBe('XML_VALIDATED'));
     await request(app.getHttpServer())
       .get(`${base()}/corrective-notes/${sourceId}`)
       .set('X-API-Key', apiKey.secret)
