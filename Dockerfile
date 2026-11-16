@@ -27,7 +27,7 @@ RUN npx prisma generate
 RUN npm run build
 
 # Prune dev dependencies
-RUN npm prune --production
+RUN npm prune --omit=dev --offline --ignore-scripts --no-audit --no-fund
 
 # ─── Stage 3: runner ──────────────────────────────────────────────────────────
 # Minimal production image — non-root user

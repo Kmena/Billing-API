@@ -81,7 +81,16 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   private singlePostStagTest(): boolean {
+    const isolatedDemo =
+      process.env.DEMO_STAG_SINGLE_POST === 'true' &&
+      process.env.NODE_ENV === 'development' &&
+      process.env.DATABASE_URL?.includes('@billing-db:5432/billing_demo') &&
+      process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL ===
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1' &&
+      process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL === 'https://127.0.0.1:9/' &&
+      process.env.EMAIL_USE_REAL === 'false';
     return (
+      isolatedDemo ||
       process.env.NODE_ENV === 'test' &&
       process.env.BILLING_SPEC09_STAG_INVOICING === 'true' &&
       process.env.SPEC10_SINGLE_STAG_POST === 'true'

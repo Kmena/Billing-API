@@ -162,6 +162,37 @@ describe('FiscalSubmissionWorkerService', () => {
     }
   });
 
+  it('makes only one POST in the isolated demo with the dedicated STAG endpoint', async () => {
+    const keys = ['NODE_ENV', 'DEMO_STAG_SINGLE_POST', 'DATABASE_URL',
+      'HACIENDA_RECEPCION_SANDBOX_BASE_URL', 'HACIENDA_RECEPCION_PRODUCTION_BASE_URL',
+      'EMAIL_USE_REAL'] as const;
+    const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+    Object.assign(process.env, {
+      NODE_ENV: 'development', DEMO_STAG_SINGLE_POST: 'true',
+      DATABASE_URL: 'postgresql://synthetic:synthetic@billing-db:5432/billing_demo',
+      HACIENDA_RECEPCION_SANDBOX_BASE_URL:
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1',
+      HACIENDA_RECEPCION_PRODUCTION_BASE_URL: 'https://127.0.0.1:9/',
+      EMAIL_USE_REAL: 'false',
+    });
+    try {
+      const { worker, hacienda, state, queue } = makeWorker({
+        kind: 'RETRYABLE_FAILURE', nextStatus: 'TECHNICAL_RETRY_PENDING',
+        normalizedErrorCode: 'HACIENDA_TOKEN_EXPIRED', httpStatus: 401,
+      } as never);
+      await worker.handleSubmitJob({ submissionId: 'submission-id' });
+      expect(hacienda.submitSignedDocument).toHaveBeenCalledTimes(1);
+      expect(state.applyProviderResult).toHaveBeenCalledWith('submission-id',
+        expect.objectContaining({ nextStatus: 'MANUAL_REVIEW_REQUIRED', httpStatus: 401 }));
+      expect(queue.publish).not.toHaveBeenCalled();
+    } finally {
+      for (const key of keys) {
+        if (previous[key] === undefined) delete process.env[key];
+        else process.env[key] = previous[key];
+      }
+    }
+  });
+
   it('does not replay a stale submission after a crash in the single STAG test', async () => {
     const previous = {
       nodeEnv: process.env.NODE_ENV,
