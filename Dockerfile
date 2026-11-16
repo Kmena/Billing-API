@@ -9,6 +9,12 @@ RUN apk add --no-cache python3 make g++
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 
+# Install only runtime dependencies in a separate, reproducible stage.
+FROM node:24-alpine AS production-deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 # ─── Stage 2: builder ─────────────────────────────────────────────────────────
 # Build the TypeScript project and generate Prisma client
 FROM node:24-alpine AS builder
@@ -25,9 +31,6 @@ RUN npx prisma generate
 
 # Build TypeScript
 RUN npm run build
-
-# Prune dev dependencies
-RUN npm prune --omit=dev --offline --ignore-scripts --no-audit --no-fund
 
 # ─── Stage 3: runner ──────────────────────────────────────────────────────────
 # Minimal production image — non-root user
@@ -60,7 +63,8 @@ RUN apk add --no-cache python3 openssl && \
 
 # Copy only production artifacts
 COPY --from=builder --chown=billing:billing /app/dist ./dist
-COPY --from=builder --chown=billing:billing /app/node_modules ./node_modules
+COPY --from=production-deps --chown=billing:billing /app/node_modules ./node_modules
+COPY --from=builder --chown=billing:billing /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=billing:billing /app/python-packages ./python-packages
 COPY --from=builder --chown=billing:billing /app/prisma ./prisma
 COPY --from=builder --chown=billing:billing /app/resources ./resources
