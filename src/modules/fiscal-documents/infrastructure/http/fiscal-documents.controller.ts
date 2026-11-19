@@ -15,9 +15,10 @@ import { ScopeGuard } from '../../../../api/guards/scope.guard';
 import { Scopes } from '../../../../api/decorators/scopes.decorator';
 import { FiscalDocumentService } from '../../application/fiscal-document.service';
 import { FiscalDocumentType, HaciendaEnvironment } from '../../domain/fiscal.constants';
-import { CreateFiscalDocumentDto } from './dtos/fiscal-document.dtos';
+import { CreateFiscalDocumentDto, DisposeUnsentFiscalDocumentDto } from './dtos/fiscal-document.dtos';
 
 const environments = { PRODUCTION: 'PRODUCTION', SANDBOX: 'SANDBOX' } as const;
+const sandboxOnly = { SANDBOX: 'SANDBOX' } as const;
 
 @ApiTags('Fiscal Documents')
 @SkipThrottle()
@@ -26,6 +27,22 @@ const environments = { PRODUCTION: 'PRODUCTION', SANDBOX: 'SANDBOX' } as const;
 @Controller('companies/:companyId/fiscal-documents/:environment')
 export class FiscalDocumentsController {
   constructor(private readonly fiscalDocumentService: FiscalDocumentService) {}
+
+  @Post('invoices/:id/dispose-unsent')
+  @Scopes('invoices:write')
+  async disposeUnsent(
+    @Request() request: ApiKeyRequest,
+    @Param('companyId') companyId: string,
+    @Param('environment', new ParseEnumPipe(sandboxOnly)) _environment: 'SANDBOX',
+    @Param('id') id: string,
+    @Body() body: DisposeUnsentFiscalDocumentDto,
+  ) {
+    return this.fiscalDocumentService.disposeUnsentInvoice({
+      tenantId: request.user.tenantId, companyId, documentId: id,
+      apiKeyId: request.apiKey.id, actor: `apiKey:${request.apiKey.keyPrefix}`,
+      reason: body.reason,
+    });
+  }
 
   @Post('invoices')
   @Scopes('invoices:write')

@@ -168,8 +168,17 @@ export class SubmitFiscalDocumentService {
     },
     artifact: { signedXmlSha256: string | null; signedXmlStorageKey: string | null },
   ) {
-    try {
-      return await this.prisma.fiscalSubmission.create({
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM fiscal_documents WHERE id = ${document.id}::uuid FOR UPDATE`;
+      const current = await tx.fiscalDocument.findUnique({ where: { id: document.id },
+        select: { status: true } });
+      if (current?.status !== 'READY_TO_SUBMIT')
+        throw new ConflictException({ code: 'FISCAL_DOCUMENT_NOT_READY_TO_SUBMIT' });
+      const existing = await tx.fiscalSubmission.findUnique({
+        where: { fiscalDocumentId: document.id },
+      });
+      if (existing) return existing;
+      return tx.fiscalSubmission.create({
         data: {
           id: randomUUID(),
           fiscalDocumentId: document.id,
@@ -184,24 +193,7 @@ export class SubmitFiscalDocumentService {
           nextAttemptAt: new Date(),
         },
       });
-    } catch (error: unknown) {
-      if (this.isUniqueConstraintError(error)) {
-        const existing = await this.prisma.fiscalSubmission.findUnique({
-          where: { fiscalDocumentId: document.id },
-        });
-        if (existing) return existing;
-      }
-      throw error;
-    }
-  }
-
-  private isUniqueConstraintError(error: unknown): boolean {
-    return (
-      typeof error === 'object' &&
-      error !== null &&
-      'code' in error &&
-      (error as { code?: string }).code === 'P2002'
-    );
+    });
   }
 
   private toResponse(submission: {

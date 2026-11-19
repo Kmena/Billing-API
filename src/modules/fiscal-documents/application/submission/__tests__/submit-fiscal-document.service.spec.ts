@@ -33,21 +33,25 @@ function makeService(overrides: Record<string, unknown> = {}) {
     responseReceivedAt: null,
   };
   const prisma = {
+    $transaction: jest.fn(),
+    $queryRaw: jest.fn().mockResolvedValue([{ id: readyDocument.id }]),
     apiKeyCompany: {
       findUnique: jest.fn().mockResolvedValue({ apiKeyId: 'api-key-id', companyId: 'company-id' }),
     },
     haciendaConnection: {
       findFirst: jest.fn().mockResolvedValue({ id: 'connection-id', status: 'CONNECTED' }),
     },
-    fiscalDocument: { findFirst: jest.fn().mockResolvedValue(readyDocument) },
+    fiscalDocument: { findFirst: jest.fn().mockResolvedValue(readyDocument),
+      findUnique: jest.fn().mockResolvedValue(readyDocument) },
     fiscalSubmission: {
       create: jest.fn().mockResolvedValue({ ...submission, status: 'REQUESTED' }),
       update: jest.fn().mockResolvedValue(submission),
-      findUnique: jest.fn().mockResolvedValue(submission),
+      findUnique: jest.fn().mockResolvedValue(null),
       findUniqueOrThrow: jest.fn().mockResolvedValue(submission),
     },
     ...overrides,
   };
+  prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => Promise<unknown>) => fn(prisma));
   const audit = { record: jest.fn() };
   const queue = { publish: jest.fn().mockResolvedValue(undefined) };
   return {
@@ -115,6 +119,14 @@ describe('SubmitFiscalDocumentService', () => {
       }),
     );
     expect(queue.publish).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks a document after the row lock and refuses a concurrent disposal', async () => {
+    const { service, prisma, queue } = makeService();
+    prisma.fiscalDocument.findUnique.mockResolvedValueOnce({ status: 'SUPERSEDED' });
+    await expect(service.execute(input())).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.fiscalSubmission.create).not.toHaveBeenCalled();
+    expect(queue.publish).not.toHaveBeenCalled();
   });
 
   it('denies invoice submission without invoice scope', async () => {

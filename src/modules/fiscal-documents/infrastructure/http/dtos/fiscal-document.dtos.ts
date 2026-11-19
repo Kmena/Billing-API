@@ -76,3 +76,7 @@ export class UpsertDefaultIssuancePointDto {
 export class ConfigureFiscalSequenceDto {
   @ApiProperty() @Matches(/^\d{1,10}$/) nextValue!: string;
 }
+
+export class DisposeUnsentFiscalDocumentDto {
+  @ApiProperty() @IsString() @MinLength(3) @MaxLength(180) reason!: string;
+}

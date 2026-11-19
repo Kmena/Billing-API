@@ -96,6 +96,45 @@ export class FiscalDocumentService {
     private readonly issuanceEligibility?: FiscalIssuanceEligibilityService,
   ) {}
 
+  /** Dispose of a SANDBOX invoice only when no fiscal submission ever existed. */
+  async disposeUnsentInvoice(input: { tenantId: string; companyId: string;
+    documentId: string; apiKeyId: string; actor: string; reason: string }) {
+    if (!input.reason.trim() || input.reason.length > 180)
+      throw new BadRequestException({ code: 'DISPOSITION_REASON_REQUIRED' });
+    return this.prisma.$transaction(async (tx) => {
+      const keyCompany = await tx.apiKeyCompany.findUnique({ where: {
+        apiKeyId_companyId: { apiKeyId: input.apiKeyId, companyId: input.companyId },
+      } });
+      if (!keyCompany) throw new ForbiddenException({ code: 'API_KEY_COMPANY_NOT_ALLOWED' });
+      await tx.$queryRaw`SELECT id FROM fiscal_documents WHERE id = ${input.documentId}::uuid FOR UPDATE`;
+      const document = await tx.fiscalDocument.findFirst({ where: {
+        id: input.documentId, tenantId: input.tenantId, companyId: input.companyId,
+        environment: 'SANDBOX', type: 'INVOICE',
+      } });
+      if (!document) throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
+      if (document.status === 'SUPERSEDED' && document.disposedAt)
+        return { id: document.id, status: document.status };
+      if (!['READY_FOR_XML', 'XML_GENERATED', 'XML_VALIDATED', 'SIGNED', 'READY_TO_SUBMIT']
+        .includes(document.status))
+        throw new ConflictException({ code: 'FISCAL_DOCUMENT_NOT_DISPOSABLE' });
+      const submissions = await tx.fiscalSubmission.count({ where: {
+        fiscalDocumentId: document.id,
+      } });
+      if (submissions) throw new ConflictException({ code: 'FISCAL_SUBMISSION_EXISTS' });
+      const changed = await tx.fiscalDocument.updateMany({ where: {
+        id: document.id, status: document.status, disposedAt: null,
+      }, data: { status: 'SUPERSEDED', disposedAt: new Date(),
+        disposedBy: input.actor, dispositionReason: input.reason.trim() } });
+      if (changed.count !== 1) throw new ConflictException({ code: 'FISCAL_DOCUMENT_CHANGED' });
+      await tx.auditLog.create({ data: { id: randomUUID(), tenantId: input.tenantId,
+        companyId: input.companyId, apiKeyId: input.apiKeyId, actor: input.actor,
+        action: 'fiscal-document.unsent-disposed', resource: `FiscalDocument:${document.id}`,
+        eventClass: 'FISCAL_AUDIT', metadata: { reason: input.reason.trim(),
+          environment: 'SANDBOX', previousStatus: document.status } } });
+      return { id: document.id, status: 'SUPERSEDED' as const };
+    });
+  }
+
   async ensureDefaultIssuancePoint(input: {
     tenantId: string;
     companyId: string;
