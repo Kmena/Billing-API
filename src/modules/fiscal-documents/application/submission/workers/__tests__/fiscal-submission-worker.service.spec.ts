@@ -74,6 +74,28 @@ function makeWorker(
 }
 
 describe('FiscalSubmissionWorkerService', () => {
+  it('ignores jobs outside the explicitly allowed installed STAG company', async () => {
+    const previous = process.env.BILLING_STAG_ALLOWED_COMPANY_ID;
+    process.env.BILLING_STAG_ALLOWED_COMPANY_ID = 'other-company-id';
+    try {
+      const { worker, prisma, hacienda } = makeWorker();
+      await worker.handleSubmitJob({ submissionId: 'submission-id' });
+      await worker.handleReconcileJob({ submissionId: 'submission-id' });
+      await worker.enqueueDueWork();
+      expect(prisma.fiscalSubmission.updateMany).not.toHaveBeenCalled();
+      expect(hacienda.submitSignedDocument).not.toHaveBeenCalled();
+      expect(hacienda.queryStatusByClave).not.toHaveBeenCalled();
+      expect(prisma.fiscalSubmission.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({
+          companyId: 'other-company-id', environment: 'SANDBOX',
+        }) }),
+      );
+    } finally {
+      if (previous === undefined) delete process.env.BILLING_STAG_ALLOWED_COMPANY_ID;
+      else process.env.BILLING_STAG_ALLOWED_COMPANY_ID = previous;
+    }
+  });
+
   it('submits exact persisted signed XML and schedules reconciliation after HTTP 201 acknowledgement', async () => {
     const { worker, prisma, hacienda, state, queue } = makeWorker();
 

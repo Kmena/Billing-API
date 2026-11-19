@@ -82,6 +82,13 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   private singlePostStagTest(): boolean {
+    const scopedInstalledStag =
+      /^[0-9a-f-]{36}$/i.test(process.env.BILLING_STAG_ALLOWED_COMPANY_ID ?? '') &&
+      process.env.USE_REAL_HACIENDA === 'true' &&
+      process.env.EMAIL_USE_REAL === 'false' &&
+      process.env.HACIENDA_RECEPCION_SANDBOX_BASE_URL ===
+        'https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1' &&
+      process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL === 'https://127.0.0.1:9/';
     const isolatedDemo =
       process.env.DEMO_STAG_SINGLE_POST === 'true' &&
       process.env.NODE_ENV === 'development' &&
@@ -91,7 +98,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
       process.env.HACIENDA_RECEPCION_PRODUCTION_BASE_URL === 'https://127.0.0.1:9/' &&
       process.env.EMAIL_USE_REAL === 'false';
     return (
-      isolatedDemo ||
+      isolatedDemo || scopedInstalledStag ||
       process.env.NODE_ENV === 'test' &&
       process.env.BILLING_SPEC09_STAG_INVOICING === 'true' &&
       process.env.SPEC10_SINGLE_STAG_POST === 'true'
@@ -109,6 +116,15 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     return process.env.DEMO_STAG_PROTECTED_COMPANY_ID || null;
   }
 
+  private async isOutsideStagScope(submissionId: string): Promise<boolean> {
+    const allowedCompanyId = process.env.BILLING_STAG_ALLOWED_COMPANY_ID;
+    if (!allowedCompanyId) return false;
+    const row = await this.prisma.fiscalSubmission.findUnique({
+      where: { id: submissionId }, select: { companyId: true, environment: true },
+    });
+    return !row || row.companyId !== allowedCompanyId || row.environment !== 'SANDBOX';
+  }
+
   private async mockWouldProcessProtectedSubmission(id: string): Promise<boolean> {
     const companyId = this.protectedDemoCompanyInMock();
     if (!companyId) return false;
@@ -119,6 +135,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   async handleSubmitJob(payload: FiscalSubmissionJobPayload): Promise<void> {
+    if (await this.isOutsideStagScope(payload.submissionId)) return;
     if (await this.mockWouldProcessProtectedSubmission(payload.submissionId)) return;
     if (this.singlePostStagTest()) {
       const current = await this.prisma.fiscalSubmission.findUnique({
@@ -213,6 +230,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   }
 
   async handleReconcileJob(payload: FiscalSubmissionJobPayload): Promise<void> {
+    if (await this.isOutsideStagScope(payload.submissionId)) return;
     if (await this.mockWouldProcessProtectedSubmission(payload.submissionId)) return;
     const context = await this.loadContext(payload.submissionId);
     if (!context || FiscalSubmissionStateMachine.isTerminal(context.submission.status)) {
@@ -260,8 +278,10 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
   async enqueueDueWork(): Promise<void> {
     const singlePost = this.singlePostStagTest();
     const protectedCompanyId = this.protectedDemoCompanyInMock();
+    const allowedCompanyId = process.env.BILLING_STAG_ALLOWED_COMPANY_ID;
     const due = await this.prisma.fiscalSubmission.findMany({
       where: {
+        ...(allowedCompanyId ? { companyId: allowedCompanyId, environment: 'SANDBOX' as const } : {}),
         ...(protectedCompanyId ? { companyId: { not: protectedCompanyId } } : {}),
         status: {
           in: [
@@ -279,6 +299,7 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
 
     const staleSubmitting = await this.prisma.fiscalSubmission.findMany({
       where: {
+        ...(allowedCompanyId ? { companyId: allowedCompanyId, environment: 'SANDBOX' as const } : {}),
         ...(protectedCompanyId ? { companyId: { not: protectedCompanyId } } : {}),
         status: 'SUBMITTING',
         lastAttemptAt: { lte: new Date(Date.now() - 5 * 60_000) },
