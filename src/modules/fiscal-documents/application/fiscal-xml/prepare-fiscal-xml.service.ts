@@ -30,6 +30,7 @@ import {
 import { FiscalXmlProcessingResult } from '../../domain/fiscal-xml/fiscal-xml.types';
 import { EnsureInitialFiscalPackageService } from '../delivery/ensure-initial-fiscal-package.service';
 import { FiscalArtifactIndexService } from '../artifacts/fiscal-artifact-index.service';
+import { correctiveStagAllowed } from '../../domain/corrective-stag-gate';
 
 @Injectable()
 export class PrepareFiscalXmlService implements OnModuleDestroy {
@@ -64,7 +65,7 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
     });
     if (!document) throw new NotFoundException({ code: FISCAL_XML_ERROR.documentNotFound });
     const isNote = document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE';
-    if (isNote && (process.env.NODE_ENV !== 'test' || document.environment !== 'SANDBOX')) {
+    if (isNote && !correctiveStagAllowed(document.type, document.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     this.assertScope(document.type, input.scopes);

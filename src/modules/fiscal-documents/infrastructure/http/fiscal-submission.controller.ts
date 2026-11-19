@@ -19,6 +19,7 @@ import { GetFiscalSubmissionStatusService } from '../../application/submission/g
 import { RequestFiscalSubmissionReconciliationService } from '../../application/submission/request-fiscal-submission-reconciliation.service';
 
 const environments = { PRODUCTION: 'PRODUCTION', SANDBOX: 'SANDBOX' } as const;
+const sandboxOnly = { SANDBOX: 'SANDBOX' } as const;
 
 @ApiTags('Fiscal Submission')
 @SkipThrottle()
@@ -51,6 +52,54 @@ export class FiscalSubmissionController {
       apiKeyId: request.apiKey.id,
       scopes: request.apiKey.scopes,
       actor: `apiKey:${request.apiKey.keyPrefix}`,
+    });
+  }
+
+  @Post('credit-notes/:id/submit')
+  @Scopes('credit-notes:write')
+  @HttpCode(202)
+  async submitCreditNote(
+    @Request() request: ApiKeyRequest,
+    @Param('companyId') companyId: string,
+    @Param('environment', new ParseEnumPipe(sandboxOnly)) environment: HaciendaEnvironment,
+    @Param('id') id: string,
+  ) {
+    return this.submitFiscalDocumentService.execute({
+      tenantId: request.user.tenantId, companyId, environment,
+      documentType: 'CREDIT_NOTE', documentId: id,
+      apiKeyId: request.apiKey.id, scopes: request.apiKey.scopes,
+      actor: `apiKey:${request.apiKey.keyPrefix}`,
+    });
+  }
+
+  @Get('credit-notes/:id/submission')
+  @Scopes('credit-notes:write')
+  async getCreditNoteSubmission(
+    @Request() request: ApiKeyRequest,
+    @Param('companyId') companyId: string,
+    @Param('environment', new ParseEnumPipe(sandboxOnly)) environment: HaciendaEnvironment,
+    @Param('id') id: string,
+  ) {
+    return this.getStatusService.execute({
+      tenantId: request.user.tenantId, companyId, environment,
+      documentType: 'CREDIT_NOTE', documentId: id,
+      apiKeyId: request.apiKey.id, scopes: request.apiKey.scopes,
+    });
+  }
+
+  @Post('credit-notes/:id/submission/reconcile')
+  @Scopes('credit-notes:write')
+  @HttpCode(202)
+  async reconcileCreditNoteSubmission(
+    @Request() request: ApiKeyRequest,
+    @Param('companyId') companyId: string,
+    @Param('environment', new ParseEnumPipe(sandboxOnly)) environment: HaciendaEnvironment,
+    @Param('id') id: string,
+  ) {
+    return this.reconcileService.execute({
+      tenantId: request.user.tenantId, companyId, environment,
+      documentType: 'CREDIT_NOTE', documentId: id,
+      apiKeyId: request.apiKey.id, scopes: request.apiKey.scopes,
     });
   }
 

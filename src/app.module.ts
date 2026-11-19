@@ -17,6 +17,7 @@ import { CabysModule } from './modules/cabys/cabys.module';
 import { ExchangeRatesModule } from './modules/exchange-rates/exchange-rates.module';
 import { HaciendaConnectionModule } from './modules/hacienda-connection/hacienda-connection.module';
 import { FiscalDocumentsModule } from './modules/fiscal-documents/fiscal-documents.module';
+import { CorrectiveNotesLabModule } from './modules/fiscal-documents/corrective-notes-lab.module';
 import { FiscalOnboardingModule } from './modules/fiscal-onboarding/fiscal-onboarding.module';
 import { HealthController } from './api/health/health.controller';
 import { PrismaHealthIndicator } from './api/health/indicators/prisma.health-indicator';
@@ -68,6 +69,7 @@ import { ConfigService } from '@nestjs/config';
     ApiKeysModule,
     HaciendaConnectionModule,
     FiscalDocumentsModule,
+    ...(process.env.CORRECTIVE_NOTES_STAG_ENABLED === 'true' ? [CorrectiveNotesLabModule] : []),
     FiscalOnboardingModule,
 
     // Fase 1: Hacienda query endpoints

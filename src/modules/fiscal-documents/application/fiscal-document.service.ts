@@ -29,6 +29,7 @@ import { mapIdentificationTypeToXmlCode } from '../domain/fiscal-identification.
 import { ScaledDecimal } from '../domain/scaled-decimal';
 import { HACIENDA_V44_REFERENCE_CODES } from '../domain/fiscal-xml/hacienda-v44-contract';
 import { classifyFiscalLineTax } from '../domain/fiscal-line-tax-treatment';
+import { correctiveStagAllowed } from '../domain/corrective-stag-gate';
 import {
   canonicalFiscalPayloadHash,
   FISCAL_PAYLOAD_EQUIVALENCE_CONTRACT_VERSION,
@@ -226,10 +227,12 @@ export class FiscalDocumentService {
       where: { id: input.documentId, tenantId: input.tenantId },
     });
     if (!document) throw new NotFoundException({ code: 'FISCAL_DOCUMENT_NOT_FOUND' });
-    if (document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE') {
+    if ((document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE') &&
+        !correctiveStagAllowed(document.type, document.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
-    const requiredScope = document.type === 'INVOICE' ? 'invoices:read' : 'tickets:read';
+    const requiredScope = document.type === 'INVOICE' ? 'invoices:read' :
+      document.type === 'CREDIT_NOTE' ? 'credit-notes:read' : 'tickets:read';
     if (!input.scopes.includes(requiredScope))
       throw new ForbiddenException({ code: 'INSUFFICIENT_SCOPE' });
     const authorization = await this.prisma.apiKeyCompany.findUnique({
@@ -256,7 +259,7 @@ export class FiscalDocumentService {
     documentId?: string;
     idempotencyKey?: string;
   }) {
-    if (process.env.NODE_ENV !== 'test' || input.environment !== 'SANDBOX') {
+    if (!correctiveStagAllowed(input.type, input.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     const authorization = await this.prisma.apiKeyCompany.findUnique({
@@ -308,7 +311,7 @@ export class FiscalDocumentService {
 
   async createDocument(command: CreateFiscalDocumentCommand) {
     const isNote = command.type === 'CREDIT_NOTE' || command.type === 'DEBIT_NOTE';
-    if (isNote && (process.env.NODE_ENV !== 'test' || command.environment !== 'SANDBOX')) {
+    if (isNote && !correctiveStagAllowed(command.type, command.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     if (!isNote && (command.sourceDocumentId || command.referenceCode || command.referenceReason)) {
@@ -676,7 +679,7 @@ export class FiscalDocumentService {
     apiKeyId: string;
     actor: string;
   }) {
-    if (process.env.NODE_ENV !== 'test' || input.environment !== 'SANDBOX') {
+    if (!correctiveStagAllowed(input.type, input.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     const source = await this.prisma.fiscalDocument.findFirst({

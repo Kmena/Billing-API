@@ -7,6 +7,7 @@ import type { HaciendaSubmissionConfig } from '../../../../infrastructure/config
 import { classifyRecepcionStatus } from './hacienda-recepcion-status.table';
 import { parseMensajeHacienda } from './hacienda-mensajehacienda-parser';
 import type { HaciendaEnvironment } from '../../domain/fiscal.constants';
+import { correctiveStagAllowed } from '../../domain/corrective-stag-gate';
 import type {
   HaciendaQueryStatusInput,
   HaciendaRateLimitMetadata,
@@ -63,7 +64,8 @@ export class HaciendaRecepcionAdapter implements HaciendaSubmissionPort {
   async submitSignedDocument(
     input: HaciendaSubmitSignedDocumentInput,
   ): Promise<HaciendaSubmissionResult> {
-    if (input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') {
+    if ((input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') &&
+        !correctiveStagAllowed(input.documentType, input.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     const body: HaciendaSubmissionRequest = {

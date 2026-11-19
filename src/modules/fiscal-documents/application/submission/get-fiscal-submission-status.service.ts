@@ -54,7 +54,8 @@ export class GetFiscalSubmissionStatusService {
   }
 
   private assertScope(documentType: FiscalDocumentType, scopes: string[]): void {
-    const requiredScope = documentType === 'INVOICE' ? 'invoices:write' : 'tickets:write';
+    const requiredScope = documentType === 'INVOICE' ? 'invoices:write' :
+      documentType === 'CREDIT_NOTE' ? 'credit-notes:write' : 'tickets:write';
     if (!scopes.includes(requiredScope))
       throw new ForbiddenException({ code: 'INSUFFICIENT_SCOPE' });
   }

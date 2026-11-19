@@ -13,6 +13,7 @@ import { AuditService, EventClass } from '../../../audit/application/audit.servi
 import { FiscalDocumentType, HaciendaEnvironment } from '../../domain/fiscal.constants';
 import { FiscalSubmissionStateMachine } from '../../domain/submission';
 import { FiscalSubmissionResponse } from './fiscal-submission-response';
+import { correctiveStagAllowed } from '../../domain/corrective-stag-gate';
 import {
   RECONCILE_FISCAL_SUBMISSION_JOB,
   SUBMIT_FISCAL_DOCUMENT_JOB,
@@ -42,7 +43,8 @@ export class SubmitFiscalDocumentService {
   ) {}
 
   async execute(input: SubmitFiscalDocumentInput): Promise<SubmitFiscalDocumentResult> {
-    if (input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') {
+    if ((input.documentType === 'CREDIT_NOTE' || input.documentType === 'DEBIT_NOTE') &&
+        !correctiveStagAllowed(input.documentType, input.environment)) {
       throw new ForbiddenException({ code: 'FISCAL_ISSUANCE_BLOCKED' });
     }
     this.assertScope(input.documentType, input.scopes);
@@ -241,7 +243,8 @@ export class SubmitFiscalDocumentService {
   }
 
   private assertScope(documentType: FiscalDocumentType, scopes: string[]): void {
-    const requiredScope = documentType === 'INVOICE' ? 'invoices:write' : 'tickets:write';
+    const requiredScope = documentType === 'INVOICE' ? 'invoices:write' :
+      documentType === 'CREDIT_NOTE' ? 'credit-notes:write' : 'tickets:write';
     if (!scopes.includes(requiredScope)) {
       throw new ForbiddenException({ code: 'INSUFFICIENT_SCOPE' });
     }

@@ -25,6 +25,7 @@ import {
 } from '../ports/hacienda-submission.port';
 import { FiscalSubmissionStateService } from '../fiscal-submission-state.service';
 import { FiscalSubmissionStateMachine, FiscalSubmissionStatus } from '../../../domain/submission';
+import { correctiveStagAllowed } from '../../../domain/corrective-stag-gate';
 import {
   FiscalSubmissionJobPayload,
   RECONCILE_FISCAL_SUBMISSION_JOB,
@@ -143,7 +144,8 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     try {
       const context = await this.loadContext(payload.submissionId);
       if (!context) return;
-      if (context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') {
+      if ((context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') &&
+          !correctiveStagAllowed(context.document.type, context.document.environment)) {
         throw new Error('FISCAL_ISSUANCE_BLOCKED');
       }
 
@@ -216,7 +218,8 @@ export class FiscalSubmissionWorkerService implements OnModuleInit, OnModuleDest
     if (!context || FiscalSubmissionStateMachine.isTerminal(context.submission.status)) {
       return;
     }
-    if (context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') {
+    if ((context.document.type === 'CREDIT_NOTE' || context.document.type === 'DEBIT_NOTE') &&
+        !correctiveStagAllowed(context.document.type, context.document.environment)) {
       throw new Error('FISCAL_ISSUANCE_BLOCKED');
     }
 
