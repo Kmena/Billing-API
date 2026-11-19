@@ -44,7 +44,14 @@ export class CreateFiscalLineDto {
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) taxRate?: string;
 }
 
+export class FiscalIssuancePointSelectionDto {
+  @ApiProperty() @Matches(/^\d{3}$/) branchCode!: string;
+  @ApiProperty() @Matches(/^\d{5}$/) terminalCode!: string;
+}
+
 export class CreateFiscalDocumentDto {
+  @ApiPropertyOptional() @IsOptional() @ValidateNested() @Type(() => FiscalIssuancePointSelectionDto)
+  issuancePoint?: FiscalIssuancePointSelectionDto;
   @ApiPropertyOptional() @IsOptional() @IsObject() receiver?: Record<string, unknown>;
   @ApiProperty({ enum: ['CRC', 'USD'] }) @IsIn(['CRC', 'USD']) currency!: string;
   @ApiPropertyOptional() @IsOptional() @Matches(/^\d+(\.\d{1,5})?$/) exchangeRate?: string;

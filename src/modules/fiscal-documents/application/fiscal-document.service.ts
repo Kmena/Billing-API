@@ -75,6 +75,8 @@ export interface CreateFiscalDocumentCommand {
   readonly saleCondition: string;
   readonly creditTermDays?: number;
   readonly paymentMethod?: string;
+  /** An active point explicitly selected for a SANDBOX invoice. */
+  readonly issuancePoint?: { readonly branchCode: string; readonly terminalCode: string };
   readonly lines: FiscalDocumentLineInput[];
   readonly idempotencyKey?: string;
   readonly apiKeyId?: string;
@@ -601,13 +603,21 @@ export class FiscalDocumentService {
     if (!haciendaConnection)
       throw new BadRequestException({ code: 'HACIENDA_CONNECTION_REQUIRED' });
 
+    if (command.issuancePoint && (command.environment !== 'SANDBOX' ||
+        !['INVOICE', 'CREDIT_NOTE'].includes(command.type) ||
+        !/^\d{3}$/.test(command.issuancePoint.branchCode) ||
+        !/^\d{5}$/.test(command.issuancePoint.terminalCode)))
+      throw new BadRequestException({ code: 'SANDBOX_ISSUANCE_POINT_INVALID' });
     const point = await tx.fiscalIssuancePoint.findFirst({
       where: {
         tenantId: command.tenantId,
         companyId: command.companyId,
         environment: command.environment,
         active: true,
-        isDefault: true,
+        ...(command.issuancePoint ? {
+          branchCode: command.issuancePoint.branchCode,
+          terminalCode: command.issuancePoint.terminalCode,
+        } : { isDefault: true }),
       },
       orderBy: { id: 'asc' },
     });
@@ -734,6 +744,7 @@ export class FiscalDocumentService {
     if (!source) throw new NotFoundException({ code: 'CORRECTION_SOURCE_NOT_FOUND' });
     return this.createDocument({
       ...input,
+      issuancePoint: { branchCode: source.branchCode, terminalCode: source.terminalCode },
       receiver: source.receiverSnapshot as Record<string, unknown> | undefined,
       currency: source.currency,
       exchangeRate: source.exchangeRate?.toString(),

@@ -111,6 +111,7 @@ export class FiscalDocumentsController {
       saleCondition: body.saleCondition,
       creditTermDays: body.creditTermDays,
       paymentMethod: body.paymentMethod,
+      issuancePoint: body.issuancePoint,
       lines: body.lines,
       idempotencyKey,
       apiKeyId: request.apiKey.id,
