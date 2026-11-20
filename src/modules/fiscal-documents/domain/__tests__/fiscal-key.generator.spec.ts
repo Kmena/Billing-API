@@ -24,6 +24,17 @@ describe('Fiscal key generation v4.4', () => {
     expect(clave).toHaveLength(50);
   });
 
+  it('uses the Costa Rica calendar date across a UTC day boundary', () => {
+    const clave = buildFiscalKey({
+      issuedAt: new Date('2026-11-20T00:24:23.309Z'),
+      issuerIdentificationNumber: '3101123456',
+      consecutive: '00100001010000000025',
+      securityCode: '12345678',
+    });
+
+    expect(clave.slice(3, 9)).toBe('191126');
+  });
+
   it('rejects issuer identification values that cannot be explicitly normalized for Clave', () => {
     expect(() =>
       buildFiscalKey({

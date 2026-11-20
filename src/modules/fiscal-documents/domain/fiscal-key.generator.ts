@@ -35,9 +35,12 @@ export function buildFiscalKey(input: {
   const normalizedIssuerId = normalizeIssuerIdentificationForClave(
     input.issuerIdentificationNumber,
   );
-  const day = input.issuedAt.getDate().toString().padStart(2, '0');
-  const month = (input.issuedAt.getMonth() + 1).toString().padStart(2, '0');
-  const year = (input.issuedAt.getFullYear() % 100).toString().padStart(2, '0');
+  // The clave date must match FechaEmision, which is serialized at UTC-06:00.
+  // Use UTC accessors after shifting to avoid dependence on the host timezone.
+  const costaRicaDate = new Date(input.issuedAt.getTime() - 6 * 60 * 60_000);
+  const day = costaRicaDate.getUTCDate().toString().padStart(2, '0');
+  const month = (costaRicaDate.getUTCMonth() + 1).toString().padStart(2, '0');
+  const year = (costaRicaDate.getUTCFullYear() % 100).toString().padStart(2, '0');
   const situation = input.situation ?? FISCAL_NORMAL_SITUATION;
 
   if (!/^\d{20}$/.test(input.consecutive)) throw new Error('consecutive must be 20 digits.');
