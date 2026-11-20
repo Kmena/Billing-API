@@ -243,6 +243,36 @@ describe('PrepareFiscalXmlService', () => {
     expect(xsdValidator.validate).not.toHaveBeenCalled();
   });
 
+  it('promotes an already signed STAG credit note only after verified XML', async () => {
+    const previous = process.env.CORRECTIVE_NOTES_STAG_ENABLED;
+    process.env.CORRECTIVE_NOTES_STAG_ENABLED = 'true';
+    try {
+      const document = createDocument('INVOICE');
+      Object.assign(document, { type: 'CREDIT_NOTE', status: 'XML_VALIDATED' });
+      document.xmlArtifacts = [{
+        id: artifactId, schemaVersion: 'v4.4', unsignedXmlSha256: 'u'.repeat(64),
+        signedXmlSha256: 's'.repeat(64), signedXmlStorageKey: 'signed.xml',
+        xsdValidationStatus: 'VALID', signedAt: new Date('2026-09-13T00:00:00.000Z'),
+        signatureVerifiedAt: new Date('2026-09-13T00:00:01.000Z'),
+        signingCertificateId: certificateId,
+      } as never];
+      const { service, prisma, storage } = createService(document);
+
+      const result = await service.execute({ tenantId: document.tenantId,
+        documentId: document.id, apiKeyId, scopes: ['credit-notes:write'] });
+
+      expect(result.status).toBe('READY_TO_SUBMIT');
+      expect(prisma.fiscalDocument.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ type: 'CREDIT_NOTE', environment: 'SANDBOX', status: 'XML_VALIDATED' }),
+        data: { status: 'READY_TO_SUBMIT' },
+      }));
+      expect(storage.upload).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) delete process.env.CORRECTIVE_NOTES_STAG_ENABLED;
+      else process.env.CORRECTIVE_NOTES_STAG_ENABLED = previous;
+    }
+  });
+
   it('does not reactivate a document superseded during XML preparation', async () => {
     const document = createDocument('INVOICE');
     const { service, prisma, signer } = createService(document);

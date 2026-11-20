@@ -108,11 +108,29 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
     enableInitialDelivery = true,
   ): Promise<FiscalXmlProcessingResult> {
     const isNote = document.type === 'CREDIT_NOTE' || document.type === 'DEBIT_NOTE';
+    const stagCreditNote = document.type === 'CREDIT_NOTE' &&
+      process.env.CORRECTIVE_NOTES_STAG_ENABLED === 'true' &&
+      correctiveStagAllowed(document.type, document.environment);
+    const readyStatus = isNote && !stagCreditNote ? 'XML_VALIDATED' : 'READY_TO_SUBMIT';
     const existingArtifact = document.xmlArtifacts[0];
     if (
       (document.status === 'READY_TO_SUBMIT' || (isNote && document.status === 'XML_VALIDATED')) &&
       existingArtifact?.signedXmlSha256
     ) {
+      if (stagCreditNote && document.status === 'XML_VALIDATED') {
+        if (existingArtifact.xsdValidationStatus !== 'VALID' ||
+            !existingArtifact.signedXmlStorageKey || !existingArtifact.signatureVerifiedAt) {
+          throw new ConflictException({ code: FISCAL_XML_ERROR.documentNotReady });
+        }
+        const promoted = await this.prisma.fiscalDocument.updateMany({
+          where: { id: document.id, tenantId: document.tenantId,
+            companyId: document.companyId, environment: 'SANDBOX',
+            type: 'CREDIT_NOTE', status: 'XML_VALIDATED' },
+          data: { status: 'READY_TO_SUBMIT' },
+        });
+        this.assertDocumentStatusAdvanced(promoted.count);
+        return this.toResult(document.id, 'READY_TO_SUBMIT', existingArtifact);
+      }
       return this.toResult(document.id, document.status, existingArtifact);
     }
     if (!['READY_FOR_XML', 'XML_GENERATED', 'XML_VALIDATED', 'SIGNED'].includes(document.status)) {
@@ -294,7 +312,7 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
             id: document.id,
             status: { notIn: ['ACCEPTED', 'REJECTED', 'SUPERSEDED'] },
           },
-          data: { status: isNote ? 'XML_VALIDATED' : 'READY_TO_SUBMIT' },
+          data: { status: readyStatus },
         });
         this.assertDocumentStatusAdvanced(readyUpdate.count);
         return updatedArtifact;
@@ -338,7 +356,7 @@ export class PrepareFiscalXmlService implements OnModuleDestroy {
         void pending.then(() => this.pendingInitialDeliveries.delete(pending));
       }
 
-      return this.toResult(document.id, isNote ? 'XML_VALIDATED' : 'READY_TO_SUBMIT', completed);
+      return this.toResult(document.id, readyStatus, completed);
     } catch (error) {
       if (
         error instanceof BadRequestException ||
